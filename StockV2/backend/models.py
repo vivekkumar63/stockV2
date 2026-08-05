@@ -1,0 +1,339 @@
+from datetime import date, datetime
+from typing import Optional
+
+from sqlalchemy import (
+    Boolean, Date, DateTime, Float, Index, Integer,
+    String, Text, UniqueConstraint,
+)
+from sqlalchemy.orm import Mapped, mapped_column
+
+from database import Base
+
+
+# ─── Market Data ──────────────────────────────────────────────────────────────
+
+class Stock(Base):
+    __tablename__ = "stocks"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    symbol: Mapped[str] = mapped_column(String(20), unique=True, nullable=False)
+    name: Mapped[str] = mapped_column(String(200), default="")
+    sector: Mapped[Optional[str]] = mapped_column(String(100))
+    industry: Mapped[Optional[str]] = mapped_column(String(200))
+    market_cap: Mapped[Optional[float]] = mapped_column(Float)
+    exchange: Mapped[str] = mapped_column(String(10), default="NSE")
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    added_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class StockPriceDaily(Base):
+    __tablename__ = "stock_prices_daily"
+    __table_args__ = (
+        UniqueConstraint("symbol", "date", name="uq_daily_symbol_date"),
+        Index("idx_prices_daily_symbol_date", "symbol", "date"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    symbol: Mapped[str] = mapped_column(String(20), nullable=False)
+    date: Mapped[date] = mapped_column(Date, nullable=False)
+    open: Mapped[float] = mapped_column(Float)
+    high: Mapped[float] = mapped_column(Float)
+    low: Mapped[float] = mapped_column(Float)
+    close: Mapped[float] = mapped_column(Float)
+    volume: Mapped[int] = mapped_column(Integer)
+    adj_close: Mapped[Optional[float]] = mapped_column(Float)
+    data_source: Mapped[str] = mapped_column(String(20), default="yfinance")
+
+
+class StockPriceIntraday(Base):
+    __tablename__ = "stock_prices_intraday"
+    __table_args__ = (
+        UniqueConstraint("symbol", "timestamp", "interval", name="uq_intraday_symbol_ts"),
+        Index("idx_prices_intraday_symbol_ts", "symbol", "timestamp"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    symbol: Mapped[str] = mapped_column(String(20), nullable=False)
+    timestamp: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    open: Mapped[float] = mapped_column(Float)
+    high: Mapped[float] = mapped_column(Float)
+    low: Mapped[float] = mapped_column(Float)
+    close: Mapped[float] = mapped_column(Float)
+    volume: Mapped[int] = mapped_column(Integer)
+    interval: Mapped[str] = mapped_column(String(5), default="15m")
+
+
+class Fundamental(Base):
+    __tablename__ = "fundamentals"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    symbol: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
+    pe_ratio: Mapped[Optional[float]] = mapped_column(Float)
+    pb_ratio: Mapped[Optional[float]] = mapped_column(Float)
+    eps: Mapped[Optional[float]] = mapped_column(Float)
+    revenue: Mapped[Optional[float]] = mapped_column(Float)
+    net_profit: Mapped[Optional[float]] = mapped_column(Float)
+    debt_equity: Mapped[Optional[float]] = mapped_column(Float)
+    roe: Mapped[Optional[float]] = mapped_column(Float)
+    promoter_holding: Mapped[Optional[float]] = mapped_column(Float)
+    fii_holding: Mapped[Optional[float]] = mapped_column(Float)
+    dii_holding: Mapped[Optional[float]] = mapped_column(Float)
+    data_as_of: Mapped[Optional[date]] = mapped_column(Date)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class CorporateAction(Base):
+    __tablename__ = "corporate_actions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    symbol: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
+    action_type: Mapped[str] = mapped_column(String(20))
+    ex_date: Mapped[Optional[date]] = mapped_column(Date)
+    record_date: Mapped[Optional[date]] = mapped_column(Date)
+    value: Mapped[Optional[float]] = mapped_column(Float)
+    notes: Mapped[Optional[str]] = mapped_column(Text)
+
+
+class News(Base):
+    __tablename__ = "news"
+    __table_args__ = (
+        Index("idx_news_symbol_published", "symbol", "published_at"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    symbol: Mapped[Optional[str]] = mapped_column(String(20))
+    headline: Mapped[str] = mapped_column(Text, nullable=False)
+    source_url: Mapped[Optional[str]] = mapped_column(Text)
+    published_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
+    sentiment: Mapped[Optional[str]] = mapped_column(String(10))
+    impact_score: Mapped[Optional[float]] = mapped_column(Float)
+    category: Mapped[Optional[str]] = mapped_column(String(30))
+    ai_summary: Mapped[Optional[str]] = mapped_column(Text)
+    fetched_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+# ─── Strategy & Signals ───────────────────────────────────────────────────────
+
+class Strategy(Base):
+    __tablename__ = "strategies"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
+    type: Mapped[str] = mapped_column(String(20))
+    description: Mapped[Optional[str]] = mapped_column(Text)
+    parameters_json: Mapped[Optional[str]] = mapped_column(Text)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class StrategySignal(Base):
+    __tablename__ = "strategy_signals"
+    __table_args__ = (
+        Index("idx_signals_symbol_date", "symbol", "signal_date"),
+        Index("idx_signals_strategy_date", "strategy_id", "signal_date"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    symbol: Mapped[str] = mapped_column(String(20), nullable=False)
+    strategy_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    signal_date: Mapped[date] = mapped_column(Date, nullable=False)
+    signal_type: Mapped[str] = mapped_column(String(10))
+    price_at_signal: Mapped[Optional[float]] = mapped_column(Float)
+    confidence_score: Mapped[Optional[float]] = mapped_column(Float)
+    risk_score: Mapped[Optional[float]] = mapped_column(Float)
+    expected_upside_pct: Mapped[Optional[float]] = mapped_column(Float)
+    suggested_stop_loss: Mapped[Optional[float]] = mapped_column(Float)
+    suggested_target: Mapped[Optional[float]] = mapped_column(Float)
+    holding_period_days: Mapped[Optional[int]] = mapped_column(Integer)
+    reasoning_json: Mapped[Optional[str]] = mapped_column(Text)
+    indicators_json: Mapped[Optional[str]] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class BacktestResult(Base):
+    __tablename__ = "backtest_results"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    strategy_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    symbol: Mapped[Optional[str]] = mapped_column(String(20))
+    from_date: Mapped[date] = mapped_column(Date)
+    to_date: Mapped[date] = mapped_column(Date)
+    total_trades: Mapped[int] = mapped_column(Integer, default=0)
+    win_rate: Mapped[Optional[float]] = mapped_column(Float)
+    cagr: Mapped[Optional[float]] = mapped_column(Float)
+    sharpe_ratio: Mapped[Optional[float]] = mapped_column(Float)
+    sortino_ratio: Mapped[Optional[float]] = mapped_column(Float)
+    max_drawdown: Mapped[Optional[float]] = mapped_column(Float)
+    profit_factor: Mapped[Optional[float]] = mapped_column(Float)
+    avg_return_pct: Mapped[Optional[float]] = mapped_column(Float)
+    full_metrics_json: Mapped[Optional[str]] = mapped_column(Text)
+    ran_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class BacktestTrade(Base):
+    __tablename__ = "backtest_trades"
+    __table_args__ = (
+        Index("idx_backtest_trades_result", "backtest_result_id"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    backtest_result_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    symbol: Mapped[str] = mapped_column(String(20), nullable=False)
+    entry_date: Mapped[date] = mapped_column(Date)
+    entry_price: Mapped[float] = mapped_column(Float)
+    exit_date: Mapped[Optional[date]] = mapped_column(Date)
+    exit_price: Mapped[Optional[float]] = mapped_column(Float)
+    quantity: Mapped[int] = mapped_column(Integer)
+    pnl: Mapped[Optional[float]] = mapped_column(Float)
+    pnl_pct: Mapped[Optional[float]] = mapped_column(Float)
+    exit_reason: Mapped[Optional[str]] = mapped_column(String(30))
+    holding_days: Mapped[Optional[int]] = mapped_column(Integer)
+
+
+# ─── Portfolio ────────────────────────────────────────────────────────────────
+
+class PortfolioHolding(Base):
+    __tablename__ = "portfolio_holdings"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    symbol: Mapped[str] = mapped_column(String(20), unique=True, nullable=False)
+    quantity: Mapped[int] = mapped_column(Integer, nullable=False)
+    avg_buy_price: Mapped[float] = mapped_column(Float, nullable=False)
+    first_buy_date: Mapped[date] = mapped_column(Date)
+    last_buy_date: Mapped[date] = mapped_column(Date)
+    notes: Mapped[Optional[str]] = mapped_column(Text)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+
+
+class Trade(Base):
+    __tablename__ = "trades"
+    __table_args__ = (
+        Index("idx_trades_symbol_date", "symbol", "trade_date"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    symbol: Mapped[str] = mapped_column(String(20), nullable=False)
+    trade_type: Mapped[str] = mapped_column(String(4))
+    quantity: Mapped[int] = mapped_column(Integer)
+    price: Mapped[float] = mapped_column(Float)
+    total_value: Mapped[float] = mapped_column(Float)
+    brokerage: Mapped[float] = mapped_column(Float, default=0.0)
+    trade_date: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    order_id: Mapped[Optional[int]] = mapped_column(Integer)
+    mode: Mapped[str] = mapped_column(String(10), default="paper")
+    strategy_id: Mapped[Optional[int]] = mapped_column(Integer)
+    signal_id: Mapped[Optional[int]] = mapped_column(Integer)
+    notes: Mapped[Optional[str]] = mapped_column(Text)
+
+
+class Order(Base):
+    __tablename__ = "orders"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    symbol: Mapped[str] = mapped_column(String(20), nullable=False)
+    order_type: Mapped[str] = mapped_column(String(10))
+    side: Mapped[str] = mapped_column(String(4))
+    quantity: Mapped[int] = mapped_column(Integer)
+    price: Mapped[Optional[float]] = mapped_column(Float)
+    trigger_price: Mapped[Optional[float]] = mapped_column(Float)
+    status: Mapped[str] = mapped_column(String(15), default="pending")
+    broker_order_id: Mapped[Optional[str]] = mapped_column(String(50))
+    placed_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    executed_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
+    mode: Mapped[str] = mapped_column(String(10), default="paper")
+
+
+class ExitRule(Base):
+    __tablename__ = "exit_rules"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    order_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    symbol: Mapped[str] = mapped_column(String(20), nullable=False)
+    entry_price: Mapped[float] = mapped_column(Float)
+    stop_loss_price: Mapped[float] = mapped_column(Float)
+    target_1_price: Mapped[float] = mapped_column(Float)
+    target_2_price: Mapped[float] = mapped_column(Float)
+    max_exit_date: Mapped[Optional[date]] = mapped_column(Date)
+    partial_exit_at_t1: Mapped[bool] = mapped_column(Boolean, default=True)
+
+
+class Watchlist(Base):
+    __tablename__ = "watchlist"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    symbol: Mapped[str] = mapped_column(String(20), unique=True, nullable=False)
+    added_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    reason: Mapped[Optional[str]] = mapped_column(Text)
+    strategy_id: Mapped[Optional[int]] = mapped_column(Integer)
+    alert_price: Mapped[Optional[float]] = mapped_column(Float)
+
+
+# ─── AI ───────────────────────────────────────────────────────────────────────
+
+class AIAnalysis(Base):
+    __tablename__ = "ai_analyses"
+    __table_args__ = (
+        Index("idx_ai_analyses_subject", "subject_type", "subject_id", "expires_at"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    subject_type: Mapped[str] = mapped_column(String(20))
+    subject_id: Mapped[Optional[str]] = mapped_column(String(50))
+    analysis_type: Mapped[str] = mapped_column(String(30))
+    content: Mapped[str] = mapped_column(Text)
+    model_used: Mapped[str] = mapped_column(String(50), default="claude-sonnet-4-6")
+    tokens_used: Mapped[Optional[int]] = mapped_column(Integer)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
+
+
+class AIConversation(Base):
+    __tablename__ = "ai_conversations"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    role: Mapped[str] = mapped_column(String(10))
+    content: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+# ─── Alerts ───────────────────────────────────────────────────────────────────
+
+class Alert(Base):
+    __tablename__ = "alerts"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    alert_type: Mapped[str] = mapped_column(String(30))
+    symbol: Mapped[Optional[str]] = mapped_column(String(20))
+    condition_json: Mapped[Optional[str]] = mapped_column(Text)
+    message_template: Mapped[Optional[str]] = mapped_column(Text)
+    channels_json: Mapped[str] = mapped_column(Text, default='["telegram"]')
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class AlertHistory(Base):
+    __tablename__ = "alert_history"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    alert_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    symbol: Mapped[Optional[str]] = mapped_column(String(20))
+    triggered_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    message_sent: Mapped[Optional[str]] = mapped_column(Text)
+    delivery_status_json: Mapped[Optional[str]] = mapped_column(Text)
+
+
+# ─── System ───────────────────────────────────────────────────────────────────
+
+class DataQualityLog(Base):
+    __tablename__ = "data_quality_log"
+    __table_args__ = (
+        Index("idx_data_quality_symbol", "symbol", "logged_at"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    symbol: Mapped[Optional[str]] = mapped_column(String(20))
+    date: Mapped[Optional[date]] = mapped_column(Date)
+    issue_type: Mapped[str] = mapped_column(String(30))
+    details: Mapped[Optional[str]] = mapped_column(Text)
+    resolved: Mapped[bool] = mapped_column(Boolean, default=False)
+    logged_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
