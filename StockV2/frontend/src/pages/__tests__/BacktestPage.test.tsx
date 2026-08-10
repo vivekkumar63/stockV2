@@ -19,6 +19,15 @@ const mockTrades = [
   },
 ]
 
+vi.mock('../../api/strategies', () => ({
+  getStrategies: vi.fn().mockResolvedValue([
+    { id: 1, name: 'EMA Crossover', type: 'trend', description: null, is_active: true },
+  ]),
+  getStockList: vi.fn().mockResolvedValue([
+    { symbol: 'TCS', name: 'Tata Consultancy Services', sector: 'IT' },
+  ]),
+}))
+
 vi.mock('../../api/backtest', () => ({
   runBacktest: vi.fn().mockResolvedValue({
     id: 1, result_id: 1, symbol: 'TCS',

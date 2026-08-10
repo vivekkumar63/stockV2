@@ -74,13 +74,17 @@ class BacktestSimulator:
         # Pre-build date→position lookup once (O(n)) before the loop
         date_to_idx = {d: i for i, d in enumerate(df["date"])}
 
+        # Pre-compute indicators once on the full df — indicators are all rolling/cumulative
+        # so df_ind_full.iloc[:idx+1] equals IndicatorEngine.compute(df.iloc[:idx+1]).
+        # This reduces indicator overhead from O(n²) to O(n).
+        df_ind_full = IndicatorEngine.compute(df)
+
         trades: list[SimTrade] = []
         open_pos: Optional[_OpenPosition] = None
 
         for current_date in trading_dates:
             idx = date_to_idx[current_date]
-            df_slice = df.iloc[: idx + 1]   # view — IndicatorEngine.compute() copies internally
-            if len(df_slice) < 30:
+            if idx < 30:
                 continue
 
             current_price = float(df["close"].iat[idx])
@@ -93,7 +97,7 @@ class BacktestSimulator:
                     open_pos = None
 
             if open_pos is None:
-                df_ind = IndicatorEngine.compute(df_slice)
+                df_ind = df_ind_full.iloc[: idx + 1]
 
                 if use_aggregator:
                     pairs = [(s, s.generate_signal(df_ind)) for s in strategies]

@@ -1,17 +1,59 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   getBacktestTrades, listBacktestResults, runBacktest,
   type BacktestResult, type BacktestTrade,
 } from '../api/backtest'
+import { getStrategies, getStockList } from '../api/strategies'
 import { inr } from '../utils/format'
 
 const resultId = (r: BacktestResult): number | undefined => r.id ?? r.result_id
 
+function isoDate(d: Date) {
+  return d.toISOString().slice(0, 10)
+}
+
+function datePresets() {
+  const today = new Date()
+  const ytd = new Date(today.getFullYear(), 0, 1)
+  const y1 = new Date(today); y1.setFullYear(today.getFullYear() - 1)
+  const y3 = new Date(today); y3.setFullYear(today.getFullYear() - 3)
+  const y5 = new Date(today); y5.setFullYear(today.getFullYear() - 5)
+  return [
+    { label: 'YTD', from: isoDate(ytd) },
+    { label: '1Y', from: isoDate(y1) },
+    { label: '3Y', from: isoDate(y3) },
+    { label: '5Y', from: isoDate(y5) },
+  ]
+}
+
+const PRESETS = datePresets()
+const TODAY = isoDate(new Date())
+
 export function BacktestPage() {
   const queryClient = useQueryClient()
-  const [form, setForm] = useState({ symbol: '', from_date: '', to_date: '' })
+  const [form, setForm] = useState({
+    symbol: '',
+    from_date: PRESETS[1].from,
+    to_date: TODAY,
+    strategy_id: '' as string,
+    initial_capital: '500000',
+  })
   const [selectedId, setSelectedId] = useState<number | null>(null)
+  const [symbolSearch, setSymbolSearch] = useState('')
+  const [showDropdown, setShowDropdown] = useState(false)
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  const { data: strategies = [] } = useQuery({
+    queryKey: ['strategies'],
+    queryFn: getStrategies,
+  })
+
+  const { data: stocks = [] } = useQuery({
+    queryKey: ['stocks'],
+    queryFn: getStockList,
+    staleTime: 5 * 60 * 1000,
+  })
 
   const { data: results = [], isError: resultsError } = useQuery({
     queryKey: ['backtest', 'results'],
@@ -31,9 +73,31 @@ export function BacktestPage() {
     onError: (err) => console.error('Backtest failed:', err),
   })
 
+  const filteredStocks = symbolSearch.length >= 1
+    ? stocks.filter(
+        (s) =>
+          s.symbol.startsWith(symbolSearch.toUpperCase()) ||
+          s.name?.toLowerCase().includes(symbolSearch.toLowerCase()),
+      ).slice(0, 10)
+    : []
+
+  const selectSymbol = (sym: string) => {
+    setForm((f) => ({ ...f, symbol: sym }))
+    setSymbolSearch(sym)
+    setShowDropdown(false)
+    inputRef.current?.blur()
+  }
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
-    runMut.mutate(form)
+    if (!form.symbol) return
+    runMut.mutate({
+      symbol: form.symbol,
+      from_date: form.from_date,
+      to_date: form.to_date,
+      strategy_id: form.strategy_id ? Number(form.strategy_id) : undefined,
+      initial_capital: Number(form.initial_capital) || 500000,
+    })
   }
 
   const toggleRow = (id: number) => setSelectedId((prev) => (prev === id ? null : id))
@@ -45,52 +109,129 @@ export function BacktestPage() {
       {/* Run form */}
       <form
         onSubmit={handleSubmit}
-        className="bg-white border border-gray-200 rounded-lg p-4 flex flex-wrap gap-4 items-end shadow-sm"
+        className="bg-white border border-gray-200 rounded-lg p-4 shadow-sm space-y-4"
       >
-        <div>
-          <label className="block text-xs text-gray-500 mb-1">Symbol</label>
-          <input
-            className="border border-gray-300 rounded px-3 py-1.5 text-sm w-28 uppercase"
-            placeholder="e.g. TCS"
-            value={form.symbol}
-            onChange={(e) => setForm((f) => ({ ...f, symbol: e.target.value.toUpperCase() }))}
-            required
-          />
+        <div className="flex flex-wrap gap-4 items-end">
+          {/* Symbol autocomplete */}
+          <div className="relative">
+            <label className="block text-xs text-gray-500 mb-1">Symbol</label>
+            <input
+              ref={inputRef}
+              className="border border-gray-300 rounded px-3 py-1.5 text-sm w-40"
+              placeholder="e.g. TCS, Infosys…"
+              value={symbolSearch}
+              onChange={(e) => {
+                setSymbolSearch(e.target.value)
+                setForm((f) => ({ ...f, symbol: e.target.value.toUpperCase() }))
+                setShowDropdown(true)
+              }}
+              onFocus={() => setShowDropdown(true)}
+              onBlur={() => setTimeout(() => setShowDropdown(false), 150)}
+              autoComplete="off"
+              required
+            />
+            {showDropdown && filteredStocks.length > 0 && (
+              <ul className="absolute z-20 mt-1 w-64 bg-white border border-gray-200 rounded-lg shadow-lg max-h-52 overflow-y-auto text-sm">
+                {filteredStocks.map((s) => (
+                  <li
+                    key={s.symbol}
+                    onMouseDown={() => selectSymbol(s.symbol)}
+                    className="px-3 py-2 cursor-pointer hover:bg-blue-50 flex justify-between"
+                  >
+                    <span className="font-semibold">{s.symbol}</span>
+                    <span className="text-gray-400 truncate ml-2 text-xs">{s.name}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+
+          {/* Strategy dropdown */}
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">Strategy</label>
+            <select
+              className="border border-gray-300 rounded px-3 py-1.5 text-sm w-48"
+              value={form.strategy_id}
+              onChange={(e) => setForm((f) => ({ ...f, strategy_id: e.target.value }))}
+            >
+              <option value="">All strategies</option>
+              {strategies.filter((s) => s.is_active).map((s) => (
+                <option key={s.id} value={s.id}>{s.name}</option>
+              ))}
+            </select>
+          </div>
+
+          {/* Date range */}
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">From</label>
+            <input
+              type="date"
+              className="border border-gray-300 rounded px-3 py-1.5 text-sm"
+              value={form.from_date}
+              onChange={(e) => setForm((f) => ({ ...f, from_date: e.target.value }))}
+              required
+            />
+          </div>
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">To</label>
+            <input
+              type="date"
+              className="border border-gray-300 rounded px-3 py-1.5 text-sm"
+              value={form.to_date}
+              onChange={(e) => setForm((f) => ({ ...f, to_date: e.target.value }))}
+              required
+            />
+          </div>
+
+          {/* Initial capital */}
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">Capital (₹)</label>
+            <input
+              type="number"
+              min="10000"
+              step="10000"
+              className="border border-gray-300 rounded px-3 py-1.5 text-sm w-36"
+              value={form.initial_capital}
+              onChange={(e) => setForm((f) => ({ ...f, initial_capital: e.target.value }))}
+            />
+          </div>
+
+          <button
+            type="submit"
+            disabled={runMut.isPending || !form.symbol}
+            className="px-4 py-1.5 bg-blue-600 text-white text-sm rounded hover:bg-blue-700 disabled:opacity-50"
+          >
+            {runMut.isPending ? 'Running…' : 'Run Backtest'}
+          </button>
         </div>
-        <div>
-          <label className="block text-xs text-gray-500 mb-1">From</label>
-          <input
-            type="date"
-            className="border border-gray-300 rounded px-3 py-1.5 text-sm"
-            value={form.from_date}
-            onChange={(e) => setForm((f) => ({ ...f, from_date: e.target.value }))}
-            required
-          />
+
+        {/* Date presets */}
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-gray-400">Quick range:</span>
+          {PRESETS.map((p) => (
+            <button
+              key={p.label}
+              type="button"
+              onClick={() => setForm((f) => ({ ...f, from_date: p.from, to_date: TODAY }))}
+              className={`px-2 py-0.5 text-xs rounded border transition-colors ${
+                form.from_date === p.from && form.to_date === TODAY
+                  ? 'border-blue-500 bg-blue-50 text-blue-700'
+                  : 'border-gray-300 text-gray-500 hover:border-gray-400'
+              }`}
+            >
+              {p.label}
+            </button>
+          ))}
         </div>
-        <div>
-          <label className="block text-xs text-gray-500 mb-1">To</label>
-          <input
-            type="date"
-            className="border border-gray-300 rounded px-3 py-1.5 text-sm"
-            value={form.to_date}
-            onChange={(e) => setForm((f) => ({ ...f, to_date: e.target.value }))}
-            required
-          />
-        </div>
-        <button
-          type="submit"
-          disabled={runMut.isPending}
-          className="px-4 py-1.5 bg-blue-600 text-white text-sm rounded hover:bg-blue-700 disabled:opacity-50"
-        >
-          {runMut.isPending ? 'Running…' : 'Run Backtest'}
-        </button>
+
+        {/* Feedback */}
         {runMut.isError && (
-          <span className="text-red-600 text-sm">{String(runMut.error)}</span>
+          <p className="text-red-600 text-sm">{String(runMut.error)}</p>
         )}
         {runMut.isSuccess && runMut.data && (
-          <span className="text-green-600 text-sm">
-            Done — {runMut.data.total_trades} trades, CAGR {runMut.data.cagr?.toFixed(2)}%
-          </span>
+          <p className="text-green-600 text-sm">
+            Done — {runMut.data.total_trades} trades · CAGR {runMut.data.cagr?.toFixed(2)}% · Sharpe {runMut.data.sharpe_ratio?.toFixed(2) ?? '—'}
+          </p>
         )}
       </form>
 
@@ -107,6 +248,7 @@ export function BacktestPage() {
               <thead className="bg-gray-100 text-gray-600 text-left">
                 <tr>
                   <th scope="col" className="px-4 py-2">Symbol</th>
+                  <th scope="col" className="px-4 py-2">Strategy</th>
                   <th scope="col" className="px-4 py-2">From</th>
                   <th scope="col" className="px-4 py-2">To</th>
                   <th scope="col" className="px-4 py-2">Trades</th>
@@ -119,10 +261,12 @@ export function BacktestPage() {
               <tbody className="bg-white divide-y divide-gray-100">
                 {results.map((r) => {
                   const rid = resultId(r)
+                  const stratName = strategies.find((s) => s.id === r.strategy_id)?.name
                   return (
                     <ResultRow
                       key={rid ?? `${r.symbol}-${r.from_date}`}
                       result={r}
+                      strategyName={stratName}
                       selected={selectedId === rid}
                       onClick={() => rid != null ? toggleRow(rid) : undefined}
                     />
@@ -154,6 +298,7 @@ export function BacktestPage() {
                     <th scope="col" className="px-4 py-2">Exit ₹</th>
                     <th scope="col" className="px-4 py-2">P&amp;L</th>
                     <th scope="col" className="px-4 py-2">P&amp;L %</th>
+                    <th scope="col" className="px-4 py-2">Days</th>
                     <th scope="col" className="px-4 py-2">Reason</th>
                   </tr>
                 </thead>
@@ -174,14 +319,15 @@ export function BacktestPage() {
 }
 
 function ResultRow({
-  result: r, selected, onClick,
-}: { result: BacktestResult; selected: boolean; onClick: () => void }) {
+  result: r, strategyName, selected, onClick,
+}: { result: BacktestResult; strategyName?: string; selected: boolean; onClick: () => void }) {
   return (
     <tr
       onClick={onClick}
       className={`cursor-pointer hover:bg-blue-50 transition-colors ${selected ? 'bg-blue-50' : ''}`}
     >
       <td className="px-4 py-2 font-semibold">{r.symbol}</td>
+      <td className="px-4 py-2 text-gray-500 text-xs">{strategyName ?? 'All'}</td>
       <td className="px-4 py-2 text-gray-500">{r.from_date}</td>
       <td className="px-4 py-2 text-gray-500">{r.to_date}</td>
       <td className="px-4 py-2">{r.total_trades}</td>
@@ -210,6 +356,7 @@ function TradeRow({ trade: t }: { trade: BacktestTrade }) {
       <td className={`px-4 py-2 ${pos ? 'text-green-600' : 'text-red-600'}`}>
         {t.pnl_pct.toFixed(2)}%
       </td>
+      <td className="px-4 py-2 text-gray-400">{t.holding_days}</td>
       <td className="px-4 py-2 text-gray-500">{t.exit_reason}</td>
     </tr>
   )
