@@ -1,0 +1,161 @@
+import logging
+from dataclasses import dataclass
+from datetime import date, timedelta
+from types import SimpleNamespace
+from typing import Optional
+
+import pandas as pd
+
+from domains.data.indicators import IndicatorEngine
+from domains.strategies.aggregator import SignalAggregator
+from domains.portfolio.position_sizer import PositionSizer
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass
+class SimTrade:
+    symbol: str
+    entry_date: date
+    entry_price: float
+    exit_date: date
+    exit_price: float
+    quantity: int
+    stop_loss_price: float
+    target_price: float
+    exit_reason: str  # "stop_loss" | "target_hit" | "max_holding_days" | "end_of_period"
+    pnl: float
+    pnl_pct: float
+    holding_days: int
+
+
+@dataclass
+class _OpenPosition:
+    entry_date: date
+    entry_price: float
+    quantity: int
+    stop_loss_price: float
+    target_price: float
+    max_exit_date: date
+
+
+class BacktestSimulator:
+    def run(
+        self,
+        symbol: str,
+        prices_df: pd.DataFrame,
+        from_date: date,
+        to_date: date,
+        strategies: list,
+        initial_capital: float = 500_000.0,
+        risk_per_trade_pct: float = 2.0,
+        max_single_stock_pct: float = 20.0,
+        use_aggregator: bool = True,
+    ) -> list[SimTrade]:
+        cfg = SimpleNamespace(
+            total_capital=initial_capital,
+            paper_capital=initial_capital,
+            risk_per_trade_pct=risk_per_trade_pct,
+            max_open_positions=8,
+            max_single_stock_pct=max_single_stock_pct,
+        )
+        aggregator = SignalAggregator()
+        sizer = PositionSizer()
+
+        df = prices_df.copy()
+        # Normalize date column to Python date objects
+        if not df.empty and not isinstance(df["date"].iloc[0], date):
+            df["date"] = pd.to_datetime(df["date"]).dt.date
+        df = df.sort_values("date").reset_index(drop=True)
+
+        mask = (df["date"] >= from_date) & (df["date"] <= to_date)
+        trading_dates = df.loc[mask, "date"].tolist()
+
+        trades: list[SimTrade] = []
+        open_pos: Optional[_OpenPosition] = None
+
+        for current_date in trading_dates:
+            df_slice = df[df["date"] <= current_date].copy()
+            if len(df_slice) < 30:
+                continue
+
+            current_price = float(df_slice["close"].iloc[-1])
+
+            # Check exits before entries
+            if open_pos:
+                reason = self._check_exit(open_pos, current_price, current_date)
+                if reason:
+                    trades.append(self._close(symbol, open_pos, current_price, current_date, reason))
+                    open_pos = None
+
+            if open_pos is None:
+                df_ind = IndicatorEngine.compute(df_slice)
+
+                if use_aggregator:
+                    pairs = [(s, s.generate_signal(df_ind)) for s in strategies]
+                    consensus = aggregator.aggregate(pairs)
+                    should_enter = consensus["signal_type"] == "BUY"
+                    buy_sigs = [sig for _, sig in pairs if sig.signal_type == "BUY"]
+                    stop_pct = (sum(s.stop_loss_pct for s in buy_sigs) / len(buy_sigs)) if buy_sigs else 7.0
+                    tgt_pct = (sum(s.target_pct for s in buy_sigs) / len(buy_sigs)) if buy_sigs else 15.0
+                    h_days = int(sum(s.holding_days for s in buy_sigs) / len(buy_sigs)) if buy_sigs else 15
+                else:
+                    sig = strategies[0].generate_signal(df_ind)
+                    should_enter = sig.signal_type == "BUY"
+                    stop_pct, tgt_pct, h_days = sig.stop_loss_pct, sig.target_pct, sig.holding_days
+
+                if should_enter:
+                    sl = round(current_price * (1 - stop_pct / 100), 2)
+                    tgt = round(current_price * (1 + tgt_pct / 100), 2)
+                    pos = sizer.compute(
+                        entry_price=current_price,
+                        stop_loss_price=sl,
+                        target_price=tgt,
+                        open_positions=0,
+                        invested_capital=0.0,
+                        _cfg=cfg,
+                    )
+                    if pos.is_valid:
+                        open_pos = _OpenPosition(
+                            entry_date=current_date,
+                            entry_price=current_price,
+                            quantity=pos.quantity,
+                            stop_loss_price=pos.stop_loss_price,
+                            target_price=pos.target_price,
+                            max_exit_date=current_date + timedelta(days=h_days),
+                        )
+
+        # Force-close any open position at end of period
+        if open_pos and trading_dates:
+            last_price = float(df[df["date"] <= to_date]["close"].iloc[-1])
+            trades.append(self._close(symbol, open_pos, last_price, to_date, "end_of_period"))
+
+        return trades
+
+    def _check_exit(self, pos: _OpenPosition, price: float, current_date: date) -> Optional[str]:
+        if price <= pos.stop_loss_price:
+            return "stop_loss"
+        if price >= pos.target_price:
+            return "target_hit"
+        if current_date >= pos.max_exit_date:
+            return "max_holding_days"
+        return None
+
+    def _close(self, symbol: str, pos: _OpenPosition, price: float,
+               exit_date: date, reason: str) -> SimTrade:
+        pnl = round((price - pos.entry_price) * pos.quantity, 2)
+        pnl_pct = round((price - pos.entry_price) / pos.entry_price * 100, 2)
+        return SimTrade(
+            symbol=symbol,
+            entry_date=pos.entry_date,
+            entry_price=pos.entry_price,
+            exit_date=exit_date,
+            exit_price=price,
+            quantity=pos.quantity,
+            stop_loss_price=pos.stop_loss_price,
+            target_price=pos.target_price,
+            exit_reason=reason,
+            pnl=pnl,
+            pnl_pct=pnl_pct,
+            holding_days=(exit_date - pos.entry_date).days,
+        )
