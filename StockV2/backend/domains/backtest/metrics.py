@@ -79,7 +79,11 @@ def _build_equity_curve(trades: list, initial_capital: float,
 def _compute_sharpe(curve: list[float]) -> Optional[float]:
     if len(curve) < 3:
         return None
-    returns = [(curve[i] - curve[i - 1]) / curve[i - 1] for i in range(1, len(curve))]
+    returns = [
+        (curve[i] - curve[i - 1]) / curve[i - 1]
+        for i in range(1, len(curve))
+        if curve[i - 1] != 0.0
+    ]
     if len(returns) < 2:
         return None
     mean_r = statistics.mean(returns)
