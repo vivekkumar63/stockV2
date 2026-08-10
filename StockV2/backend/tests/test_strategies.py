@@ -205,3 +205,176 @@ def test_supertrend_none_when_no_flip():
     df["supertrend_direction"] = 1.0
     signal = SuperTrendStrategy().generate_signal(df)
     assert signal.signal_type == "NONE"
+
+
+# ── BB Squeeze ─────────────────────────────────────────────────────────────────
+
+def test_bb_squeeze_buy_on_breakout_with_volume():
+    from domains.strategies.strategies.bb_squeeze import BBSqueezeStrategy
+    df = _make_df()
+    df["close"] = 115.0
+    df["bb_upper"] = 110.0
+    df["volume_ratio"] = 2.0
+    signal = BBSqueezeStrategy().generate_signal(df)
+    assert signal.signal_type == "BUY"
+    assert signal.confidence > 0.55
+
+
+def test_bb_squeeze_none_without_volume():
+    from domains.strategies.strategies.bb_squeeze import BBSqueezeStrategy
+    df = _make_df()
+    df["close"] = 115.0
+    df["bb_upper"] = 110.0
+    df["volume_ratio"] = 1.0
+    signal = BBSqueezeStrategy().generate_signal(df)
+    assert signal.signal_type == "NONE"
+
+
+def test_bb_squeeze_none_below_band():
+    from domains.strategies.strategies.bb_squeeze import BBSqueezeStrategy
+    df = _make_df()
+    df["close"] = 100.0
+    df["bb_upper"] = 110.0
+    df["volume_ratio"] = 3.0
+    signal = BBSqueezeStrategy().generate_signal(df)
+    assert signal.signal_type == "NONE"
+
+
+# ── Volume Breakout ────────────────────────────────────────────────────────────
+
+def test_volume_breakout_buy_on_surge_up():
+    from domains.strategies.strategies.volume_breakout import VolumeBreakoutStrategy
+    df = _make_df()
+    df["volume_ratio"] = 3.0
+    df["close"] = 102.0
+    df.at[df.index[-2], "close"] = 100.0
+    signal = VolumeBreakoutStrategy().generate_signal(df)
+    assert signal.signal_type == "BUY"
+
+
+def test_volume_breakout_none_if_price_down():
+    from domains.strategies.strategies.volume_breakout import VolumeBreakoutStrategy
+    df = _make_df()
+    df["volume_ratio"] = 3.0
+    df["close"] = 98.0
+    df.at[df.index[-2], "close"] = 100.0
+    signal = VolumeBreakoutStrategy().generate_signal(df)
+    assert signal.signal_type == "NONE"
+
+
+def test_volume_breakout_none_low_volume():
+    from domains.strategies.strategies.volume_breakout import VolumeBreakoutStrategy
+    df = _make_df()
+    df["volume_ratio"] = 1.5
+    signal = VolumeBreakoutStrategy().generate_signal(df)
+    assert signal.signal_type == "NONE"
+
+
+# ── Mean Reversion ─────────────────────────────────────────────────────────────
+
+def test_mean_reversion_buy_oversold_non_trending():
+    from domains.strategies.strategies.mean_reversion import MeanReversionStrategy
+    df = _make_df()
+    df["close"] = 85.0
+    df["bb_lower"] = 90.0
+    df["bb_upper"] = 115.0
+    df["rsi_14"] = 32.0
+    df["adx_14"] = 18.0
+    signal = MeanReversionStrategy().generate_signal(df)
+    assert signal.signal_type == "BUY"
+
+
+def test_mean_reversion_none_if_trending():
+    from domains.strategies.strategies.mean_reversion import MeanReversionStrategy
+    df = _make_df()
+    df["close"] = 85.0
+    df["bb_lower"] = 90.0
+    df["rsi_14"] = 32.0
+    df["adx_14"] = 35.0
+    signal = MeanReversionStrategy().generate_signal(df)
+    assert signal.signal_type == "NONE"
+
+
+def test_mean_reversion_sell_overbought():
+    from domains.strategies.strategies.mean_reversion import MeanReversionStrategy
+    df = _make_df()
+    df["close"] = 125.0
+    df["bb_upper"] = 110.0
+    df["bb_lower"] = 90.0
+    df["rsi_14"] = 75.0
+    df["adx_14"] = 15.0
+    signal = MeanReversionStrategy().generate_signal(df)
+    assert signal.signal_type == "SELL"
+
+
+# ── Volatility Breakout ────────────────────────────────────────────────────────
+
+def test_volatility_breakout_buy_on_20d_high_break():
+    from domains.strategies.strategies.volatility_breakout import VolatilityBreakoutStrategy
+    df = _make_df(n=60)
+    df["close"] = 100.0
+    df["volume_ratio"] = 2.0
+    df.at[df.index[-1], "close"] = 105.0
+    df.at[df.index[-2], "close"] = 99.0
+    signal = VolatilityBreakoutStrategy().generate_signal(df)
+    assert signal.signal_type == "BUY"
+
+
+def test_volatility_breakout_none_without_volume():
+    from domains.strategies.strategies.volatility_breakout import VolatilityBreakoutStrategy
+    df = _make_df(n=60)
+    df["close"] = 100.0
+    df["volume_ratio"] = 1.0
+    df.at[df.index[-1], "close"] = 105.0
+    signal = VolatilityBreakoutStrategy().generate_signal(df)
+    assert signal.signal_type == "NONE"
+
+
+def test_volatility_breakout_none_too_few_rows():
+    from domains.strategies.strategies.volatility_breakout import VolatilityBreakoutStrategy
+    df = _make_df(n=15)
+    signal = VolatilityBreakoutStrategy().generate_signal(df)
+    assert signal.signal_type == "NONE"
+
+
+# ── Swing Trend Rider ──────────────────────────────────────────────────────────
+
+def test_swing_trend_rider_buy_all_conditions():
+    from domains.strategies.strategies.swing_trend_rider import SwingTrendRiderStrategy
+    df = _make_df()
+    df["close"] = 110.0
+    df["sma_50"] = 100.0
+    df["rsi_14"] = 58.0
+    df["adx_14"] = 28.0
+    df["macd_hist"] = 0.5
+    df["supertrend_direction"] = 1.0
+    signal = SwingTrendRiderStrategy().generate_signal(df)
+    assert signal.signal_type == "BUY"
+    assert signal.confidence >= 0.90
+
+
+def test_swing_trend_rider_buy_4_of_5():
+    from domains.strategies.strategies.swing_trend_rider import SwingTrendRiderStrategy
+    df = _make_df()
+    df["close"] = 110.0
+    df["sma_50"] = 100.0
+    df["rsi_14"] = 58.0
+    df["adx_14"] = 28.0
+    df["macd_hist"] = 0.5
+    df["supertrend_direction"] = -1.0
+    signal = SwingTrendRiderStrategy().generate_signal(df)
+    assert signal.signal_type == "BUY"
+    assert signal.confidence >= 0.80
+
+
+def test_swing_trend_rider_none_only_3_conditions():
+    from domains.strategies.strategies.swing_trend_rider import SwingTrendRiderStrategy
+    df = _make_df()
+    df["close"] = 110.0
+    df["sma_50"] = 100.0
+    df["rsi_14"] = 58.0
+    df["adx_14"] = 15.0
+    df["macd_hist"] = -0.1
+    df["supertrend_direction"] = 1.0
+    signal = SwingTrendRiderStrategy().generate_signal(df)
+    assert signal.signal_type == "NONE"
