@@ -5,6 +5,8 @@ import {
   type BacktestResult, type BacktestTrade,
 } from '../api/backtest'
 
+const resultId = (r: BacktestResult): number | undefined => r.id ?? r.result_id
+
 export function BacktestPage() {
   const queryClient = useQueryClient()
   const [form, setForm] = useState({ symbol: '', from_date: '', to_date: '' })
@@ -15,10 +17,11 @@ export function BacktestPage() {
     queryFn: () => listBacktestResults(),
   })
 
-  const { data: trades = [] } = useQuery({
+  const { data: trades = [], isFetching: tradesFetching } = useQuery({
     queryKey: ['backtest', 'trades', selectedId],
     queryFn: () => getBacktestTrades(selectedId!),
     enabled: selectedId != null,
+    placeholderData: undefined,
   })
 
   const runMut = useMutation({
@@ -113,14 +116,17 @@ export function BacktestPage() {
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-gray-100">
-                {results.map((r) => (
-                  <ResultRow
-                    key={r.id ?? r.result_id}
-                    result={r}
-                    selected={selectedId === r.id}
-                    onClick={() => toggleRow(r.id!)}
-                  />
-                ))}
+                {results.map((r) => {
+                  const rid = resultId(r)
+                  return (
+                    <ResultRow
+                      key={rid ?? `${r.symbol}-${r.from_date}`}
+                      result={r}
+                      selected={selectedId === rid}
+                      onClick={() => rid != null ? toggleRow(rid) : undefined}
+                    />
+                  )
+                })}
               </tbody>
             </table>
           </div>
@@ -128,32 +134,38 @@ export function BacktestPage() {
       ) : null}
 
       {/* Trade detail */}
-      {selectedId != null && trades.length > 0 && (
+      {selectedId != null && (
         <section>
           <h2 className="text-lg font-semibold text-gray-700 mb-3">
             Trades — result #{selectedId}
           </h2>
-          <div className="overflow-x-auto rounded-lg border border-gray-200">
-            <table className="w-full text-sm">
-              <thead className="bg-gray-100 text-gray-600 text-left">
-                <tr>
-                  <th scope="col" className="px-4 py-2">Entry</th>
-                  <th scope="col" className="px-4 py-2">Exit</th>
-                  <th scope="col" className="px-4 py-2">Qty</th>
-                  <th scope="col" className="px-4 py-2">Entry ₹</th>
-                  <th scope="col" className="px-4 py-2">Exit ₹</th>
-                  <th scope="col" className="px-4 py-2">P&amp;L</th>
-                  <th scope="col" className="px-4 py-2">P&amp;L %</th>
-                  <th scope="col" className="px-4 py-2">Reason</th>
-                </tr>
-              </thead>
-              <tbody className="bg-white divide-y divide-gray-100">
-                {trades.map((t) => (
-                  <TradeRow key={t.id} trade={t} />
-                ))}
-              </tbody>
-            </table>
-          </div>
+          {tradesFetching ? (
+            <p className="text-gray-400">Loading trades…</p>
+          ) : trades.length > 0 ? (
+            <div className="overflow-x-auto rounded-lg border border-gray-200">
+              <table className="w-full text-sm">
+                <thead className="bg-gray-100 text-gray-600 text-left">
+                  <tr>
+                    <th scope="col" className="px-4 py-2">Entry</th>
+                    <th scope="col" className="px-4 py-2">Exit</th>
+                    <th scope="col" className="px-4 py-2">Qty</th>
+                    <th scope="col" className="px-4 py-2">Entry ₹</th>
+                    <th scope="col" className="px-4 py-2">Exit ₹</th>
+                    <th scope="col" className="px-4 py-2">P&amp;L</th>
+                    <th scope="col" className="px-4 py-2">P&amp;L %</th>
+                    <th scope="col" className="px-4 py-2">Reason</th>
+                  </tr>
+                </thead>
+                <tbody className="bg-white divide-y divide-gray-100">
+                  {trades.map((t) => (
+                    <TradeRow key={t.id} trade={t} />
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <p className="text-gray-500">No trades for this result.</p>
+          )}
         </section>
       )}
     </div>
