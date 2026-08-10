@@ -46,6 +46,7 @@ vi.mock('../../api/backtest', () => ({
     exit_date: '2021-01-20', exit_price: 3450, quantity: 10,
     pnl: 4500, pnl_pct: 15.0, exit_reason: 'target_hit', holding_days: 15,
   }]),
+  runScan: vi.fn().mockResolvedValue([]),
 }))
 
 function makeWrapper() {

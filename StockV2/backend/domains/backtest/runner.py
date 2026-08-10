@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from domains.backtest.metrics import compute_metrics
 from domains.backtest.simulator import BacktestSimulator, SimTrade
+from domains.data.indicators import IndicatorEngine
 from domains.strategies.engine import ALL_STRATEGIES
 
 logger = logging.getLogger(__name__)
@@ -86,6 +87,92 @@ class BacktestRunner:
             "to_date": str(to_date),
             **metrics,
         }
+
+    def scan_all(
+        self,
+        from_date: date,
+        to_date: date,
+        strategy_ids: Optional[list[int]] = None,
+        initial_capital: float = 500_000.0,
+        limit: int = 200,
+    ) -> list[dict]:
+        if strategy_ids:
+            placeholders = ",".join(str(int(i)) for i in strategy_ids)
+            strats_rows = self.db.execute(
+                text(f"SELECT id, name FROM strategies WHERE id IN ({placeholders}) AND is_active = 1")
+            ).fetchall()
+        else:
+            strats_rows = self.db.execute(
+                text("SELECT id, name FROM strategies WHERE is_active = 1")
+            ).fetchall()
+
+        strats_to_run = []
+        for sid, sname in strats_rows:
+            instances = [s for s in ALL_STRATEGIES if s.name == sname]
+            if instances:
+                strats_to_run.append((sid, sname, instances[0]))
+
+        if not strats_to_run:
+            return []
+
+        symbols = [
+            r[0] for r in self.db.execute(
+                text("""
+                    SELECT symbol FROM stock_prices_daily
+                    WHERE date >= :fd AND date <= :td
+                    GROUP BY symbol HAVING COUNT(*) >= 10
+                    ORDER BY symbol LIMIT :lim
+                """),
+                {"fd": str(from_date), "td": str(to_date), "lim": limit},
+            ).fetchall()
+        ]
+
+        results = []
+        for symbol in symbols:
+            rows = self.db.execute(
+                text("SELECT date, open, high, low, close, volume FROM stock_prices_daily WHERE symbol = :sym ORDER BY date ASC"),
+                {"sym": symbol},
+            ).fetchall()
+            if len(rows) < 50:
+                continue
+
+            df = pd.DataFrame([dict(r._mapping) for r in rows])
+            df["date"] = pd.to_datetime(df["date"]).dt.date
+
+            # Compute indicators once; reuse across all strategies for this stock
+            df_ind = IndicatorEngine.compute(df)
+
+            for sid, sname, strat in strats_to_run:
+                try:
+                    trades = self.simulator.run(
+                        symbol=symbol,
+                        prices_df=df,
+                        from_date=from_date,
+                        to_date=to_date,
+                        strategies=[strat],
+                        use_aggregator=False,
+                        initial_capital=initial_capital,
+                        _df_ind_precomputed=df_ind,
+                    )
+                    m = compute_metrics(trades, initial_capital, from_date, to_date)
+                    results.append({
+                        "symbol": symbol,
+                        "strategy_id": sid,
+                        "strategy_name": sname,
+                        "total_trades": m["total_trades"],
+                        "win_rate": m["win_rate"],
+                        "cagr": m["cagr"],
+                        "sharpe_ratio": m["sharpe_ratio"],
+                        "max_drawdown": m["max_drawdown"],
+                        "profit_factor": m["profit_factor"],
+                        "total_pnl": m["total_pnl"],
+                    })
+                except Exception as e:
+                    logger.warning("[scan] %s/%s: %s", symbol, sname, e)
+
+        logger.info("[scan_all] %s→%s: %d results across %d symbols × %d strategies",
+                    from_date, to_date, len(results), len(symbols), len(strats_to_run))
+        return results
 
     def _save_result(
         self, symbol: str, from_date: date, to_date: date,

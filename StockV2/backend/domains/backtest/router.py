@@ -2,7 +2,7 @@ from datetime import date
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel, model_validator
+from pydantic import BaseModel, Field, model_validator
 from sqlalchemy.orm import Session
 
 from database import get_db
@@ -38,6 +38,32 @@ def run_backtest(body: BacktestRunRequest, db: Session = Depends(get_db)):
     if "error" in result:
         raise HTTPException(status_code=400, detail=result["error"])
     return result
+
+
+class ScanRequest(BaseModel):
+    from_date: date
+    to_date: date
+    strategy_ids: Optional[list[int]] = None
+    initial_capital: float = 500_000.0
+    limit: int = Field(default=200, le=500)
+
+    @model_validator(mode="after")
+    def check_date_range(self):
+        if self.from_date >= self.to_date:
+            raise ValueError("from_date must be before to_date")
+        return self
+
+
+@router.post("/backtest/scan")
+def scan_backtest(body: ScanRequest, db: Session = Depends(get_db)):
+    results = BacktestRunner(db).scan_all(
+        from_date=body.from_date,
+        to_date=body.to_date,
+        strategy_ids=body.strategy_ids,
+        initial_capital=body.initial_capital,
+        limit=body.limit,
+    )
+    return results
 
 
 @router.get("/backtest/results")

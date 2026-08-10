@@ -51,6 +51,7 @@ class BacktestSimulator:
         risk_per_trade_pct: float = 2.0,
         max_single_stock_pct: float = 20.0,
         use_aggregator: bool = True,
+        _df_ind_precomputed: Optional[pd.DataFrame] = None,
     ) -> list[SimTrade]:
         cfg = SimpleNamespace(
             total_capital=initial_capital,
@@ -77,7 +78,8 @@ class BacktestSimulator:
         # Pre-compute indicators once on the full df — indicators are all rolling/cumulative
         # so df_ind_full.iloc[:idx+1] equals IndicatorEngine.compute(df.iloc[:idx+1]).
         # This reduces indicator overhead from O(n²) to O(n).
-        df_ind_full = IndicatorEngine.compute(df)
+        # _df_ind_precomputed lets callers (e.g. scan_all) skip recomputation across strategies.
+        df_ind_full = _df_ind_precomputed if _df_ind_precomputed is not None else IndicatorEngine.compute(df)
 
         trades: list[SimTrade] = []
         open_pos: Optional[_OpenPosition] = None

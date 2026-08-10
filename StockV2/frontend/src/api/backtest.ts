@@ -39,6 +39,27 @@ export interface BacktestTrade {
   holding_days: number
 }
 
+export interface ScanRequest {
+  from_date: string
+  to_date: string
+  strategy_ids?: number[]
+  initial_capital?: number
+  limit?: number
+}
+
+export interface ScanResult {
+  symbol: string
+  strategy_id: number
+  strategy_name: string
+  total_trades: number
+  win_rate: number | null
+  cagr: number | null
+  sharpe_ratio: number | null
+  max_drawdown: number | null
+  profit_factor: number | null
+  total_pnl: number
+}
+
 export const runBacktest = (req: BacktestRunRequest) =>
   apiFetch<BacktestResult>('/backtest/run', {
     method: 'POST',
@@ -56,3 +77,9 @@ export const getBacktestResult = (id: number) =>
 
 export const getBacktestTrades = (id: number) =>
   apiFetch<BacktestTrade[]>(`/backtest/results/${id}/trades`)
+
+export const runScan = (req: ScanRequest) =>
+  apiFetch<ScanResult[]>('/backtest/scan', {
+    method: 'POST',
+    body: JSON.stringify(req),
+  })

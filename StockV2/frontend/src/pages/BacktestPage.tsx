@@ -1,8 +1,8 @@
 import { useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
-  getBacktestTrades, listBacktestResults, runBacktest,
-  type BacktestResult, type BacktestTrade,
+  getBacktestTrades, listBacktestResults, runBacktest, runScan,
+  type BacktestResult, type BacktestTrade, type ScanResult,
 } from '../api/backtest'
 import { getStrategies, getStockList } from '../api/strategies'
 import { inr } from '../utils/format'
@@ -72,6 +72,31 @@ export function BacktestPage() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['backtest', 'results'] }),
     onError: (err) => console.error('Backtest failed:', err),
   })
+
+  const [scanResults, setScanResults] = useState<ScanResult[] | null>(null)
+  const [scanHideZero, setScanHideZero] = useState(true)
+  const [scanSort, setScanSort] = useState<keyof ScanResult>('cagr')
+  const [scanDir, setScanDir] = useState<'asc' | 'desc'>('desc')
+
+  const scanMut = useMutation({
+    mutationFn: runScan,
+    onSuccess: (data) => setScanResults(data),
+    onError: (err) => console.error('Scan failed:', err),
+  })
+
+  const handleScan = () => {
+    setScanResults(null)
+    scanMut.mutate({
+      from_date: form.from_date,
+      to_date: form.to_date,
+      initial_capital: Number(form.initial_capital) || 500000,
+    })
+  }
+
+  const toggleScanSort = (key: keyof ScanResult) => {
+    if (scanSort === key) setScanDir((d) => (d === 'asc' ? 'desc' : 'asc'))
+    else { setScanSort(key); setScanDir('desc') }
+  }
 
   const filteredStocks = symbolSearch.length >= 1
     ? stocks.filter(
@@ -203,6 +228,15 @@ export function BacktestPage() {
           >
             {runMut.isPending ? 'Running…' : 'Run Backtest'}
           </button>
+
+          <button
+            type="button"
+            onClick={handleScan}
+            disabled={scanMut.isPending}
+            className="px-4 py-1.5 bg-emerald-600 text-white text-sm rounded hover:bg-emerald-700 disabled:opacity-50"
+          >
+            {scanMut.isPending ? 'Scanning…' : 'Scan All Stocks'}
+          </button>
         </div>
 
         {/* Date presets */}
@@ -232,6 +266,12 @@ export function BacktestPage() {
           <p className="text-green-600 text-sm">
             Done — {runMut.data.total_trades} trades · CAGR {runMut.data.cagr?.toFixed(2)}% · Sharpe {runMut.data.sharpe_ratio?.toFixed(2) ?? '—'}
           </p>
+        )}
+        {scanMut.isPending && (
+          <p className="text-emerald-600 text-sm animate-pulse">Scanning all stocks — this may take 20–60 s…</p>
+        )}
+        {scanMut.isError && (
+          <p className="text-red-600 text-sm">{String(scanMut.error)}</p>
         )}
       </form>
 
@@ -278,6 +318,36 @@ export function BacktestPage() {
         </section>
       ) : null}
 
+      {/* Scan results */}
+      {scanResults != null && (
+        <section>
+          <div className="flex items-center gap-4 mb-3">
+            <h2 className="text-lg font-semibold text-gray-700">
+              Scan Results
+              <span className="ml-2 text-sm font-normal text-gray-400">
+                ({scanResults.filter((r) => !scanHideZero || r.total_trades > 0).length} rows)
+              </span>
+            </h2>
+            <label className="flex items-center gap-1.5 text-sm text-gray-500 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={scanHideZero}
+                onChange={(e) => setScanHideZero(e.target.checked)}
+                className="rounded"
+              />
+              Hide zero-trade rows
+            </label>
+          </div>
+          <ScanResultsTable
+            results={scanResults}
+            hideZero={scanHideZero}
+            sortKey={scanSort}
+            sortDir={scanDir}
+            onSort={toggleScanSort}
+          />
+        </section>
+      )}
+
       {/* Trade detail */}
       {selectedId != null && (
         <section>
@@ -314,6 +384,91 @@ export function BacktestPage() {
           )}
         </section>
       )}
+    </div>
+  )
+}
+
+type SortKey = keyof ScanResult
+
+function SortTh({
+  label, sortKey, active, dir, onSort,
+}: { label: string; sortKey: SortKey; active: boolean; dir: 'asc' | 'desc'; onSort: (k: SortKey) => void }) {
+  return (
+    <th
+      scope="col"
+      onClick={() => onSort(sortKey)}
+      className="px-4 py-2 cursor-pointer select-none hover:bg-gray-200 whitespace-nowrap"
+    >
+      {label}
+      {active && <span className="ml-1 text-blue-500">{dir === 'desc' ? '▼' : '▲'}</span>}
+    </th>
+  )
+}
+
+function ScanResultsTable({
+  results, hideZero, sortKey, sortDir, onSort,
+}: {
+  results: ScanResult[]
+  hideZero: boolean
+  sortKey: SortKey
+  sortDir: 'asc' | 'desc'
+  onSort: (k: SortKey) => void
+}) {
+  const visible = results
+    .filter((r) => !hideZero || r.total_trades > 0)
+    .sort((a, b) => {
+      const av = a[sortKey] ?? (sortDir === 'desc' ? -Infinity : Infinity)
+      const bv = b[sortKey] ?? (sortDir === 'desc' ? -Infinity : Infinity)
+      if (av < bv) return sortDir === 'desc' ? 1 : -1
+      if (av > bv) return sortDir === 'desc' ? -1 : 1
+      return 0
+    })
+
+  if (visible.length === 0) return <p className="text-gray-500 text-sm">No results to display.</p>
+
+  return (
+    <div className="overflow-x-auto rounded-lg border border-gray-200">
+      <table className="w-full text-sm">
+        <thead className="bg-gray-100 text-gray-600 text-left">
+          <tr>
+            <SortTh label="Symbol" sortKey="symbol" active={sortKey === 'symbol'} dir={sortDir} onSort={onSort} />
+            <SortTh label="Strategy" sortKey="strategy_name" active={sortKey === 'strategy_name'} dir={sortDir} onSort={onSort} />
+            <SortTh label="CAGR %" sortKey="cagr" active={sortKey === 'cagr'} dir={sortDir} onSort={onSort} />
+            <SortTh label="P&L ₹" sortKey="total_pnl" active={sortKey === 'total_pnl'} dir={sortDir} onSort={onSort} />
+            <SortTh label="Trades" sortKey="total_trades" active={sortKey === 'total_trades'} dir={sortDir} onSort={onSort} />
+            <SortTh label="Win %" sortKey="win_rate" active={sortKey === 'win_rate'} dir={sortDir} onSort={onSort} />
+            <SortTh label="Sharpe" sortKey="sharpe_ratio" active={sortKey === 'sharpe_ratio'} dir={sortDir} onSort={onSort} />
+            <SortTh label="Max DD" sortKey="max_drawdown" active={sortKey === 'max_drawdown'} dir={sortDir} onSort={onSort} />
+            <SortTh label="PF" sortKey="profit_factor" active={sortKey === 'profit_factor'} dir={sortDir} onSort={onSort} />
+          </tr>
+        </thead>
+        <tbody className="bg-white divide-y divide-gray-100">
+          {visible.map((r) => {
+            const pos = (r.cagr ?? 0) >= 0
+            return (
+              <tr key={`${r.symbol}-${r.strategy_id}`} className="hover:bg-blue-50 transition-colors">
+                <td className="px-4 py-2 font-semibold">{r.symbol}</td>
+                <td className="px-4 py-2 text-gray-500 text-xs">{r.strategy_name}</td>
+                <td className={`px-4 py-2 font-semibold ${pos ? 'text-green-600' : 'text-red-600'}`}>
+                  {r.cagr != null ? `${r.cagr.toFixed(2)}%` : '—'}
+                </td>
+                <td className={`px-4 py-2 ${r.total_pnl >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                  {inr(r.total_pnl)}
+                </td>
+                <td className="px-4 py-2">{r.total_trades}</td>
+                <td className="px-4 py-2">
+                  {r.win_rate != null ? `${(r.win_rate * 100).toFixed(1)}%` : '—'}
+                </td>
+                <td className="px-4 py-2">{r.sharpe_ratio != null ? r.sharpe_ratio.toFixed(2) : '—'}</td>
+                <td className="px-4 py-2 text-red-600">
+                  {r.max_drawdown != null ? `${r.max_drawdown.toFixed(2)}%` : '—'}
+                </td>
+                <td className="px-4 py-2">{r.profit_factor != null ? r.profit_factor.toFixed(2) : '—'}</td>
+              </tr>
+            )
+          })}
+        </tbody>
+      </table>
     </div>
   )
 }
