@@ -68,10 +68,7 @@ class BacktestRunner:
         )
 
         metrics = compute_metrics(trades, initial_capital, from_date, to_date)
-        # strategy_id=0 is the sentinel for "all strategies / aggregator run"
-        # because backtest_results.strategy_id is NOT NULL
-        db_strategy_id = strategy_id if strategy_id is not None else 0
-        result_id = self._save_result(symbol.upper(), from_date, to_date, db_strategy_id, metrics, trades)
+        result_id = self._save_result(symbol.upper(), from_date, to_date, strategy_id, metrics, trades)
 
         logger.info("[BacktestRunner] %s %s→%s: %d trades, result_id=%d",
                     symbol, from_date, to_date, len(trades), result_id)
@@ -85,7 +82,7 @@ class BacktestRunner:
 
     def _save_result(
         self, symbol: str, from_date: date, to_date: date,
-        strategy_id: int, metrics: dict, trades: list[SimTrade],
+        strategy_id: Optional[int], metrics: dict, trades: list[SimTrade],
     ) -> int:
         result = self.db.execute(
             text("""

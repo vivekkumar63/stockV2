@@ -154,7 +154,7 @@ class BacktestResult(Base):
     __tablename__ = "backtest_results"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    strategy_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    strategy_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     symbol: Mapped[Optional[str]] = mapped_column(String(20))
     from_date: Mapped[date] = mapped_column(Date)
     to_date: Mapped[date] = mapped_column(Date)
