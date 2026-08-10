@@ -25,6 +25,13 @@ def verify_api_key(key: str = Security(API_KEY_HEADER)) -> str:
 async def lifespan(app: FastAPI):
     Base.metadata.create_all(bind=engine)
     logger.info("Database tables verified")
+    from domains.strategies.seed import seed_strategies
+    from database import SessionLocal
+    db = SessionLocal()
+    try:
+        seed_strategies(db)
+    finally:
+        db.close()
     from scheduler import scheduler, register_jobs
     register_jobs()
     scheduler.start()
@@ -57,3 +64,6 @@ def health():
 from domains.data.router import router as data_router  # noqa: E402
 
 app.include_router(data_router, prefix="/api/v1", dependencies=[Depends(verify_api_key)])
+
+from domains.strategies.router import router as strategies_router  # noqa: E402
+app.include_router(strategies_router, prefix="/api/v1", dependencies=[Depends(verify_api_key)])
