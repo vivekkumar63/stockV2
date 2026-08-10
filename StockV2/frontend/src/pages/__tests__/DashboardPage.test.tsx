@@ -21,9 +21,9 @@ vi.mock('../../api/portfolio', () => ({
   enterPosition: vi.fn().mockResolvedValue({ id: 1 }),
 }))
 
-function Wrapper({ children }: { children: React.ReactNode }) {
+function makeWrapper() {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  return (
+  return ({ children }: { children: React.ReactNode }) => (
     <QueryClientProvider client={qc}>
       <MemoryRouter>{children}</MemoryRouter>
     </QueryClientProvider>
@@ -32,17 +32,17 @@ function Wrapper({ children }: { children: React.ReactNode }) {
 
 describe('DashboardPage', () => {
   it('renders portfolio summary section', async () => {
-    render(<DashboardPage />, { wrapper: Wrapper })
+    render(<DashboardPage />, { wrapper: makeWrapper() })
     await waitFor(() => expect(screen.getByText('Paper Capital')).toBeInTheDocument())
   })
 
   it('renders today BUY signals with symbol', async () => {
-    render(<DashboardPage />, { wrapper: Wrapper })
+    render(<DashboardPage />, { wrapper: makeWrapper() })
     await waitFor(() => expect(screen.getByText('TCS')).toBeInTheDocument())
   })
 
   it('renders Enter button per signal', async () => {
-    render(<DashboardPage />, { wrapper: Wrapper })
+    render(<DashboardPage />, { wrapper: makeWrapper() })
     await waitFor(() => expect(screen.getByRole('button', { name: 'Enter position for TCS' })).toBeInTheDocument())
   })
 })

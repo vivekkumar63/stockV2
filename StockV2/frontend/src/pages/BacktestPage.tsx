@@ -4,6 +4,7 @@ import {
   getBacktestTrades, listBacktestResults, runBacktest,
   type BacktestResult, type BacktestTrade,
 } from '../api/backtest'
+import { inr } from '../utils/format'
 
 const resultId = (r: BacktestResult): number | undefined => r.id ?? r.result_id
 
@@ -201,10 +202,10 @@ function TradeRow({ trade: t }: { trade: BacktestTrade }) {
       <td className="px-4 py-2">{t.entry_date}</td>
       <td className="px-4 py-2">{t.exit_date}</td>
       <td className="px-4 py-2">{t.quantity}</td>
-      <td className="px-4 py-2">{t.entry_price.toFixed(2)}</td>
-      <td className="px-4 py-2">{t.exit_price.toFixed(2)}</td>
+      <td className="px-4 py-2">{inr(t.entry_price)}</td>
+      <td className="px-4 py-2">{inr(t.exit_price)}</td>
       <td className={`px-4 py-2 font-semibold ${pos ? 'text-green-600' : 'text-red-600'}`}>
-        {t.pnl.toFixed(2)}
+        {inr(t.pnl)}
       </td>
       <td className={`px-4 py-2 ${pos ? 'text-green-600' : 'text-red-600'}`}>
         {t.pnl_pct.toFixed(2)}%

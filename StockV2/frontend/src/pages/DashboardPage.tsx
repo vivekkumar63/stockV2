@@ -11,7 +11,7 @@ export function DashboardPage() {
     queryFn: getPortfolioSummary,
   })
 
-  const { data: signals = [], isLoading: loadingSignals } = useQuery({
+  const { data: signals = [], isLoading: loadingSignals, isError: signalsError } = useQuery({
     queryKey: ['signals', 'today'],
     queryFn: getTodaySignals,
   })
@@ -50,6 +50,8 @@ export function DashboardPage() {
         <h2 className="text-lg font-semibold text-gray-700 mb-3">Today's BUY Signals</h2>
         {loadingSignals ? (
           <p className="text-gray-400">Loading…</p>
+        ) : signalsError ? (
+          <p className="text-red-600 text-sm">Failed to load today's signals.</p>
         ) : buySignals.length === 0 ? (
           <p className="text-gray-500 py-4">No BUY signals today.</p>
         ) : (
