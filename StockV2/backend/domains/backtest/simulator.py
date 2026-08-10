@@ -111,6 +111,8 @@ class BacktestSimulator:
                 if should_enter:
                     sl = round(current_price * (1 - stop_pct / 100), 2)
                     tgt = round(current_price * (1 + tgt_pct / 100), 2)
+                    # open_positions=0 and invested_capital=0.0 are correct here:
+                    # exits are evaluated before entries, so open_pos is always None at this point.
                     pos = sizer.compute(
                         entry_price=current_price,
                         stop_loss_price=sl,
@@ -129,10 +131,13 @@ class BacktestSimulator:
                             max_exit_date=current_date + timedelta(days=h_days),
                         )
 
-        # Force-close any open position at end of period
+        # Force-close any open position at end of period.
+        # Use the actual last trading date (not to_date, which may be a weekend/holiday).
         if open_pos and trading_dates:
-            last_price = float(df[df["date"] <= to_date]["close"].iloc[-1])
-            trades.append(self._close(symbol, open_pos, last_price, to_date, "end_of_period"))
+            last_row = df[df["date"] <= to_date].iloc[-1]
+            last_price = float(last_row["close"])
+            actual_last_date = last_row["date"]
+            trades.append(self._close(symbol, open_pos, last_price, actual_last_date, "end_of_period"))
 
         return trades
 

@@ -44,6 +44,10 @@ class BacktestRunner:
             return {"error": f"Insufficient price data for {symbol}: {len(rows)} bars (need >= 50)"}
 
         df = pd.DataFrame([dict(r._mapping) for r in rows])
+        df["date"] = pd.to_datetime(df["date"]).dt.date
+
+        if df[(df["date"] >= from_date) & (df["date"] <= to_date)].empty:
+            return {"error": f"No price data for {symbol} in range {from_date} to {to_date}"}
 
         if strategy_id is not None:
             row = self.db.execute(
