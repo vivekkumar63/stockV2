@@ -44,13 +44,39 @@ def _intraday_scan():
     from database import SessionLocal
     from domains.strategies.engine import StrategyEngine
     from domains.data.nse_universe import NSE_SYMBOLS
+    from sqlalchemy import text
     if not _is_market_hours():
         return
     db = SessionLocal()
     try:
+        # Strategy scan
         engine = StrategyEngine(db)
         results = engine.scan_all(NSE_SYMBOLS, date.today())
         logger.info("[scheduler] intraday_scan: %d signals", len(results))
+
+        # Exit monitor: get open positions and their last known close prices
+        open_rows = db.execute(
+            text("SELECT ph.symbol FROM portfolio_holdings ph WHERE ph.is_active=1")
+        ).fetchall()
+        open_symbols = [r[0] for r in open_rows]
+        if open_symbols:
+            placeholders = ",".join(f"'{s}'" for s in open_symbols)
+            price_rows = db.execute(
+                text(f"""
+                    SELECT symbol, close FROM stock_prices_daily
+                    WHERE (symbol, date) IN (
+                        SELECT symbol, MAX(date) FROM stock_prices_daily
+                        WHERE symbol IN ({placeholders})
+                        GROUP BY symbol
+                    )
+                """)
+            ).fetchall()
+            current_prices = {r[0]: r[1] for r in price_rows}
+            if current_prices:
+                from domains.portfolio.exit_monitor import ExitMonitor
+                exits = ExitMonitor(db).scan_exits(current_prices)
+                if exits:
+                    logger.info("[scheduler] intraday_scan: %d positions exited", len(exits))
     except Exception:
         logger.exception("[scheduler] intraday_scan failed")
     finally:
