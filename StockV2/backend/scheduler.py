@@ -62,7 +62,22 @@ def _weekly_fundamentals():
 
 
 def _daily_digest():
-    logger.info("[scheduler] daily_digest — placeholder (implemented in Plan 3)")
+    from datetime import date
+    from database import SessionLocal
+    from domains.strategies.service import StrategyService
+    from domains.alerts.telegram import AlertService
+    db = SessionLocal()
+    try:
+        today_str = date.today().strftime("%Y-%m-%d")
+        signals = StrategyService(db).get_today_signals(signal_date=today_str)
+        buy_signals = [s for s in signals if s["signal_type"] == "BUY"]
+        top_10 = sorted(buy_signals, key=lambda x: x.get("confidence_score") or 0, reverse=True)[:10]
+        AlertService().send_daily_digest(top_10, scan_date=date.today())
+        logger.info("[scheduler] daily_digest sent: %d buy signals today", len(top_10))
+    except Exception:
+        logger.exception("[scheduler] daily_digest failed")
+    finally:
+        db.close()
 
 
 def register_jobs():
