@@ -20,6 +20,7 @@ class _AlwaysBuyStrategy:
     """Test double: always BUY after 30-bar warmup. No ABC inheritance needed."""
     name = "always_buy"
     weight = 0.20
+    strategy_type = "technical"
 
     def generate_signal(self, df, fundamentals=None):
         from domains.strategies.base import Signal
@@ -65,6 +66,7 @@ def test_simulator_trade_fields_are_populated():
 
 def test_simulator_exit_on_target():
     """Rapidly rising prices → target_hit exit."""
+    from domains.backtest.simulator import BacktestSimulator   # ADD THIS LINE
     n = 120
     # Flat for 50 bars, then +15/bar so target (+15%) hits quickly
     closes = [1000.0] * 50 + [1001.0 + i * 15 for i in range(70)]
@@ -77,7 +79,6 @@ def test_simulator_exit_on_target():
         "close":  closes,
         "volume": [1_000_000] * n,
     })
-    from domains.backtest.simulator import BacktestSimulator
     trades = BacktestSimulator().run(
         symbol="TCS", prices_df=df,
         from_date=dates[50], to_date=dates[-1],
@@ -100,3 +101,19 @@ def test_simulator_no_double_entry():
     )
     for i in range(len(trades) - 1):
         assert trades[i].exit_date <= trades[i + 1].entry_date
+
+
+def test_simulator_aggregator_requires_three_buy_signals():
+    """SignalAggregator only fires BUY with consensus_score > 0.65 AND buy_count >= 3."""
+    from domains.backtest.simulator import BacktestSimulator
+    df = _make_prices(250)
+    from_date, to_date = df["date"][50], df["date"].iloc[-1]
+    # One strategy cannot satisfy buy_count >= 3 — expect zero trades
+    trades = BacktestSimulator().run(
+        symbol="TCS", prices_df=df,
+        from_date=from_date, to_date=to_date,
+        strategies=[_AlwaysBuyStrategy()],
+        use_aggregator=True,
+        initial_capital=500_000.0,
+    )
+    assert trades == []

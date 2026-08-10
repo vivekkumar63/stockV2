@@ -71,15 +71,19 @@ class BacktestSimulator:
         mask = (df["date"] >= from_date) & (df["date"] <= to_date)
         trading_dates = df.loc[mask, "date"].tolist()
 
+        # Pre-build date→position lookup once (O(n)) before the loop
+        date_to_idx = {d: i for i, d in enumerate(df["date"])}
+
         trades: list[SimTrade] = []
         open_pos: Optional[_OpenPosition] = None
 
         for current_date in trading_dates:
-            df_slice = df[df["date"] <= current_date].copy()
+            idx = date_to_idx[current_date]
+            df_slice = df.iloc[: idx + 1]   # view — IndicatorEngine.compute() copies internally
             if len(df_slice) < 30:
                 continue
 
-            current_price = float(df_slice["close"].iloc[-1])
+            current_price = float(df["close"].iat[idx])
 
             # Check exits before entries
             if open_pos:
