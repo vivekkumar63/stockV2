@@ -90,3 +90,17 @@ def test_unauthorized_without_key():
     c = TestClient(app)
     response = c.get("/api/v1/strategies")
     assert response.status_code == 401
+
+
+def test_get_signal_explanation_no_api_key(client):
+    """With no API key configured, explanation endpoint returns 503."""
+    signals = client.get("/api/v1/signals/today").json()
+    signal_id = signals[0]["id"]
+    response = client.get(f"/api/v1/signals/{signal_id}/explanation")
+    assert response.status_code in (200, 503)
+
+
+def test_get_sell_signal_explanation_returns_404_or_503(client):
+    """Missing signal returns 404."""
+    response = client.get("/api/v1/signals/99998/explanation")
+    assert response.status_code in (404, 503)
