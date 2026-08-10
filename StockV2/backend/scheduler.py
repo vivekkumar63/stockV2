@@ -16,12 +16,45 @@ class JobIds:
 scheduler = BackgroundScheduler(timezone="Asia/Kolkata")
 
 
+def _is_market_hours() -> bool:
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    now = datetime.now(ZoneInfo("Asia/Kolkata"))
+    return now.weekday() < 5 and 9 <= now.hour < 16
+
+
 def _daily_eod_update():
-    logger.info("[scheduler] daily_eod_update — placeholder (implemented in Plan 2)")
+    from datetime import date
+    from database import SessionLocal
+    from domains.strategies.engine import StrategyEngine
+    from domains.data.nse_universe import NSE_SYMBOLS
+    db = SessionLocal()
+    try:
+        engine = StrategyEngine(db)
+        results = engine.scan_all(NSE_SYMBOLS, date.today())
+        logger.info("[scheduler] daily_eod_update: %d signals generated", len(results))
+    except Exception:
+        logger.exception("[scheduler] daily_eod_update failed")
+    finally:
+        db.close()
 
 
 def _intraday_scan():
-    logger.info("[scheduler] intraday_scan — placeholder (implemented in Plan 2)")
+    from datetime import date
+    from database import SessionLocal
+    from domains.strategies.engine import StrategyEngine
+    from domains.data.nse_universe import NSE_SYMBOLS
+    if not _is_market_hours():
+        return
+    db = SessionLocal()
+    try:
+        engine = StrategyEngine(db)
+        results = engine.scan_all(NSE_SYMBOLS, date.today())
+        logger.info("[scheduler] intraday_scan: %d signals", len(results))
+    except Exception:
+        logger.exception("[scheduler] intraday_scan failed")
+    finally:
+        db.close()
 
 
 def _weekly_fundamentals():
