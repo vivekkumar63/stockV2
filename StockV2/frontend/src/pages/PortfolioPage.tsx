@@ -12,7 +12,7 @@ export function PortfolioPage() {
     queryFn: getHoldings,
   })
 
-  const { data: pnlData, isLoading: loadingPnl } = useQuery({
+  const { data: pnlData, isLoading: loadingPnl, isError: pnlError } = useQuery({
     queryKey: ['portfolio', 'pnl'],
     queryFn: getClosedPnl,
   })
@@ -77,40 +77,47 @@ export function PortfolioPage() {
       </section>
 
       {/* Closed P&L */}
-      {!loadingPnl && pnlData && (
-        <section>
-          <h2 className="text-lg font-semibold text-gray-700 mb-3">
-            Closed P&L —{' '}
-            <span className={pnlData.total_pnl >= 0 ? 'text-green-600' : 'text-red-600'}>
-              {inr(pnlData.total_pnl)}
-            </span>
-          </h2>
-          {pnlData.closed_trades.length === 0 ? (
-            <p className="text-gray-500">No closed trades yet.</p>
-          ) : (
-            <div className="overflow-x-auto rounded-lg border border-gray-200">
-              <table className="w-full text-sm">
-                <thead className="bg-gray-100 text-gray-600 text-left">
-                  <tr>
-                    <th scope="col" className="px-4 py-2">Symbol</th>
-                    <th scope="col" className="px-4 py-2">Date</th>
-                    <th scope="col" className="px-4 py-2">Qty</th>
-                    <th scope="col" className="px-4 py-2">Sell ₹</th>
-                    <th scope="col" className="px-4 py-2">Buy Avg ₹</th>
-                    <th scope="col" className="px-4 py-2">P&L</th>
-                    <th scope="col" className="px-4 py-2">P&L %</th>
-                  </tr>
-                </thead>
-                <tbody className="bg-white divide-y divide-gray-100">
-                  {pnlData.closed_trades.map((t, i) => (
-                    <ClosedTradeRow key={i} trade={t} />
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </section>
-      )}
+      <section>
+        <h2 className="text-lg font-semibold text-gray-700 mb-3">Closed P&L</h2>
+        {loadingPnl ? (
+          <p className="text-gray-400">Loading…</p>
+        ) : pnlError ? (
+          <p className="text-red-600 text-sm">Failed to load P&L data.</p>
+        ) : pnlData ? (
+          <>
+            <p className="text-sm text-gray-500 mb-3">
+              Total:{' '}
+              <span className={pnlData.total_pnl >= 0 ? 'text-green-600 font-semibold' : 'text-red-600 font-semibold'}>
+                {inr(pnlData.total_pnl)}
+              </span>
+            </p>
+            {pnlData.closed_trades.length === 0 ? (
+              <p className="text-gray-500">No closed trades yet.</p>
+            ) : (
+              <div className="overflow-x-auto rounded-lg border border-gray-200">
+                <table className="w-full text-sm">
+                  <thead className="bg-gray-100 text-gray-600 text-left">
+                    <tr>
+                      <th scope="col" className="px-4 py-2">Symbol</th>
+                      <th scope="col" className="px-4 py-2">Date</th>
+                      <th scope="col" className="px-4 py-2">Qty</th>
+                      <th scope="col" className="px-4 py-2">Sell ₹</th>
+                      <th scope="col" className="px-4 py-2">Buy Avg ₹</th>
+                      <th scope="col" className="px-4 py-2">P&L</th>
+                      <th scope="col" className="px-4 py-2">P&L %</th>
+                    </tr>
+                  </thead>
+                  <tbody className="bg-white divide-y divide-gray-100">
+                    {pnlData.closed_trades.map((t, i) => (
+                      <ClosedTradeRow key={i} trade={t} />
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </>
+        ) : null}
+      </section>
     </div>
   )
 }
@@ -144,7 +151,7 @@ function HoldingRow({
       <td className="px-4 py-2">
         <button
           onClick={onExit}
-          disabled={!exitPrice || exiting}
+          disabled={!exitPrice || isNaN(Number(exitPrice)) || Number(exitPrice) <= 0 || exiting}
           aria-label={`Exit ${h.symbol}`}
           className="px-3 py-1 bg-red-600 text-white text-xs rounded hover:bg-red-700 disabled:opacity-50"
         >

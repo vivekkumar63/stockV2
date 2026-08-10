@@ -22,9 +22,9 @@ vi.mock('../../api/portfolio', () => ({
   exitPosition: vi.fn().mockResolvedValue({ id: 1 }),
 }))
 
-function Wrapper({ children }: { children: React.ReactNode }) {
+function makeWrapper() {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  return (
+  return ({ children }: { children: React.ReactNode }) => (
     <QueryClientProvider client={qc}>
       <MemoryRouter>{children}</MemoryRouter>
     </QueryClientProvider>
@@ -33,29 +33,29 @@ function Wrapper({ children }: { children: React.ReactNode }) {
 
 describe('PortfolioPage', () => {
   it('renders open holdings with symbol', async () => {
-    render(<PortfolioPage />, { wrapper: Wrapper })
+    render(<PortfolioPage />, { wrapper: makeWrapper() })
     await waitFor(() => expect(screen.getByText('TCS')).toBeInTheDocument())
   })
 
   it('renders closed P&L section', async () => {
-    render(<PortfolioPage />, { wrapper: Wrapper })
+    render(<PortfolioPage />, { wrapper: makeWrapper() })
     await waitFor(() => expect(screen.getByText(/Closed P&L/)).toBeInTheDocument())
   })
 
   it('renders closed trade row with symbol', async () => {
-    render(<PortfolioPage />, { wrapper: Wrapper })
+    render(<PortfolioPage />, { wrapper: makeWrapper() })
     await waitFor(() => expect(screen.getByText('INFY')).toBeInTheDocument())
   })
 
   it('Exit button is disabled when price input is empty', async () => {
-    render(<PortfolioPage />, { wrapper: Wrapper })
+    render(<PortfolioPage />, { wrapper: makeWrapper() })
     await waitFor(() => screen.getByText('TCS'))
     const btn = screen.getByRole('button', { name: /Exit TCS/i })
     expect(btn).toBeDisabled()
   })
 
   it('Exit button enables when price is entered', async () => {
-    render(<PortfolioPage />, { wrapper: Wrapper })
+    render(<PortfolioPage />, { wrapper: makeWrapper() })
     await waitFor(() => screen.getByText('TCS'))
     const input = screen.getByPlaceholderText('exit price')
     await userEvent.type(input, '3600')
