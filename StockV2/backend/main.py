@@ -70,3 +70,6 @@ app.include_router(strategies_router, prefix="/api/v1", dependencies=[Depends(ve
 
 from domains.ai.router import router as ai_router  # noqa: E402
 app.include_router(ai_router, prefix="/api/v1", dependencies=[Depends(verify_api_key)])
+
+from domains.portfolio.router import router as portfolio_router  # noqa: E402
+app.include_router(portfolio_router, prefix="/api/v1", dependencies=[Depends(verify_api_key)])
