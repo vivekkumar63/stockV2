@@ -85,3 +85,50 @@ def test_get_closed_pnl_parses_notes(db):
     assert result["total_pnl"] == 15000.0
     assert len(result["closed_trades"]) >= 1
     assert result["closed_trades"][0]["pnl"] == 15000.0
+
+
+@pytest.fixture(scope="module")
+def wl_db():
+    eng = create_engine(
+        "sqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(eng)
+    Session = sessionmaker(bind=eng)
+    session = Session()
+    yield session
+    session.close()
+
+
+def test_watchlist_add_and_get(wl_db):
+    from domains.portfolio.watchlist_service import WatchlistService
+    svc = WatchlistService(wl_db)
+    item = svc.add("TCS", reason="RSI oversold")
+    assert item["symbol"] == "TCS"
+    items = svc.get_all()
+    assert any(i["symbol"] == "TCS" for i in items)
+
+
+def test_watchlist_add_is_idempotent(wl_db):
+    from domains.portfolio.watchlist_service import WatchlistService
+    svc = WatchlistService(wl_db)
+    svc.add("TCS")
+    svc.add("TCS")  # duplicate
+    items = svc.get_all()
+    assert sum(1 for i in items if i["symbol"] == "TCS") == 1
+
+
+def test_watchlist_remove(wl_db):
+    from domains.portfolio.watchlist_service import WatchlistService
+    svc = WatchlistService(wl_db)
+    svc.add("INFY")
+    removed = svc.remove("INFY")
+    assert removed is True
+    assert not any(i["symbol"] == "INFY" for i in svc.get_all())
+
+
+def test_watchlist_remove_missing_returns_false(wl_db):
+    from domains.portfolio.watchlist_service import WatchlistService
+    result = WatchlistService(wl_db).remove("NONEXISTENT")
+    assert result is False
