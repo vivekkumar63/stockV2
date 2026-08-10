@@ -43,6 +43,6 @@ describe('DashboardPage', () => {
 
   it('renders Enter button per signal', async () => {
     render(<DashboardPage />, { wrapper: Wrapper })
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Enter' })).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Enter position for TCS' })).toBeInTheDocument())
   })
 })

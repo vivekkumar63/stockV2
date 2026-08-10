@@ -1,14 +1,12 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { enterPosition, getPortfolioSummary } from '../api/portfolio'
 import { getTodaySignals, type Signal } from '../api/signals'
-
-const inr = (n: number) =>
-  new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(n)
+import { inr } from '../utils/format'
 
 export function DashboardPage() {
-  const qc = useQueryClient()
+  const queryClient = useQueryClient()
 
-  const { data: summary, isLoading: loadingSummary } = useQuery({
+  const { data: summary, isLoading: loadingSummary, isError: summaryError } = useQuery({
     queryKey: ['portfolio', 'summary'],
     queryFn: getPortfolioSummary,
   })
@@ -21,7 +19,8 @@ export function DashboardPage() {
   const enterMut = useMutation({
     mutationFn: ({ signalId, price }: { signalId: number; price: number }) =>
       enterPosition(signalId, price),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['portfolio'] }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['portfolio'] }),
+    onError: (err) => console.error('Failed to enter position:', err),
   })
 
   const buySignals = signals.filter((s) => s.signal_type === 'BUY')
@@ -34,6 +33,8 @@ export function DashboardPage() {
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         {loadingSummary ? (
           <p className="col-span-4 text-gray-400">Loading…</p>
+        ) : summaryError ? (
+          <p className="col-span-4 text-red-600 text-sm">Failed to load portfolio summary.</p>
         ) : summary ? (
           <>
             <Card label="Paper Capital" value={inr(summary.paper_capital)} />
@@ -56,13 +57,13 @@ export function DashboardPage() {
             <table className="w-full text-sm">
               <thead className="bg-gray-100 text-gray-600 text-left">
                 <tr>
-                  <th className="px-4 py-2">Symbol</th>
-                  <th className="px-4 py-2">Strategy</th>
-                  <th className="px-4 py-2">Confidence</th>
-                  <th className="px-4 py-2">Price</th>
-                  <th className="px-4 py-2">Stop Loss</th>
-                  <th className="px-4 py-2">Target</th>
-                  <th className="px-4 py-2" />
+                  <th className="px-4 py-2" scope="col">Symbol</th>
+                  <th className="px-4 py-2" scope="col">Strategy</th>
+                  <th className="px-4 py-2" scope="col">Confidence</th>
+                  <th className="px-4 py-2" scope="col">Price</th>
+                  <th className="px-4 py-2" scope="col">Stop Loss</th>
+                  <th className="px-4 py-2" scope="col">Target</th>
+                  <th className="px-4 py-2" scope="col" />
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-gray-100">
@@ -71,12 +72,17 @@ export function DashboardPage() {
                     key={sig.id}
                     sig={sig}
                     onEnter={() => enterMut.mutate({ signalId: sig.id, price: sig.price_at_signal })}
-                    entering={enterMut.isPending}
+                    entering={enterMut.isPending && enterMut.variables?.signalId === sig.id}
                   />
                 ))}
               </tbody>
             </table>
           </div>
+        )}
+        {enterMut.isError && (
+          <p className="text-red-600 text-sm mt-2">
+            Failed to enter position: {String(enterMut.error)}
+          </p>
         )}
       </section>
     </div>
@@ -93,8 +99,6 @@ function Card({ label, value }: { label: string; value: string }) {
 }
 
 function SignalRow({ sig, onEnter, entering }: { sig: Signal; onEnter: () => void; entering: boolean }) {
-  const inr = (n: number) =>
-    new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(n)
   const conf = sig.confidence_score
   return (
     <tr className="hover:bg-gray-50">
@@ -114,6 +118,7 @@ function SignalRow({ sig, onEnter, entering }: { sig: Signal; onEnter: () => voi
         <button
           onClick={onEnter}
           disabled={entering}
+          aria-label={`Enter position for ${sig.symbol}`}
           className="px-3 py-1 bg-blue-600 text-white text-xs rounded hover:bg-blue-700 disabled:opacity-50"
         >
           Enter
