@@ -57,8 +57,16 @@ def test_runner_returns_result_id(db):
 
 
 def test_runner_saves_result_to_db(db):
-    count = db.execute(text("SELECT COUNT(*) FROM backtest_results")).fetchone()[0]
-    assert count >= 1
+    from domains.backtest.runner import BacktestRunner
+    result = BacktestRunner(db).run(
+        symbol="TCS",
+        from_date=date(2021, 1, 4),
+        to_date=date(2021, 3, 31),
+    )
+    row = db.execute(
+        text("SELECT id FROM backtest_results WHERE id = :id"), {"id": result["result_id"]}
+    ).fetchone()
+    assert row is not None
 
 
 def test_runner_result_has_metrics(db):
@@ -80,5 +88,16 @@ def test_runner_insufficient_data_returns_error(db):
         symbol="NONEXISTENT",
         from_date=date(2021, 1, 4),
         to_date=date(2021, 3, 31),
+    )
+    assert "error" in result
+
+
+def test_runner_invalid_strategy_id_returns_error(db):
+    from domains.backtest.runner import BacktestRunner
+    result = BacktestRunner(db).run(
+        symbol="TCS",
+        from_date=date(2021, 1, 4),
+        to_date=date(2021, 3, 31),
+        strategy_id=99999,
     )
     assert "error" in result

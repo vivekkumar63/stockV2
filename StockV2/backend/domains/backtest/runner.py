@@ -27,6 +27,9 @@ class BacktestRunner:
         strategy_id: Optional[int] = None,
         initial_capital: float = 500_000.0,
     ) -> dict:
+        symbol = symbol.upper()
+        # Fetch full history — no LIMIT because IndicatorEngine needs warmup bars
+        # before from_date, and the simulator filters to the requested window.
         rows = self.db.execute(
             text("""
                 SELECT date, open, high, low, close, volume
@@ -34,11 +37,11 @@ class BacktestRunner:
                 WHERE symbol = :sym
                 ORDER BY date ASC
             """),
-            {"sym": symbol.upper()},
+            {"sym": symbol},
         ).fetchall()
 
         if len(rows) < 50:
-            return {"error": f"Insufficient price data for {symbol}: {len(rows)} bars (need ≥ 50)"}
+            return {"error": f"Insufficient price data for {symbol}: {len(rows)} bars (need >= 50)"}
 
         df = pd.DataFrame([dict(r._mapping) for r in rows])
 
@@ -52,13 +55,13 @@ class BacktestRunner:
             strategies = [s for s in ALL_STRATEGIES if s.name == strat_name]
             if not strategies:
                 return {"error": f"Strategy '{strat_name}' not in ALL_STRATEGIES"}
-            use_aggregator = False
+            use_aggregator = False  # single strategy; no consensus threshold needed
         else:
             strategies = list(ALL_STRATEGIES)
             use_aggregator = True
 
         trades = self.simulator.run(
-            symbol=symbol.upper(),
+            symbol=symbol,
             prices_df=df,
             from_date=from_date,
             to_date=to_date,
@@ -68,13 +71,13 @@ class BacktestRunner:
         )
 
         metrics = compute_metrics(trades, initial_capital, from_date, to_date)
-        result_id = self._save_result(symbol.upper(), from_date, to_date, strategy_id, metrics, trades)
+        result_id = self._save_result(symbol, from_date, to_date, strategy_id, metrics, trades)
 
-        logger.info("[BacktestRunner] %s %s→%s: %d trades, result_id=%d",
+        logger.info("[BacktestRunner] %s %s->%s: %d trades, result_id=%d",
                     symbol, from_date, to_date, len(trades), result_id)
         return {
             "result_id": result_id,
-            "symbol": symbol.upper(),
+            "symbol": symbol,
             "from_date": str(from_date),
             "to_date": str(to_date),
             **metrics,
@@ -84,6 +87,7 @@ class BacktestRunner:
         self, symbol: str, from_date: date, to_date: date,
         strategy_id: Optional[int], metrics: dict, trades: list[SimTrade],
     ) -> int:
+        # sortino_ratio stored as NULL — compute_metrics does not compute it yet
         result = self.db.execute(
             text("""
                 INSERT INTO backtest_results
