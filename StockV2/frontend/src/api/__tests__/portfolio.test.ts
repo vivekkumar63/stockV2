@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from 'vitest'
 
 vi.mock('../client', () => ({ apiFetch: vi.fn() }))
 
-import { getPortfolioSummary, getHoldings, enterPosition, exitPosition } from '../portfolio'
+import { getPortfolioSummary, getHoldings, getClosedPnl, enterPosition, exitPosition } from '../portfolio'
 import { apiFetch } from '../client'
 
 describe('portfolio API', () => {
@@ -16,6 +16,12 @@ describe('portfolio API', () => {
     vi.mocked(apiFetch).mockResolvedValueOnce([])
     await getHoldings()
     expect(apiFetch).toHaveBeenCalledWith('/portfolio/holdings')
+  })
+
+  it('getClosedPnl calls /portfolio/pnl', async () => {
+    vi.mocked(apiFetch).mockResolvedValueOnce({ total_pnl: 0, closed_trades: [] })
+    await getClosedPnl()
+    expect(apiFetch).toHaveBeenCalledWith('/portfolio/pnl')
   })
 
   it('enterPosition calls POST /portfolio/enter/{id}', async () => {

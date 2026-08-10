@@ -20,7 +20,7 @@ export const getTodaySignals = () => apiFetch<Signal[]>('/signals/today')
 
 export const getSignals = (params?: {
   symbol?: string
-  signal_type?: string
+  signal_type?: 'BUY' | 'SELL' | 'NONE'
   from_date?: string
   limit?: number
 }) => {

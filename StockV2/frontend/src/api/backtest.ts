@@ -9,8 +9,8 @@ export interface BacktestRunRequest {
 }
 
 export interface BacktestResult {
-  id?: number
-  result_id?: number
+  id?: number        // from GET /backtest/results
+  result_id?: number // from POST /backtest/run response
   symbol: string
   from_date: string
   to_date: string

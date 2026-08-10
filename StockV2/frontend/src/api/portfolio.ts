@@ -36,18 +36,27 @@ export interface ClosedTrade {
   pnl_pct?: number
 }
 
+export interface TradeRecord {
+  id: number
+  symbol: string
+  trade_date: string
+  price: number
+  quantity: number
+  trade_type: string
+}
+
 export const getPortfolioSummary = () => apiFetch<PortfolioSummary>('/portfolio/summary')
 export const getHoldings = () => apiFetch<Holding[]>('/portfolio/holdings')
 export const getClosedPnl = () => apiFetch<ClosedPnl>('/portfolio/pnl')
 
 export const enterPosition = (signalId: number, price: number) =>
-  apiFetch(`/portfolio/enter/${signalId}`, {
+  apiFetch<TradeRecord>(`/portfolio/enter/${signalId}`, {
     method: 'POST',
     body: JSON.stringify({ price }),
   })
 
 export const exitPosition = (symbol: string, price: number, reason = 'manual') =>
-  apiFetch(`/portfolio/exit/${symbol}`, {
+  apiFetch<TradeRecord>(`/portfolio/exit/${symbol}`, {
     method: 'POST',
     body: JSON.stringify({ price, reason }),
   })
