@@ -20,9 +20,8 @@ RUN poetry config virtualenvs.create false && \
 # Copy application code
 COPY backend/ .
 
-# Non-root user for security
-RUN useradd -m stockv2 && chown -R stockv2:stockv2 /app
-USER stockv2
+# Pre-create data dir so SQLite has a writable location
+RUN mkdir -p /app/data
 
 EXPOSE 8000
 

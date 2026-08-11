@@ -1,7 +1,12 @@
+from pathlib import Path
+
 from sqlalchemy import create_engine, event, text
 from sqlalchemy.orm import sessionmaker, DeclarativeBase
 
 from settings import settings
+
+# Ensure parent directory exists (important when db_path is e.g. data/stockv2.db)
+Path(settings.db_path).parent.mkdir(parents=True, exist_ok=True)
 
 DATABASE_URL = f"sqlite:///{settings.db_path}"
 
