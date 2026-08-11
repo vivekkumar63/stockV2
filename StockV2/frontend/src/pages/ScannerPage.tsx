@@ -70,10 +70,10 @@ export function ScannerPage() {
 
       {/* Controls */}
       <div className="bg-white rounded-lg shadow p-5 flex flex-wrap gap-4 items-end">
-        <div className="flex flex-col gap-1">
+        <div className="flex flex-col gap-1 w-full sm:w-auto">
           <label className="text-xs font-medium text-gray-600">Strategy</label>
           <select
-            className="border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-blue-400 min-w-[220px]"
+            className="border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-blue-400 w-full sm:min-w-[220px]"
             value={strategyId}
             onChange={(e) => setStrategyId(e.target.value)}
           >
@@ -84,10 +84,10 @@ export function ScannerPage() {
           </select>
         </div>
 
-        <div className="flex flex-col gap-1">
+        <div className="flex flex-col gap-1 w-full sm:w-auto">
           <label className="text-xs font-medium text-gray-600">Signal Type</label>
           <select
-            className="border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-blue-400"
+            className="border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-blue-400 w-full sm:w-auto"
             value={signalType}
             onChange={(e) => setSignalType(e.target.value)}
           >
@@ -97,10 +97,10 @@ export function ScannerPage() {
           </select>
         </div>
 
-        <div className="flex flex-col gap-1">
+        <div className="flex flex-col gap-1 w-full sm:w-auto">
           <label className="text-xs font-medium text-gray-600">Stocks to scan</label>
           <select
-            className="border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-blue-400"
+            className="border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-blue-400 w-full sm:w-auto"
             value={limit}
             onChange={(e) => setLimit(Number(e.target.value))}
           >
@@ -111,7 +111,7 @@ export function ScannerPage() {
         </div>
 
         <button
-          className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+          className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed w-full sm:w-auto"
           onClick={handleScan}
           disabled={scanMut.isPending}
         >
@@ -134,7 +134,7 @@ export function ScannerPage() {
 
       {/* Results */}
       {results !== null && (
-        <div className="bg-white rounded-lg shadow overflow-hidden">
+        <div className="bg-white rounded-lg shadow">
           <div className="px-5 py-3 border-b border-gray-100 flex items-center justify-between">
             <span className="font-semibold text-gray-700">
               {sorted.length > 0
@@ -147,7 +147,7 @@ export function ScannerPage() {
           </div>
 
           {sorted.length > 0 && (
-            <div className="overflow-x-auto">
+            <div className="overflow-x-auto rounded-b-lg">
               <table className="w-full text-sm">
                 <thead className="bg-gray-50 border-b border-gray-200">
                   <tr>
