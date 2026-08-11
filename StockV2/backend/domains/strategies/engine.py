@@ -1,6 +1,10 @@
+import importlib
+import inspect
 import json
 import logging
+import pkgutil
 from datetime import date
+from pathlib import Path
 
 import pandas as pd
 from sqlalchemy import text
@@ -9,31 +13,61 @@ from sqlalchemy.orm import Session
 from domains.data.indicators import IndicatorEngine
 from domains.strategies.aggregator import SignalAggregator
 from domains.strategies.base import BaseStrategy, Signal
-from domains.strategies.strategies.rsi_oversold import RSIOversoldStrategy
-from domains.strategies.strategies.macd_crossover import MACDCrossoverStrategy
-from domains.strategies.strategies.ema_crossover import EMACrossoverStrategy
-from domains.strategies.strategies.sma_crossover import SMACrossoverStrategy
-from domains.strategies.strategies.supertrend_strategy import SuperTrendStrategy
-from domains.strategies.strategies.bb_squeeze import BBSqueezeStrategy
-from domains.strategies.strategies.volume_breakout import VolumeBreakoutStrategy
-from domains.strategies.strategies.mean_reversion import MeanReversionStrategy
-from domains.strategies.strategies.volatility_breakout import VolatilityBreakoutStrategy
-from domains.strategies.strategies.swing_trend_rider import SwingTrendRiderStrategy
 
 logger = logging.getLogger(__name__)
 
-ALL_STRATEGIES: list[BaseStrategy] = [
-    RSIOversoldStrategy(),
-    MACDCrossoverStrategy(),
-    EMACrossoverStrategy(),
-    SMACrossoverStrategy(),
-    SuperTrendStrategy(),
-    BBSqueezeStrategy(),
-    VolumeBreakoutStrategy(),
-    MeanReversionStrategy(),
-    VolatilityBreakoutStrategy(),
-    SwingTrendRiderStrategy(),
-]
+
+def _discover_strategies() -> list[BaseStrategy]:
+    """Auto-discover every BaseStrategy subclass in the strategies/ sub-package.
+
+    To add a new strategy:
+      1. Drop a .py file into domains/strategies/strategies/
+         (copy _template.py as a starting point)
+      2. Define a class that inherits BaseStrategy and sets a unique `name`
+      3. Restart the backend — it is auto-imported, instantiated, added to
+         ALL_STRATEGIES, and seeded into the DB via seed_strategies()
+
+    Files starting with '_' (e.g. _template.py, __init__.py) are skipped.
+    """
+    found: dict[str, BaseStrategy] = {}
+    package_dir = Path(__file__).parent / "strategies"
+
+    for module_info in pkgutil.iter_modules([str(package_dir)]):
+        if module_info.name.startswith("_"):
+            continue
+        try:
+            module = importlib.import_module(
+                f"domains.strategies.strategies.{module_info.name}"
+            )
+        except Exception as e:
+            logger.warning("[discover_strategies] import failed — %s: %s", module_info.name, e)
+            continue
+
+        for _, cls in inspect.getmembers(module, inspect.isclass):
+            if (
+                cls.__module__ == module.__name__  # defined in this file, not just imported
+                and issubclass(cls, BaseStrategy)
+                and cls is not BaseStrategy
+                and getattr(cls, "name", "")       # name must be a non-empty string
+                and cls.name not in found          # deduplicate across files
+            ):
+                try:
+                    found[cls.name] = cls()
+                except Exception as e:
+                    logger.warning(
+                        "[discover_strategies] instantiation failed — %s: %s", cls.__name__, e
+                    )
+
+    strategies = sorted(found.values(), key=lambda s: s.name)
+    logger.info(
+        "[discover_strategies] %d strategies loaded: %s",
+        len(strategies),
+        [s.name for s in strategies],
+    )
+    return strategies
+
+
+ALL_STRATEGIES: list[BaseStrategy] = _discover_strategies()
 
 
 class StrategyEngine:
