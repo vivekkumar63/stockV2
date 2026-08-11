@@ -1,0 +1,29 @@
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# System deps for pandas / numpy / ta
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc g++ libffi-dev && \
+    rm -rf /var/lib/apt/lists/*
+
+# Install Poetry
+RUN pip install --no-cache-dir poetry==1.8.3
+
+# Copy dependency manifests first (layer cache)
+COPY backend/pyproject.toml backend/poetry.lock ./
+
+# Install only production deps, no virtualenv (container is the isolation)
+RUN poetry config virtualenvs.create false && \
+    poetry install --only main --no-interaction --no-ansi
+
+# Copy application code
+COPY backend/ .
+
+# Non-root user for security
+RUN useradd -m stockv2 && chown -R stockv2:stockv2 /app
+USER stockv2
+
+EXPOSE 8000
+
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]

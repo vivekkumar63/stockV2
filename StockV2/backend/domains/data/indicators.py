@@ -23,13 +23,16 @@ class IndicatorEngine:
         n = len(df)
 
         # ── Moving Averages ──────────────────────────────────────────
+        out["sma_5"]  = ta.trend.SMAIndicator(close, window=5).sma_indicator()  if n >= 5  else pd.Series(float("nan"), index=close.index)
+        out["sma_10"] = ta.trend.SMAIndicator(close, window=10).sma_indicator() if n >= 10 else pd.Series(float("nan"), index=close.index)
         out["sma_20"] = ta.trend.SMAIndicator(close, window=20).sma_indicator() if n >= 20 else pd.Series(float("nan"), index=close.index)
         out["sma_50"] = ta.trend.SMAIndicator(close, window=50).sma_indicator() if n >= 50 else pd.Series(float("nan"), index=close.index)
-        out["ema_9"] = ta.trend.EMAIndicator(close, window=9).ema_indicator() if n >= 9 else pd.Series(float("nan"), index=close.index)
+        out["ema_9"]  = ta.trend.EMAIndicator(close, window=9).ema_indicator()  if n >= 9  else pd.Series(float("nan"), index=close.index)
         out["ema_21"] = ta.trend.EMAIndicator(close, window=21).ema_indicator() if n >= 21 else pd.Series(float("nan"), index=close.index)
 
         # ── RSI ──────────────────────────────────────────────────────
         out["rsi_14"] = ta.momentum.RSIIndicator(close, window=14).rsi() if n >= 15 else pd.Series(float("nan"), index=close.index)
+        out["rsi_5"]  = ta.momentum.RSIIndicator(close, window=5).rsi()  if n >= 6  else pd.Series(float("nan"), index=close.index)
 
         # ── MACD (12, 26, 9) ────────────────────────────────────────
         if n >= 34:
@@ -62,6 +65,15 @@ class IndicatorEngine:
         # ── Rate of Change ───────────────────────────────────────────
         out["roc_10"] = ta.momentum.ROCIndicator(close, window=10).roc() if n >= 11 else pd.Series(float("nan"), index=close.index)
 
+        # ── Money Flow Index ─────────────────────────────────────────
+        out["mfi_14"] = ta.volume.MFIIndicator(high, low, close, volume, window=14).money_flow_index() if n >= 15 else pd.Series(float("nan"), index=close.index)
+
+        # ── CCI ──────────────────────────────────────────────────────
+        out["cci_20"] = ta.trend.CCIIndicator(high, low, close, window=20).cci() if n >= 20 else pd.Series(float("nan"), index=close.index)
+
+        # ── Williams %R ──────────────────────────────────────────────
+        out["williams_r"] = ta.momentum.WilliamsRIndicator(high, low, close, lbp=14).williams_r() if n >= 14 else pd.Series(float("nan"), index=close.index)
+
         # ── SuperTrend (7, 3.0) ──────────────────────────────────────
         if n >= 14:
             out["supertrend"], out["supertrend_direction"] = IndicatorEngine._supertrend(
@@ -69,6 +81,40 @@ class IndicatorEngine:
             )
         else:
             out["supertrend"] = out["supertrend_direction"] = pd.Series(float("nan"), index=close.index)
+
+        # ── Fast EMAs ────────────────────────────────────────────────
+        out["ema_5"] = ta.trend.EMAIndicator(close, window=5).ema_indicator() if n >= 5 else pd.Series(float("nan"), index=close.index)
+        out["ema_10"] = ta.trend.EMAIndicator(close, window=10).ema_indicator() if n >= 10 else pd.Series(float("nan"), index=close.index)
+
+        # ── On Balance Volume ────────────────────────────────────────
+        obv = (volume * close.diff().apply(lambda x: 1 if x > 0 else (-1 if x < 0 else 0))).cumsum()
+        out["obv"] = obv
+        out["obv_sma_10"] = ta.trend.SMAIndicator(obv, window=10).sma_indicator() if n >= 10 else pd.Series(float("nan"), index=close.index)
+
+        # ── Bollinger Band Width ─────────────────────────────────────
+        if n >= 20:
+            out["bb_width"] = (out["bb_upper"] - out["bb_lower"]) / out["bb_middle"].replace(0, float("nan"))
+            out["bb_width_sma_20"] = ta.trend.SMAIndicator(out["bb_width"], window=20).sma_indicator()
+        else:
+            out["bb_width"] = out["bb_width_sma_20"] = pd.Series(float("nan"), index=close.index)
+
+        # ── Gap (open vs prev close) ─────────────────────────────────
+        out["gap_pct"] = (out["open"] - close.shift(1)) / close.shift(1) * 100
+
+        # ── Stochastic (14, 3) ───────────────────────────────────────
+        if n >= 14:
+            stoch = ta.momentum.StochasticOscillator(high, low, close, window=14, smooth_window=3)
+            out["stoch_k"] = stoch.stoch()
+            out["stoch_d"] = stoch.stoch_signal()
+        else:
+            out["stoch_k"] = out["stoch_d"] = pd.Series(float("nan"), index=close.index)
+
+        # ── ATR ratio (ATR / close) — used for volatility squeeze detection ──
+        out["atr_ratio"] = out["atr_14"] / close.replace(0, float("nan")) * 100
+
+        # ── ATR & Volume 5-bar trend (positive = expanding/growing) ──
+        out["atr_5bar_change"] = out["atr_14"] - out["atr_14"].shift(5)
+        out["volume_sma_5bar_change"] = out["volume_sma_20"] - out["volume_sma_20"].shift(5)
 
         return out
 

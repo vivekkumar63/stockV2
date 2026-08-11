@@ -32,22 +32,25 @@ def db():
     session.close()
 
 
-def test_seed_inserts_10_strategies(db):
+def test_seed_inserts_strategies(db):
+    from domains.strategies.engine import ALL_STRATEGIES
     count = db.execute(text("SELECT COUNT(*) FROM strategies")).fetchone()[0]
-    assert count == 10
+    assert count == len(ALL_STRATEGIES)
 
 
 def test_seed_is_idempotent(db):
     from domains.strategies.seed import seed_strategies
+    from domains.strategies.engine import ALL_STRATEGIES
     seed_strategies(db)
     count = db.execute(text("SELECT COUNT(*) FROM strategies")).fetchone()[0]
-    assert count == 10
+    assert count == len(ALL_STRATEGIES)
 
 
-def test_get_all_strategies_returns_10(db):
+def test_get_all_strategies_returns_correct_count(db):
     from domains.strategies.service import StrategyService
+    from domains.strategies.engine import ALL_STRATEGIES
     strategies = StrategyService(db).get_all_strategies()
-    assert len(strategies) == 10
+    assert len(strategies) == len(ALL_STRATEGIES)
     assert all("name" in s for s in strategies)
 
 

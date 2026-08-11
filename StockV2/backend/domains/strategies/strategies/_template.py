@@ -16,6 +16,8 @@ Price / OHLCV
   date, open, high, low, close, volume
 
 Moving averages
+  sma_5           — Simple MA 5
+  sma_10          — Simple MA 10
   sma_20          — Simple MA 20
   sma_50          — Simple MA 50
   ema_9           — Exponential MA 9
@@ -23,6 +25,7 @@ Moving averages
 
 Momentum
   rsi_14          — RSI 14  (0–100)
+  rsi_5           — RSI 5   (0–100, faster — reacts quicker to short-term moves)
   roc_10          — Rate of Change 10  (%)
   macd            — MACD line  (12, 26)
   macd_signal     — Signal line  (9)
@@ -39,9 +42,40 @@ Volume
   volume_ratio    — volume / volume_sma_20  (>1 = above-average volume)
 
 Trend
-  adx_14          — ADX 14  (>25 = trending)
-  supertrend      — SuperTrend line  (7, 3.0)
-  supertrend_dir  — 1.0 = bullish, -1.0 = bearish
+  adx_14              — ADX 14  (>25 = trending)
+  supertrend          — SuperTrend line  (7, 3.0)
+  supertrend_direction — 1.0 = bullish, -1.0 = bearish
+
+Fast EMAs
+  ema_5           — Exponential MA 5
+  ema_10          — Exponential MA 10
+
+On Balance Volume
+  obv             — On Balance Volume (cumulative)
+  obv_sma_10      — OBV SMA 10 (obv > obv_sma_10 = rising trend)
+
+Bollinger Band Width
+  bb_width        — (bb_upper - bb_lower) / bb_middle  (low = squeeze)
+  bb_width_sma_20 — BB Width SMA 20 (bb_width < bb_width_sma_20 = squeezing)
+
+Gap
+  gap_pct         — (open - prev_close) / prev_close * 100  (% gap at open)
+
+Stochastic (14, 3)
+  stoch_k         — %K line  (0–100)
+  stoch_d         — %D signal line  (3-period SMA of %K)
+
+Volatility
+  atr_ratio           — atr_14 / close * 100  (% of price; < 1 = very tight)
+  atr_5bar_change     — atr_14 - atr_14.shift(5)  (positive = expanding volatility)
+
+Volume trend
+  volume_sma_5bar_change — volume_sma_20 - volume_sma_20.shift(5)  (positive = rising volume trend)
+
+Additional oscillators
+  mfi_14          — Money Flow Index 14  (0–100; < 20 oversold, > 80 overbought)
+  cci_20          — Commodity Channel Index 20  (extremes: ±100)
+  williams_r      — Williams %R 14  (-100–0; < -80 oversold, > -20 overbought)
 
 All columns may contain NaN for early rows (warm-up period).
 Always check pd.isna() before using a value.

@@ -45,11 +45,12 @@ def client():
     return TestClient(app, headers={"X-API-Key": settings.api_key})
 
 
-def test_get_strategies_returns_10(client):
+def test_get_strategies_returns_correct_count(client):
+    from domains.strategies.engine import ALL_STRATEGIES
     response = client.get("/api/v1/strategies")
     assert response.status_code == 200
     data = response.json()
-    assert len(data) == 10
+    assert len(data) == len(ALL_STRATEGIES)
 
 
 def test_get_signals_today_returns_list(client):

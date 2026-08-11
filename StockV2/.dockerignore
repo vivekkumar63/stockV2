@@ -1,0 +1,27 @@
+# Python
+backend/__pycache__/
+backend/**/__pycache__/
+backend/.venv/
+backend/*.pyc
+backend/.pytest_cache/
+backend/htmlcov/
+
+# Node
+frontend/node_modules/
+frontend/dist/
+
+# Dev / local
+**/.env
+!**/.env.example
+backend/stockv2.db
+data/
+
+# Git / docs
+.git/
+docs/
+*.md
+!SETUP.md
+
+# OS
+.DS_Store
+Thumbs.db

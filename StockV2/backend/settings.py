@@ -36,6 +36,7 @@ class Settings(BaseSettings):
     port: int = 8000
     db_path: str = "stockv2.db"
     data_dir: Path = Path("data")
+    cors_origins: list[str] = ["http://localhost:3000", "http://localhost"]
 
     model_config = {"env_file": ".env", "extra": "ignore"}
 
