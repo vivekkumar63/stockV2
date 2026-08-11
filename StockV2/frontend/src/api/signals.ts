@@ -16,6 +16,30 @@ export interface Signal {
   holding_period_days: number | null
 }
 
+export interface LiveScanRequest {
+  strategy_id?: number
+  signal_type?: 'BUY' | 'SELL'
+  limit?: number
+}
+
+export interface LiveScanResult {
+  symbol: string
+  strategy_id: number | null
+  strategy_name: string
+  signal_type: string
+  confidence: number
+  price: number
+  stop_loss_pct: number | null
+  target_pct: number | null
+  holding_days: number | null
+}
+
+export const runLiveScan = (req: LiveScanRequest) =>
+  apiFetch<LiveScanResult[]>('/signals/scan', {
+    method: 'POST',
+    body: JSON.stringify(req),
+  })
+
 export const getTodaySignals = () => apiFetch<Signal[]>('/signals/today')
 
 export const getSignals = (params?: {

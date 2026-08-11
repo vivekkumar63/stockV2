@@ -4,6 +4,7 @@ import { NavBar } from './components/NavBar'
 import { DashboardPage } from './pages/DashboardPage'
 import { PortfolioPage } from './pages/PortfolioPage'
 import { BacktestPage } from './pages/BacktestPage'
+import { ScannerPage } from './pages/ScannerPage'
 
 const queryClient = new QueryClient()
 
@@ -18,6 +19,7 @@ export function App() {
               <Route path="/" element={<DashboardPage />} />
               <Route path="/portfolio" element={<PortfolioPage />} />
               <Route path="/backtest" element={<BacktestPage />} />
+              <Route path="/scanner" element={<ScannerPage />} />
             </Routes>
           </main>
         </div>

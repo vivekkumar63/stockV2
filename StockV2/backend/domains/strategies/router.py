@@ -2,12 +2,20 @@ from datetime import date
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from database import get_db
 from domains.strategies.service import StrategyService
+from domains.strategies.scanner import LiveScanner
 
 router = APIRouter(tags=["strategies"])
+
+
+class LiveScanRequest(BaseModel):
+    strategy_id: Optional[int] = None
+    signal_type: Optional[str] = None  # "BUY", "SELL", or None for both
+    limit: int = 200
 
 
 @router.get("/strategies")
@@ -26,6 +34,16 @@ def get_signal(signal_id: int, db: Session = Depends(get_db)):
     if not signal:
         raise HTTPException(status_code=404, detail=f"Signal {signal_id} not found")
     return signal
+
+
+@router.post("/signals/scan")
+def live_scan(body: LiveScanRequest, db: Session = Depends(get_db)):
+    """Run strategies against all stocks in real-time and return active signals."""
+    return LiveScanner(db).scan(
+        strategy_id=body.strategy_id,
+        signal_type=body.signal_type,
+        limit=min(body.limit, 500),
+    )
 
 
 @router.get("/signals")

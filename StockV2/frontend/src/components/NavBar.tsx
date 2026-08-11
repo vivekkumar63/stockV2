@@ -9,6 +9,7 @@ export function NavBar() {
       <NavLink to="/" end className={link}>Dashboard</NavLink>
       <NavLink to="/portfolio" className={link}>Portfolio</NavLink>
       <NavLink to="/backtest" className={link}>Backtest</NavLink>
+      <NavLink to="/scanner" className={link}>Scanner</NavLink>
     </nav>
   )
 }
