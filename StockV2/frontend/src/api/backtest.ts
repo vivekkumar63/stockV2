@@ -13,6 +13,7 @@ export interface BacktestRunRequest {
 export interface BacktestResult {
   id?: number        // from GET /backtest/results
   result_id?: number // from POST /backtest/run response
+  strategy_id?: number
   symbol: string
   from_date: string
   to_date: string
