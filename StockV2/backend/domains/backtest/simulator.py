@@ -52,6 +52,8 @@ class BacktestSimulator:
         max_single_stock_pct: float = 20.0,
         use_aggregator: bool = True,
         _df_ind_precomputed: Optional[pd.DataFrame] = None,
+        stop_loss_pct_override: Optional[float] = None,
+        target_pct_override: Optional[float] = None,
     ) -> list[SimTrade]:
         cfg = SimpleNamespace(
             total_capital=initial_capital,
@@ -106,13 +108,19 @@ class BacktestSimulator:
                     consensus = aggregator.aggregate(pairs)
                     should_enter = consensus["signal_type"] == "BUY"
                     buy_sigs = [sig for _, sig in pairs if sig.signal_type == "BUY"]
-                    stop_pct = (sum(s.stop_loss_pct for s in buy_sigs) / len(buy_sigs)) if buy_sigs else 7.0
-                    tgt_pct = (sum(s.target_pct for s in buy_sigs) / len(buy_sigs)) if buy_sigs else 15.0
+                    stop_pct = stop_loss_pct_override if stop_loss_pct_override is not None else (
+                        (sum(s.stop_loss_pct for s in buy_sigs) / len(buy_sigs)) if buy_sigs else 7.0
+                    )
+                    tgt_pct = target_pct_override if target_pct_override is not None else (
+                        (sum(s.target_pct for s in buy_sigs) / len(buy_sigs)) if buy_sigs else 15.0
+                    )
                     h_days = int(sum(s.holding_days for s in buy_sigs) / len(buy_sigs)) if buy_sigs else 15
                 else:
                     sig = strategies[0].generate_signal(df_ind)
                     should_enter = sig.signal_type == "BUY"
-                    stop_pct, tgt_pct, h_days = sig.stop_loss_pct, sig.target_pct, sig.holding_days
+                    stop_pct = stop_loss_pct_override if stop_loss_pct_override is not None else sig.stop_loss_pct
+                    tgt_pct = target_pct_override if target_pct_override is not None else sig.target_pct
+                    h_days = sig.holding_days
 
                 if should_enter:
                     sl = round(current_price * (1 - stop_pct / 100), 2)

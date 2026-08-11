@@ -18,6 +18,8 @@ class BacktestRunRequest(BaseModel):
     to_date: date
     strategy_id: Optional[int] = None
     initial_capital: float = 500_000.0
+    stop_loss_pct: Optional[float] = None
+    target_pct: Optional[float] = None
 
     @model_validator(mode="after")
     def check_date_range(self):
@@ -34,6 +36,8 @@ def run_backtest(body: BacktestRunRequest, db: Session = Depends(get_db)):
         to_date=body.to_date,
         strategy_id=body.strategy_id,
         initial_capital=body.initial_capital,
+        stop_loss_pct=body.stop_loss_pct,
+        target_pct=body.target_pct,
     )
     if "error" in result:
         raise HTTPException(status_code=400, detail=result["error"])
@@ -46,6 +50,8 @@ class ScanRequest(BaseModel):
     strategy_ids: Optional[list[int]] = None
     initial_capital: float = 500_000.0
     limit: int = Field(default=200, le=500)
+    stop_loss_pct: Optional[float] = None
+    target_pct: Optional[float] = None
 
     @model_validator(mode="after")
     def check_date_range(self):
@@ -62,6 +68,8 @@ def scan_backtest(body: ScanRequest, db: Session = Depends(get_db)):
         strategy_ids=body.strategy_ids,
         initial_capital=body.initial_capital,
         limit=body.limit,
+        stop_loss_pct=body.stop_loss_pct,
+        target_pct=body.target_pct,
     )
     return results
 

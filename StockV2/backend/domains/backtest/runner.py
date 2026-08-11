@@ -14,6 +14,8 @@ from domains.strategies.engine import ALL_STRATEGIES
 
 logger = logging.getLogger(__name__)
 
+_SCAN_METRICS = ["total_trades", "win_rate", "cagr", "sharpe_ratio", "max_drawdown", "profit_factor", "total_pnl"]
+
 
 class BacktestRunner:
     def __init__(self, db: Session):
@@ -27,6 +29,8 @@ class BacktestRunner:
         to_date: date,
         strategy_id: Optional[int] = None,
         initial_capital: float = 500_000.0,
+        stop_loss_pct: Optional[float] = None,
+        target_pct: Optional[float] = None,
     ) -> dict:
         symbol = symbol.upper()
         # Fetch full history — no LIMIT because IndicatorEngine needs warmup bars
@@ -73,6 +77,8 @@ class BacktestRunner:
             strategies=strategies,
             use_aggregator=use_aggregator,
             initial_capital=initial_capital,
+            stop_loss_pct_override=stop_loss_pct,
+            target_pct_override=target_pct,
         )
 
         metrics = compute_metrics(trades, initial_capital, from_date, to_date)
@@ -95,7 +101,14 @@ class BacktestRunner:
         strategy_ids: Optional[list[int]] = None,
         initial_capital: float = 500_000.0,
         limit: int = 200,
+        stop_loss_pct: Optional[float] = None,
+        target_pct: Optional[float] = None,
     ) -> list[dict]:
+        # Sentinel -1.0 = "use the strategy's own default" in the cache key.
+        # Using a real float (not NULL) keeps the UNIQUE constraint deterministic.
+        sl_key = stop_loss_pct if stop_loss_pct is not None else -1.0
+        tgt_key = target_pct if target_pct is not None else -1.0
+
         if strategy_ids:
             placeholders = ",".join(str(int(i)) for i in strategy_ids)
             strats_rows = self.db.execute(
@@ -106,7 +119,7 @@ class BacktestRunner:
                 text("SELECT id, name FROM strategies WHERE is_active = 1")
             ).fetchall()
 
-        strats_to_run = []
+        strats_to_run: list[tuple[int, str, object]] = []
         for sid, sname in strats_rows:
             instances = [s for s in ALL_STRATEGIES if s.name == sname]
             if instances:
@@ -114,6 +127,8 @@ class BacktestRunner:
 
         if not strats_to_run:
             return []
+
+        strat_ids_set = {sid for sid, _, _ in strats_to_run}
 
         symbols = [
             r[0] for r in self.db.execute(
@@ -126,9 +141,40 @@ class BacktestRunner:
                 {"fd": str(from_date), "td": str(to_date), "lim": limit},
             ).fetchall()
         ]
+        if not symbols:
+            return []
 
-        results = []
-        for symbol in symbols:
+        symbols_set = set(symbols)
+
+        # Bulk cache lookup — single query for the entire (date_range, capital, sl, tgt) set
+        cached_rows = self.db.execute(
+            text("""
+                SELECT symbol, strategy_id, total_trades, win_rate, cagr,
+                       sharpe_ratio, max_drawdown, profit_factor, total_pnl
+                FROM scan_result_cache
+                WHERE from_date = :fd AND to_date = :td
+                  AND initial_capital = :cap
+                  AND stop_loss_pct = :sl AND target_pct = :tgt
+            """),
+            {"fd": str(from_date), "td": str(to_date),
+             "cap": initial_capital, "sl": sl_key, "tgt": tgt_key},
+        ).fetchall()
+
+        cached_map: dict[tuple[str, int], dict] = {
+            (r[0], r[1]): dict(zip(_SCAN_METRICS, r[2:]))
+            for r in cached_rows
+            if r[0] in symbols_set and r[1] in strat_ids_set
+        }
+
+        # Only load prices for symbols that still need at least one strategy computed
+        symbols_needing_compute = [
+            sym for sym in symbols
+            if any((sym, sid) not in cached_map for sid, _, _ in strats_to_run)
+        ]
+
+        computed_map: dict[tuple[str, int], dict] = {}
+
+        for symbol in symbols_needing_compute:
             rows = self.db.execute(
                 text("SELECT date, open, high, low, close, volume FROM stock_prices_daily WHERE symbol = :sym ORDER BY date ASC"),
                 {"sym": symbol},
@@ -138,11 +184,12 @@ class BacktestRunner:
 
             df = pd.DataFrame([dict(r._mapping) for r in rows])
             df["date"] = pd.to_datetime(df["date"]).dt.date
-
-            # Compute indicators once; reuse across all strategies for this stock
             df_ind = IndicatorEngine.compute(df)
 
+            new_entries: list[tuple[str, int, dict]] = []
             for sid, sname, strat in strats_to_run:
+                if (symbol, sid) in cached_map:
+                    continue
                 try:
                     trades = self.simulator.run(
                         symbol=symbol,
@@ -153,25 +200,56 @@ class BacktestRunner:
                         use_aggregator=False,
                         initial_capital=initial_capital,
                         _df_ind_precomputed=df_ind,
+                        stop_loss_pct_override=stop_loss_pct,
+                        target_pct_override=target_pct,
                     )
                     m = compute_metrics(trades, initial_capital, from_date, to_date)
-                    results.append({
-                        "symbol": symbol,
-                        "strategy_id": sid,
-                        "strategy_name": sname,
-                        "total_trades": m["total_trades"],
-                        "win_rate": m["win_rate"],
-                        "cagr": m["cagr"],
-                        "sharpe_ratio": m["sharpe_ratio"],
-                        "max_drawdown": m["max_drawdown"],
-                        "profit_factor": m["profit_factor"],
-                        "total_pnl": m["total_pnl"],
-                    })
+                    computed_map[(symbol, sid)] = m
+                    new_entries.append((symbol, sid, m))
                 except Exception as e:
                     logger.warning("[scan] %s/%s: %s", symbol, sname, e)
 
-        logger.info("[scan_all] %s→%s: %d results across %d symbols × %d strategies",
-                    from_date, to_date, len(results), len(symbols), len(strats_to_run))
+            # Batch-persist cache entries for this symbol
+            for sym, sid, m in new_entries:
+                self.db.execute(
+                    text("""
+                        INSERT OR REPLACE INTO scan_result_cache
+                            (symbol, strategy_id, from_date, to_date, initial_capital,
+                             stop_loss_pct, target_pct, total_trades, win_rate, cagr,
+                             sharpe_ratio, max_drawdown, profit_factor, total_pnl, cached_at)
+                        VALUES (:sym, :sid, :fd, :td, :cap, :sl, :tgt,
+                                :tt, :wr, :cagr, :sharpe, :dd, :pf, :tpnl, datetime('now'))
+                    """),
+                    {
+                        "sym": sym, "sid": sid,
+                        "fd": str(from_date), "td": str(to_date),
+                        "cap": initial_capital, "sl": sl_key, "tgt": tgt_key,
+                        "tt": m["total_trades"], "wr": m["win_rate"], "cagr": m["cagr"],
+                        "sharpe": m["sharpe_ratio"], "dd": m["max_drawdown"],
+                        "pf": m["profit_factor"], "tpnl": m["total_pnl"],
+                    },
+                )
+            if new_entries:
+                self.db.commit()
+
+        n_cached = sum(1 for sym in symbols for sid, _, _ in strats_to_run if (sym, sid) in cached_map)
+        logger.info("[scan_all] %s→%s: %d cached hits, %d computed, sl=%s tgt=%s",
+                    from_date, to_date, n_cached, len(computed_map), sl_key, tgt_key)
+
+        # Assemble final results preserving symbols order
+        results = []
+        for symbol in symbols:
+            for sid, sname, _ in strats_to_run:
+                m = cached_map.get((symbol, sid)) or computed_map.get((symbol, sid))
+                if m is None:
+                    continue
+                results.append({
+                    "symbol": symbol,
+                    "strategy_id": sid,
+                    "strategy_name": sname,
+                    **{k: m[k] for k in _SCAN_METRICS},
+                })
+
         return results
 
     def _save_result(

@@ -6,6 +6,8 @@ export interface BacktestRunRequest {
   to_date: string
   strategy_id?: number
   initial_capital?: number
+  stop_loss_pct?: number
+  target_pct?: number
 }
 
 export interface BacktestResult {
@@ -45,6 +47,8 @@ export interface ScanRequest {
   strategy_ids?: number[]
   initial_capital?: number
   limit?: number
+  stop_loss_pct?: number
+  target_pct?: number
 }
 
 export interface ScanResult {

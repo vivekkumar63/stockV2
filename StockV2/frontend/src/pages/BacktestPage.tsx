@@ -38,6 +38,8 @@ export function BacktestPage() {
     to_date: TODAY,
     strategy_id: '' as string,
     initial_capital: '500000',
+    stop_loss_pct: '',
+    target_pct: '',
   })
   const [selectedId, setSelectedId] = useState<number | null>(null)
   const [symbolSearch, setSymbolSearch] = useState('')
@@ -90,6 +92,8 @@ export function BacktestPage() {
       from_date: form.from_date,
       to_date: form.to_date,
       initial_capital: Number(form.initial_capital) || 500000,
+      stop_loss_pct: form.stop_loss_pct ? Number(form.stop_loss_pct) : undefined,
+      target_pct: form.target_pct ? Number(form.target_pct) : undefined,
     })
   }
 
@@ -122,6 +126,8 @@ export function BacktestPage() {
       to_date: form.to_date,
       strategy_id: form.strategy_id ? Number(form.strategy_id) : undefined,
       initial_capital: Number(form.initial_capital) || 500000,
+      stop_loss_pct: form.stop_loss_pct ? Number(form.stop_loss_pct) : undefined,
+      target_pct: form.target_pct ? Number(form.target_pct) : undefined,
     })
   }
 
@@ -221,6 +227,36 @@ export function BacktestPage() {
             />
           </div>
 
+          {/* Stop loss override */}
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">Stop Loss %</label>
+            <input
+              type="number"
+              min="0.5"
+              max="50"
+              step="0.5"
+              placeholder="auto"
+              className="border border-gray-300 rounded px-3 py-1.5 text-sm w-24"
+              value={form.stop_loss_pct}
+              onChange={(e) => setForm((f) => ({ ...f, stop_loss_pct: e.target.value }))}
+            />
+          </div>
+
+          {/* Target override */}
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">Target %</label>
+            <input
+              type="number"
+              min="1"
+              max="200"
+              step="1"
+              placeholder="auto"
+              className="border border-gray-300 rounded px-3 py-1.5 text-sm w-24"
+              value={form.target_pct}
+              onChange={(e) => setForm((f) => ({ ...f, target_pct: e.target.value }))}
+            />
+          </div>
+
           <button
             type="submit"
             disabled={runMut.isPending || !form.symbol}
@@ -268,7 +304,7 @@ export function BacktestPage() {
           </p>
         )}
         {scanMut.isPending && (
-          <p className="text-emerald-600 text-sm animate-pulse">Scanning all stocks — this may take 20–60 s…</p>
+          <p className="text-emerald-600 text-sm animate-pulse">Scanning all stocks — first run may take 20–60 s, repeat runs hit cache instantly…</p>
         )}
         {scanMut.isError && (
           <p className="text-red-600 text-sm">{String(scanMut.error)}</p>

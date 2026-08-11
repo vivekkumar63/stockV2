@@ -150,6 +150,41 @@ class StrategySignal(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
+class ScanResultCache(Base):
+    """Cache for scan_all() results keyed by (symbol, strategy, date_range, capital, sl, target).
+
+    stop_loss_pct / target_pct = -1.0 means "strategy's own default was used".
+    UNIQUE constraint prevents duplicate entries; INSERT OR REPLACE refreshes stale ones.
+    """
+    __tablename__ = "scan_result_cache"
+    __table_args__ = (
+        UniqueConstraint(
+            "symbol", "strategy_id", "from_date", "to_date",
+            "initial_capital", "stop_loss_pct", "target_pct",
+            name="uq_scan_cache_key",
+        ),
+        Index("idx_scan_cache_lookup", "from_date", "to_date", "initial_capital",
+              "stop_loss_pct", "target_pct"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    symbol: Mapped[str] = mapped_column(String(20), nullable=False)
+    strategy_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    from_date: Mapped[date] = mapped_column(Date, nullable=False)
+    to_date: Mapped[date] = mapped_column(Date, nullable=False)
+    initial_capital: Mapped[float] = mapped_column(Float, nullable=False)
+    stop_loss_pct: Mapped[float] = mapped_column(Float, nullable=False, default=-1.0)
+    target_pct: Mapped[float] = mapped_column(Float, nullable=False, default=-1.0)
+    total_trades: Mapped[int] = mapped_column(Integer, default=0)
+    win_rate: Mapped[Optional[float]] = mapped_column(Float)
+    cagr: Mapped[Optional[float]] = mapped_column(Float)
+    sharpe_ratio: Mapped[Optional[float]] = mapped_column(Float)
+    max_drawdown: Mapped[Optional[float]] = mapped_column(Float)
+    profit_factor: Mapped[Optional[float]] = mapped_column(Float)
+    total_pnl: Mapped[float] = mapped_column(Float, default=0.0)
+    cached_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
 class BacktestResult(Base):
     __tablename__ = "backtest_results"
 
