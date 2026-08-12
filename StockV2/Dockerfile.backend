@@ -2,9 +2,9 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# System deps for pandas / numpy / ta
+# System deps for pandas / numpy / ta + tzdata for correct IST scheduling
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    gcc g++ libffi-dev && \
+    gcc g++ libffi-dev tzdata && \
     rm -rf /var/lib/apt/lists/*
 
 # Install Poetry

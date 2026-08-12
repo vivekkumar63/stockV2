@@ -1,3 +1,4 @@
+import json
 import logging
 from datetime import date
 from typing import Optional
@@ -40,14 +41,42 @@ class AlertService:
         today = scan_date or date.today()
         lines = [
             f"<b>📊 StockV2 Daily Digest — {today.strftime('%d %b %Y')}</b>",
-            "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
         ]
-        if top_signals:
-            lines.append(f"\n<b>TOP BUY SIGNALS TODAY ({len(top_signals)}):</b>")
-            for sig in top_signals[:10]:
-                pct = int((sig.get("confidence_score") or 0) * 100)
-                strategy = sig.get("strategy_name", "")
-                lines.append(f"  🟢 <b>{sig['symbol']}</b> — {pct}% confidence ({strategy})")
-        else:
-            lines.append("\nNo high-confidence signals today.")
+        if not top_signals:
+            lines.append("\nNo high-confidence BUY signals today.")
+            return self.send("\n".join(lines))
+
+        lines.append(f"\n<b>TOP BUY SIGNALS ({len(top_signals)}):</b>")
+        for sig in top_signals[:10]:
+            conf = int((sig.get("confidence_score") or 0) * 100)
+            price = sig.get("price_at_signal")
+            sl = sig.get("suggested_stop_loss")
+            tgt = sig.get("suggested_target")
+            upside = sig.get("expected_upside_pct")
+            hold = sig.get("holding_period_days")
+            strategy = sig.get("strategy_name", "")
+
+            # Format prices
+            price_str = f"₹{price:,.0f}" if price else "—"
+            sl_str = f"₹{sl:,.0f}" if sl else "—"
+            tgt_str = f"₹{tgt:,.0f}" if tgt else "—"
+
+            # Parse reasoning
+            conditions: list[str] = []
+            try:
+                reasoning = json.loads(sig.get("reasoning_json") or "{}")
+                conditions = reasoning.get("conditions_met", [])
+            except Exception:
+                pass
+            why = " | ".join(conditions[:3]) if conditions else strategy
+
+            lines.append(
+                f"\n🟢 <b>{sig['symbol']}</b> — {conf}% confidence\n"
+                f"   📌 {strategy}\n"
+                f"   💰 Price: {price_str}  |  SL: {sl_str}  |  Target: {tgt_str}\n"
+                + (f"   📈 Upside: {upside:.1f}%  |  Hold: {hold}d\n" if upside and hold else "")
+                + f"   💡 <i>{why}</i>"
+            )
+
         return self.send("\n".join(lines))
