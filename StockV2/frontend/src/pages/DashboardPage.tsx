@@ -4,6 +4,8 @@ import { enterPosition, getPortfolioSummary } from '../api/portfolio'
 import { getTodaySignals, type Signal } from '../api/signals'
 import { inr } from '../utils/format'
 
+const SIGNALS_POLL_MS = 3 * 60 * 1000 // re-fetch every 3 minutes
+
 export function DashboardPage() {
   const queryClient = useQueryClient()
 
@@ -12,9 +14,17 @@ export function DashboardPage() {
     queryFn: getPortfolioSummary,
   })
 
-  const { data: signals = [], isLoading: loadingSignals, isError: signalsError } = useQuery({
+  const {
+    data: signals = [],
+    isLoading: loadingSignals,
+    isError: signalsError,
+    isFetching: fetchingSignals,
+    dataUpdatedAt,
+  } = useQuery({
     queryKey: ['signals', 'today'],
     queryFn: getTodaySignals,
+    refetchInterval: SIGNALS_POLL_MS,
+    refetchIntervalInBackground: false,
   })
 
   const enterMut = useMutation({
@@ -48,26 +58,43 @@ export function DashboardPage() {
 
       {/* Today's BUY signals */}
       <section>
-        <div className="flex items-baseline gap-3 mb-3">
-          <h2 className="text-lg font-semibold text-gray-700">BUY Signals</h2>
-          {!loadingSignals && buySignals.length > 0 && (() => {
-            const d = buySignals[0].signal_date
-            const today = new Date().toISOString().slice(0, 10)
-            return d !== today ? (
-              <span className="text-xs text-amber-600 font-medium">
-                from {d} — next scan at 4pm IST
+        <div className="flex items-center justify-between mb-3">
+          <div className="flex items-baseline gap-3">
+            <h2 className="text-lg font-semibold text-gray-700">BUY Signals</h2>
+            {!loadingSignals && buySignals.length > 0 && (() => {
+              const d = buySignals[0].signal_date
+              const today = new Date().toISOString().slice(0, 10)
+              return d !== today ? (
+                <span className="text-xs text-amber-600 font-medium">
+                  from {d} — scans at 9:00, 9:15, 12:00, 15:00 IST
+                </span>
+              ) : (
+                <span className="text-xs text-gray-400">today</span>
+              )
+            })()}
+          </div>
+          <div className="flex items-center gap-2">
+            {dataUpdatedAt > 0 && (
+              <span className="text-xs text-gray-400">
+                updated {new Date(dataUpdatedAt).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}
               </span>
-            ) : (
-              <span className="text-xs text-gray-400">today</span>
-            )
-          })()}
+            )}
+            <button
+              onClick={() => queryClient.invalidateQueries({ queryKey: ['signals', 'today'] })}
+              disabled={fetchingSignals}
+              className="text-xs px-2 py-1 rounded border border-gray-300 text-gray-500 hover:text-gray-700 hover:border-gray-400 disabled:opacity-40"
+              title="Refresh signals"
+            >
+              {fetchingSignals ? '↻ …' : '↻ Refresh'}
+            </button>
+          </div>
         </div>
         {loadingSignals ? (
           <p className="text-gray-400">Loading…</p>
         ) : signalsError ? (
           <p className="text-red-600 text-sm">Failed to load signals.</p>
         ) : buySignals.length === 0 ? (
-          <p className="text-gray-500 py-4">No BUY signals yet — first scan runs at 4pm IST on trading days.</p>
+          <p className="text-gray-500 py-4">No BUY signals yet — scans run at 9:00, 9:15, 12:00, 15:00 IST on trading days.</p>
         ) : (
           <div className="overflow-x-auto rounded-lg border border-gray-200">
             <table className="w-full text-sm">
