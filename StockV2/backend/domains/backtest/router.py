@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field, model_validator
 from sqlalchemy.orm import Session
 
 from database import get_db
+from sqlalchemy import text
 from domains.backtest.runner import BacktestRunner
 from domains.backtest.service import BacktestService
 
@@ -72,6 +73,45 @@ def scan_backtest(body: ScanRequest, db: Session = Depends(get_db)):
         target_pct=body.target_pct,
     )
     return results
+
+
+@router.get("/backtest/scan/status")
+def scan_precompute_status(db: Session = Depends(get_db)):
+    """Returns how many strategies have been precomputed vs total."""
+    total = db.execute(
+        text("SELECT COUNT(*) FROM strategies WHERE is_active = 1")
+    ).fetchone()[0]
+    computed = db.execute(
+        text("SELECT COUNT(DISTINCT strategy_id) FROM strategy_performance")
+    ).fetchone()[0]
+    return {"total": total, "computed": computed, "pending": total - computed, "ready": computed >= total}
+
+
+@router.get("/backtest/scan/results")
+def precomputed_scan_results(
+    strategy_id: Optional[int] = Query(None),
+    min_trades: int = Query(0, ge=0),
+    db: Session = Depends(get_db),
+):
+    """Return permanently precomputed backtest results — instant, no recomputation."""
+    q = """
+        SELECT sp.symbol, sp.strategy_id, s.name AS strategy_name,
+               sp.total_trades, sp.win_rate, sp.cagr, sp.sharpe_ratio,
+               sp.max_drawdown, sp.profit_factor, sp.total_pnl
+        FROM strategy_performance sp
+        JOIN strategies s ON sp.strategy_id = s.id
+        WHERE 1=1
+    """
+    params: dict = {}
+    if strategy_id is not None:
+        q += " AND sp.strategy_id = :sid"
+        params["sid"] = strategy_id
+    if min_trades > 0:
+        q += " AND sp.total_trades >= :mt"
+        params["mt"] = min_trades
+    q += " ORDER BY sp.cagr DESC"
+    rows = db.execute(text(q), params).fetchall()
+    return [dict(r._mapping) for r in rows]
 
 
 @router.get("/backtest/results")

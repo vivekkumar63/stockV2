@@ -88,3 +88,18 @@ export const runScan = (req: ScanRequest) =>
     method: 'POST',
     body: JSON.stringify(req),
   })
+
+export interface ScanStatus {
+  total: number
+  computed: number
+  pending: number
+  ready: boolean
+}
+
+export const getScanStatus = () => apiFetch<ScanStatus>('/backtest/scan/status')
+
+export const getPrecomputedScan = (strategyId?: number, minTrades = 0) => {
+  const q = new URLSearchParams({ min_trades: String(minTrades) })
+  if (strategyId != null) q.set('strategy_id', String(strategyId))
+  return apiFetch<ScanResult[]>(`/backtest/scan/results?${q.toString()}`)
+}

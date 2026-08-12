@@ -1,11 +1,13 @@
 import logging
+import threading
 from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI, HTTPException, Security, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security.api_key import APIKeyHeader
+from sqlalchemy import text
 
-from database import Base, engine
+from database import Base, engine, SessionLocal
 from settings import settings
 import models  # noqa
 
@@ -21,17 +23,55 @@ def verify_api_key(key: str = Security(API_KEY_HEADER)) -> str:
     return key
 
 
+def _precompute_strategies(strategy_ids: list[int]) -> None:
+    """Background thread: compute backtest results for strategies that have none yet."""
+    from domains.backtest.runner import BacktestRunner
+    logger.info("[precompute] starting for %d strategies", len(strategy_ids))
+    for sid in strategy_ids:
+        db = SessionLocal()
+        try:
+            count = BacktestRunner(db).precompute_all_for_strategy(sid)
+            logger.info("[precompute] strategy id=%d: %d symbols done", sid, count)
+        except Exception:
+            logger.exception("[precompute] strategy id=%d failed", sid)
+        finally:
+            db.close()
+    logger.info("[precompute] all strategies done")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     Base.metadata.create_all(bind=engine)
     logger.info("Database tables verified")
+
     from domains.strategies.seed import seed_strategies
-    from database import SessionLocal
     db = SessionLocal()
     try:
         seed_strategies(db)
     finally:
         db.close()
+
+    # Find strategies that have never been precomputed (no rows in strategy_performance)
+    db2 = SessionLocal()
+    try:
+        rows = db2.execute(text("""
+            SELECT id FROM strategies
+            WHERE is_active = 1
+            AND id NOT IN (SELECT DISTINCT strategy_id FROM strategy_performance)
+        """)).fetchall()
+        uncomputed_ids = [r[0] for r in rows]
+    finally:
+        db2.close()
+
+    if uncomputed_ids:
+        logger.info("[precompute] %d strategies need precomputation — running in background", len(uncomputed_ids))
+        threading.Thread(
+            target=_precompute_strategies,
+            args=(uncomputed_ids,),
+            daemon=True,
+            name="strategy-precompute",
+        ).start()
+
     from scheduler import scheduler, register_jobs
     register_jobs()
     scheduler.start()

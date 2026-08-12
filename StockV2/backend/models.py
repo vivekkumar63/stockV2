@@ -150,6 +150,30 @@ class StrategySignal(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
+class StrategyPerformance(Base):
+    """Permanent precomputed backtest results for every (strategy, stock) pair.
+    Computed once from all available price history. Recomputed only when a
+    new strategy is added (detected at startup by absence of rows for that strategy_id).
+    """
+    __tablename__ = "strategy_performance"
+    __table_args__ = (
+        UniqueConstraint("strategy_id", "symbol", name="uq_strat_perf"),
+        Index("idx_strat_perf_strategy", "strategy_id"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    strategy_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    symbol: Mapped[str] = mapped_column(String(20), nullable=False)
+    total_trades: Mapped[int] = mapped_column(Integer, default=0)
+    win_rate: Mapped[Optional[float]] = mapped_column(Float)
+    cagr: Mapped[Optional[float]] = mapped_column(Float)
+    sharpe_ratio: Mapped[Optional[float]] = mapped_column(Float)
+    max_drawdown: Mapped[Optional[float]] = mapped_column(Float)
+    profit_factor: Mapped[Optional[float]] = mapped_column(Float)
+    total_pnl: Mapped[float] = mapped_column(Float, default=0.0)
+    computed_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
 class ScanResultCache(Base):
     """Cache for scan_all() results keyed by (symbol, strategy, date_range, capital, sl, target).
 

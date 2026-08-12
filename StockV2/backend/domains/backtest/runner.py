@@ -252,6 +252,76 @@ class BacktestRunner:
 
         return results
 
+    def precompute_all_for_strategy(self, strategy_id: int) -> int:
+        """Run backtest for every stock using its full price history and persist
+        results to strategy_performance. Called once per strategy at startup."""
+        row = self.db.execute(
+            text("SELECT name FROM strategies WHERE id = :id"), {"id": strategy_id}
+        ).fetchone()
+        if not row:
+            return 0
+        strat = next((s for s in ALL_STRATEGIES if s.name == row[0]), None)
+        if not strat:
+            logger.warning("[precompute] strategy '%s' not in ALL_STRATEGIES", row[0])
+            return 0
+
+        symbols = [
+            r[0] for r in self.db.execute(
+                text("SELECT DISTINCT symbol FROM stock_prices_daily ORDER BY symbol")
+            ).fetchall()
+        ]
+
+        count = 0
+        for symbol in symbols:
+            rows = self.db.execute(
+                text("""
+                    SELECT date, open, high, low, close, volume
+                    FROM stock_prices_daily WHERE symbol = :s ORDER BY date ASC
+                """),
+                {"s": symbol},
+            ).fetchall()
+            if len(rows) < 50:
+                continue
+
+            df = pd.DataFrame([dict(r._mapping) for r in rows])
+            df["date"] = pd.to_datetime(df["date"]).dt.date
+            from_date = df["date"].min()
+            to_date = df["date"].max()
+
+            try:
+                trades = self.simulator.run(
+                    symbol=symbol, prices_df=df,
+                    from_date=from_date, to_date=to_date,
+                    strategies=[strat], use_aggregator=False,
+                    initial_capital=500_000.0,
+                )
+                m = compute_metrics(trades, 500_000.0, from_date, to_date)
+                self.db.execute(
+                    text("""
+                        INSERT OR REPLACE INTO strategy_performance
+                            (strategy_id, symbol, total_trades, win_rate, cagr,
+                             sharpe_ratio, max_drawdown, profit_factor, total_pnl, computed_at)
+                        VALUES (:sid, :sym, :tt, :wr, :cagr, :sharpe, :dd, :pf, :tpnl, datetime('now'))
+                    """),
+                    {
+                        "sid": strategy_id, "sym": symbol,
+                        "tt": m["total_trades"], "wr": m["win_rate"],
+                        "cagr": m["cagr"], "sharpe": m["sharpe_ratio"],
+                        "dd": m["max_drawdown"], "pf": m["profit_factor"],
+                        "tpnl": m["total_pnl"],
+                    },
+                )
+                count += 1
+                if count % 50 == 0:
+                    self.db.commit()
+                    logger.info("[precompute] %s: %d/%d symbols done", row[0], count, len(symbols))
+            except Exception as e:
+                logger.warning("[precompute] %s/%s: %s", row[0], symbol, e)
+
+        self.db.commit()
+        logger.info("[precompute] %s complete: %d symbols", row[0], count)
+        return count
+
     def _save_result(
         self, symbol: str, from_date: date, to_date: date,
         strategy_id: Optional[int], metrics: dict, trades: list[SimTrade],

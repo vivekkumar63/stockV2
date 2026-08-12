@@ -1,7 +1,8 @@
 import { useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
-  getBacktestTrades, listBacktestResults, runBacktest, runScan,
+  getBacktestTrades, listBacktestResults, runBacktest,
+  getPrecomputedScan, getScanStatus,
   type BacktestResult, type BacktestTrade, type ScanResult,
 } from '../api/backtest'
 import { getStrategies, getStockList } from '../api/strategies'
@@ -79,22 +80,26 @@ export function BacktestPage() {
   const [scanHideZero, setScanHideZero] = useState(true)
   const [scanSort, setScanSort] = useState<keyof ScanResult>('cagr')
   const [scanDir, setScanDir] = useState<'asc' | 'desc'>('desc')
+  const [scanLoading, setScanLoading] = useState(false)
 
-  const scanMut = useMutation({
-    mutationFn: runScan,
-    onSuccess: (data) => setScanResults(data),
-    onError: (err) => console.error('Scan failed:', err),
+  const { data: scanStatus } = useQuery({
+    queryKey: ['backtest', 'scan', 'status'],
+    queryFn: getScanStatus,
+    refetchInterval: (query) => {
+      const data = query.state.data
+      return data && !data.ready ? 5000 : false
+    },
   })
 
-  const handleScan = () => {
-    setScanResults(null)
-    scanMut.mutate({
-      from_date: form.from_date,
-      to_date: form.to_date,
-      initial_capital: Number(form.initial_capital) || 500000,
-      stop_loss_pct: form.stop_loss_pct ? Number(form.stop_loss_pct) : undefined,
-      target_pct: form.target_pct ? Number(form.target_pct) : undefined,
-    })
+  const handleScan = async () => {
+    setScanLoading(true)
+    try {
+      const stratId = form.strategy_id ? Number(form.strategy_id) : undefined
+      const data = await getPrecomputedScan(stratId)
+      setScanResults(data)
+    } finally {
+      setScanLoading(false)
+    }
   }
 
   const toggleScanSort = (key: keyof ScanResult) => {
@@ -268,10 +273,10 @@ export function BacktestPage() {
           <button
             type="button"
             onClick={handleScan}
-            disabled={scanMut.isPending}
+            disabled={scanLoading}
             className="px-4 py-1.5 bg-emerald-600 text-white text-sm rounded hover:bg-emerald-700 disabled:opacity-50"
           >
-            {scanMut.isPending ? 'Scanning…' : 'Scan All Stocks'}
+            {scanLoading ? 'Loading…' : 'Scan All Stocks'}
           </button>
         </div>
 
@@ -303,11 +308,16 @@ export function BacktestPage() {
             Done — {runMut.data.total_trades} trades · CAGR {runMut.data.cagr?.toFixed(2)}% · Sharpe {runMut.data.sharpe_ratio?.toFixed(2) ?? '—'}
           </p>
         )}
-        {scanMut.isPending && (
-          <p className="text-emerald-600 text-sm animate-pulse">Scanning all stocks — first run may take 20–60 s, repeat runs hit cache instantly…</p>
+        {scanStatus && !scanStatus.ready && (
+          <p className="text-amber-600 text-sm animate-pulse">
+            Precomputing backtests in background — {scanStatus.computed}/{scanStatus.total} strategies done.
+            Results available now for completed strategies; check back in a few minutes for full results.
+          </p>
         )}
-        {scanMut.isError && (
-          <p className="text-red-600 text-sm">{String(scanMut.error)}</p>
+        {scanStatus?.ready && (
+          <p className="text-emerald-600 text-sm">
+            All {scanStatus.total} strategies precomputed — Scan All Stocks returns instantly.
+          </p>
         )}
       </form>
 
