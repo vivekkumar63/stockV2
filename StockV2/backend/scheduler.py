@@ -11,7 +11,6 @@ class JobIds:
     INTRADAY_SCAN = "intraday_scan"
     WEEKLY_FUNDAMENTALS = "weekly_fundamentals"
     MONTHLY_ML_RETRAIN = "monthly_ml_retrain"
-    DAILY_DIGEST = "daily_digest"
     DIGEST_900 = "digest_0900"
     DIGEST_915 = "digest_0915"
     DIGEST_1200 = "digest_1200"
@@ -166,21 +165,29 @@ def _weekly_precompute():
     logger.info("[precompute] done")
 
 
-def _daily_digest():
+def _intraday_digest():
+    """Run a fresh strategy scan then immediately send top BUY signals to Telegram."""
     from datetime import date
     from database import SessionLocal
+    from domains.strategies.engine import StrategyEngine
+    from domains.data.nse_universe import NSE_SYMBOLS
     from domains.strategies.service import StrategyService
     from domains.alerts.telegram import AlertService
+
     db = SessionLocal()
     try:
+        engine = StrategyEngine(db)
+        scan_count = len(engine.scan_all(NSE_SYMBOLS, date.today()))
+        logger.info("[scheduler] intraday_digest scan: %d signals generated", scan_count)
+
         today_str = date.today().strftime("%Y-%m-%d")
         signals = StrategyService(db).get_today_signals(signal_date=today_str)
         buy_signals = [s for s in signals if s["signal_type"] == "BUY"]
         top_10 = sorted(buy_signals, key=lambda x: x.get("confidence_score") or 0, reverse=True)[:10]
         AlertService().send_daily_digest(top_10, scan_date=date.today())
-        logger.info("[scheduler] daily_digest sent: %d buy signals today", len(top_10))
+        logger.info("[scheduler] intraday_digest sent: %d buy signals", len(top_10))
     except Exception:
-        logger.exception("[scheduler] daily_digest failed")
+        logger.exception("[scheduler] intraday_digest failed")
     finally:
         db.close()
 
@@ -224,7 +231,7 @@ def register_jobs():
         (JobIds.DIGEST_1500, 15,  0),
     ]:
         scheduler.add_job(
-            _daily_digest,
+            _intraday_digest,
             CronTrigger(hour=hour, minute=minute, day_of_week="mon-fri"),
             id=job_id,
             replace_existing=True,
