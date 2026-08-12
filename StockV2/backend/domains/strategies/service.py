@@ -16,7 +16,18 @@ class StrategyService:
         return [dict(r._mapping) for r in rows]
 
     def get_today_signals(self, signal_date: Optional[str] = None) -> list[dict]:
+        """Return signals for the requested date. If none exist, fall back to the most recent scan date."""
         date_str = signal_date or datetime.utcnow().strftime("%Y-%m-%d")
+
+        # Check if there are any signals for today; if not, use the most recent date available
+        latest_date = self.db.execute(
+            text("SELECT MAX(signal_date) FROM strategy_signals")
+        ).scalar()
+        if latest_date:
+            effective_date = max(str(latest_date), date_str) if str(latest_date) >= date_str else str(latest_date)
+        else:
+            effective_date = date_str
+
         rows = self.db.execute(
             text("""
                 SELECT ss.id, ss.symbol, ss.strategy_id, s.name AS strategy_name,
@@ -38,7 +49,7 @@ class StrategyService:
                 WHERE ss.signal_date = :d
                 ORDER BY ss.confidence_score DESC
             """),
-            {"d": date_str},
+            {"d": effective_date},
         ).fetchall()
         return [dict(r._mapping) for r in rows]
 

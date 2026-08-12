@@ -103,11 +103,13 @@ class StrategyEngine:
     def _load_prices(self, symbol: str, limit: int = 200) -> pd.DataFrame:
         rows = self.db.execute(
             text("""
-                SELECT date, open, high, low, close, volume
-                FROM stock_prices_daily
-                WHERE symbol = :s
-                ORDER BY date ASC
-                LIMIT :lim
+                SELECT date, open, high, low, close, volume FROM (
+                    SELECT date, open, high, low, close, volume
+                    FROM stock_prices_daily
+                    WHERE symbol = :s
+                    ORDER BY date DESC
+                    LIMIT :lim
+                ) ORDER BY date ASC
             """),
             {"s": symbol, "lim": limit},
         ).fetchall()

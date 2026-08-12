@@ -89,11 +89,13 @@ class LiveScanner:
     def _load_prices(self, symbol: str) -> pd.DataFrame:
         rows = self.db.execute(
             text("""
-                SELECT date, open, high, low, close, volume
-                FROM stock_prices_daily
-                WHERE symbol = :s
-                ORDER BY date ASC
-                LIMIT 200
+                SELECT date, open, high, low, close, volume FROM (
+                    SELECT date, open, high, low, close, volume
+                    FROM stock_prices_daily
+                    WHERE symbol = :s
+                    ORDER BY date DESC
+                    LIMIT 200
+                ) ORDER BY date ASC
             """),
             {"s": symbol},
         ).fetchall()

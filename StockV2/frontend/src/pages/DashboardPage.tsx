@@ -48,13 +48,26 @@ export function DashboardPage() {
 
       {/* Today's BUY signals */}
       <section>
-        <h2 className="text-lg font-semibold text-gray-700 mb-3">Today's BUY Signals</h2>
+        <div className="flex items-baseline gap-3 mb-3">
+          <h2 className="text-lg font-semibold text-gray-700">BUY Signals</h2>
+          {!loadingSignals && buySignals.length > 0 && (() => {
+            const d = buySignals[0].signal_date
+            const today = new Date().toISOString().slice(0, 10)
+            return d !== today ? (
+              <span className="text-xs text-amber-600 font-medium">
+                from {d} — next scan at 4pm IST
+              </span>
+            ) : (
+              <span className="text-xs text-gray-400">today</span>
+            )
+          })()}
+        </div>
         {loadingSignals ? (
           <p className="text-gray-400">Loading…</p>
         ) : signalsError ? (
-          <p className="text-red-600 text-sm">Failed to load today's signals.</p>
+          <p className="text-red-600 text-sm">Failed to load signals.</p>
         ) : buySignals.length === 0 ? (
-          <p className="text-gray-500 py-4">No BUY signals today.</p>
+          <p className="text-gray-500 py-4">No BUY signals yet — first scan runs at 4pm IST on trading days.</p>
         ) : (
           <div className="overflow-x-auto rounded-lg border border-gray-200">
             <table className="w-full text-sm">

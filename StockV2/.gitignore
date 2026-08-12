@@ -1,0 +1,11 @@
+# Database — persisted via Docker bind mount, never commit
+data/stockv2.db
+data/stockv2.db-wal
+data/stockv2.db-shm
+
+# Environment secrets
+.env
+
+# OS / editor
+.DS_Store
+Thumbs.db
