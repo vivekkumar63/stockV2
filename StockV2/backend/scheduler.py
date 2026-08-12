@@ -7,6 +7,7 @@ logger = logging.getLogger(__name__)
 
 class JobIds:
     DAILY_EOD_UPDATE = "daily_eod_update"
+    DAILY_DATA_REFRESH = "daily_data_refresh"
     INTRADAY_SCAN = "intraday_scan"
     WEEKLY_FUNDAMENTALS = "weekly_fundamentals"
     MONTHLY_ML_RETRAIN = "monthly_ml_retrain"
@@ -83,6 +84,44 @@ def _intraday_scan():
         db.close()
 
 
+def _daily_data_refresh():
+    """Download only the missing OHLCV days for every stock (incremental, not full re-download)."""
+    from datetime import date, timedelta
+    from database import SessionLocal
+    from domains.data.feeds.yfinance_feed import YFinanceFeed
+    from domains.data.nse_universe import NSE_SYMBOLS
+    import time as _time
+
+    db = SessionLocal()
+    feed = YFinanceFeed()
+    today = date.today()
+    updated = 0
+    skipped = 0
+    failed = 0
+    try:
+        for symbol in NSE_SYMBOLS:
+            last = feed.get_last_date(db, symbol)
+            if last is None:
+                skipped += 1
+                continue  # not bootstrapped yet — bootstrap job handles it
+            if last >= today:
+                skipped += 1
+                continue  # already up to date
+            since = last + timedelta(days=1)
+            df = feed.download_since(symbol, since)
+            if not df.empty:
+                feed.upsert_prices(db, symbol, df)
+                updated += 1
+            else:
+                failed += 1
+            _time.sleep(0.2)
+        logger.info("[data_refresh] updated=%d skipped=%d failed=%d", updated, skipped, failed)
+    except Exception:
+        logger.exception("[data_refresh] failed")
+    finally:
+        db.close()
+
+
 def _weekly_fundamentals():
     logger.info("[scheduler] weekly_fundamentals — placeholder (implemented in Plan 2)")
 
@@ -107,6 +146,13 @@ def _daily_digest():
 
 
 def register_jobs():
+    # 3:45pm — fetch today's closing data before EOD scan runs at 4pm
+    scheduler.add_job(
+        _daily_data_refresh,
+        CronTrigger(hour=15, minute=45, day_of_week="mon-fri"),
+        id=JobIds.DAILY_DATA_REFRESH,
+        replace_existing=True,
+    )
     scheduler.add_job(
         _daily_eod_update,
         CronTrigger(hour=16, minute=0, day_of_week="mon-fri"),

@@ -15,6 +15,22 @@ logger = logging.getLogger(__name__)
 class YFinanceFeed:
     """Downloads and validates historical OHLCV data from Yahoo Finance."""
 
+    def download_since(self, symbol: str, since: date) -> pd.DataFrame:
+        """Download only data from since to today — used for incremental daily updates."""
+        try:
+            ticker = yf.Ticker(get_yfinance_symbol(symbol))
+            raw = ticker.history(start=str(since), interval="1d", auto_adjust=True)
+            if raw.empty:
+                return pd.DataFrame()
+            df = raw.copy()
+            df.columns = [c.lower() for c in df.columns]
+            df.index = pd.to_datetime(df.index.date)
+            df = df[["open", "high", "low", "close", "volume"]].copy()
+            return df
+        except Exception as e:
+            logger.warning("yfinance incremental download failed for %s: %s", symbol, e)
+            return pd.DataFrame()
+
     def download(self, symbol: str, years: int = 15) -> pd.DataFrame:
         """Download historical daily OHLCV for a single NSE symbol.
 

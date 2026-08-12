@@ -23,6 +23,21 @@ def verify_api_key(key: str = Security(API_KEY_HEADER)) -> str:
     return key
 
 
+def _run_bootstrap() -> None:
+    """Background thread: download 15 years of OHLCV for all NSE stocks (first-time setup)."""
+    from scripts.bootstrap import BootstrapRunner
+    db = SessionLocal()
+    try:
+        logger.info("[bootstrap] starting automatic historical data download")
+        stats = BootstrapRunner(db=db).run(years=15)
+        logger.info("[bootstrap] done — downloaded=%d skipped=%d failed=%d",
+                    stats["downloaded"], stats["skipped"], stats["failed"])
+    except Exception:
+        logger.exception("[bootstrap] failed")
+    finally:
+        db.close()
+
+
 def _precompute_strategies(strategy_ids: list[int]) -> None:
     """Background thread: compute backtest results for strategies that have none yet."""
     from domains.backtest.runner import BacktestRunner
@@ -50,6 +65,16 @@ async def lifespan(app: FastAPI):
         seed_strategies(db)
     finally:
         db.close()
+
+    # Auto-bootstrap: if no price data exists, download 15 years in the background
+    db3 = SessionLocal()
+    try:
+        price_count = db3.execute(text("SELECT COUNT(*) FROM stock_prices_daily LIMIT 1")).scalar()
+    finally:
+        db3.close()
+    if not price_count:
+        logger.info("[startup] No price data found — auto-bootstrap starting in background (~20-60 min)")
+        threading.Thread(target=_run_bootstrap, daemon=True, name="auto-bootstrap").start()
 
     # Find strategies that have never been precomputed (no rows in strategy_performance)
     db2 = SessionLocal()
