@@ -12,6 +12,10 @@ class JobIds:
     WEEKLY_FUNDAMENTALS = "weekly_fundamentals"
     MONTHLY_ML_RETRAIN = "monthly_ml_retrain"
     DAILY_DIGEST = "daily_digest"
+    DIGEST_900 = "digest_0900"
+    DIGEST_915 = "digest_0915"
+    DIGEST_1200 = "digest_1200"
+    DIGEST_1500 = "digest_1500"
     WEEKLY_PRECOMPUTE = "weekly_precompute"
 
 
@@ -213,10 +217,16 @@ def register_jobs():
         id=JobIds.WEEKLY_PRECOMPUTE,
         replace_existing=True,
     )
-    scheduler.add_job(
-        _daily_digest,
-        CronTrigger(hour=17, minute=15, day_of_week="mon-fri"),
-        id=JobIds.DAILY_DIGEST,
-        replace_existing=True,
-    )
+    for job_id, hour, minute in [
+        (JobIds.DIGEST_900,  9,  0),
+        (JobIds.DIGEST_915,  9, 15),
+        (JobIds.DIGEST_1200, 12,  0),
+        (JobIds.DIGEST_1500, 15,  0),
+    ]:
+        scheduler.add_job(
+            _daily_digest,
+            CronTrigger(hour=hour, minute=minute, day_of_week="mon-fri"),
+            id=job_id,
+            replace_existing=True,
+        )
     logger.info("APScheduler jobs registered: %s", [j.id for j in scheduler.get_jobs()])
