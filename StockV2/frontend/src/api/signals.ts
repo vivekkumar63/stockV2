@@ -14,6 +14,9 @@ export interface Signal {
   suggested_stop_loss: number | null
   suggested_target: number | null
   holding_period_days: number | null
+  latest_price: number | null
+  latest_price_date: string | null
+  reasoning_json: string | null
 }
 
 export interface LiveScanRequest {

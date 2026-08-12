@@ -23,9 +23,18 @@ class StrategyService:
                        ss.signal_date, ss.signal_type, ss.price_at_signal,
                        ss.confidence_score, ss.risk_score, ss.expected_upside_pct,
                        ss.suggested_stop_loss, ss.suggested_target,
-                       ss.holding_period_days, ss.reasoning_json
+                       ss.holding_period_days, ss.reasoning_json,
+                       lp.close AS latest_price, lp.date AS latest_price_date
                 FROM strategy_signals ss
                 JOIN strategies s ON ss.strategy_id = s.id
+                LEFT JOIN (
+                    SELECT sp.symbol, sp.close, sp.date
+                    FROM stock_prices_daily sp
+                    WHERE sp.date = (
+                        SELECT MAX(sp2.date) FROM stock_prices_daily sp2
+                        WHERE sp2.symbol = sp.symbol
+                    )
+                ) lp ON lp.symbol = ss.symbol
                 WHERE ss.signal_date = :d
                 ORDER BY ss.confidence_score DESC
             """),

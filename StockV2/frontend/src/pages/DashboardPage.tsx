@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { enterPosition, getPortfolioSummary } from '../api/portfolio'
 import { getTodaySignals, type Signal } from '../api/signals'
@@ -59,12 +60,14 @@ export function DashboardPage() {
             <table className="w-full text-sm">
               <thead className="bg-gray-100 text-gray-600 text-left">
                 <tr>
+                  <th className="px-4 py-2 w-6" scope="col" />
                   <th className="px-4 py-2" scope="col">Symbol</th>
                   <th className="px-4 py-2" scope="col">Strategy</th>
                   <th className="px-4 py-2" scope="col">Confidence</th>
                   <th className="px-4 py-2" scope="col">Price</th>
                   <th className="px-4 py-2" scope="col">Stop Loss</th>
                   <th className="px-4 py-2" scope="col">Target</th>
+                  <th className="px-4 py-2" scope="col">Hold</th>
                   <th className="px-4 py-2" scope="col" />
                 </tr>
               </thead>
@@ -73,7 +76,12 @@ export function DashboardPage() {
                   <SignalRow
                     key={sig.id}
                     sig={sig}
-                    onEnter={() => enterMut.mutate({ signalId: sig.id, price: sig.price_at_signal })}
+                    onEnter={() =>
+                      enterMut.mutate({
+                        signalId: sig.id,
+                        price: sig.latest_price ?? sig.price_at_signal,
+                      })
+                    }
                     entering={enterMut.isPending && enterMut.variables?.signalId === sig.id}
                   />
                 ))}
@@ -100,32 +108,144 @@ function Card({ label, value }: { label: string; value: string }) {
   )
 }
 
-function SignalRow({ sig, onEnter, entering }: { sig: Signal; onEnter: () => void; entering: boolean }) {
-  const conf = sig.confidence_score
+function parseConditions(reasoningJson: string | null): { met: string[]; failed: string[] } {
+  if (!reasoningJson) return { met: [], failed: [] }
+  try {
+    const parsed = JSON.parse(reasoningJson)
+    return {
+      met: parsed.conditions_met ?? [],
+      failed: parsed.conditions_failed ?? [],
+    }
+  } catch {
+    return { met: [], failed: [] }
+  }
+}
+
+function ConfidenceBadge({ score, conditions }: { score: number | null; conditions: string[] }) {
+  if (score == null) return <span className="text-gray-400">—</span>
+  const pct = Math.round(score * 100)
+  const color = pct >= 80 ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'
+
+  // Build tooltip: list the conditions that drove this score
+  const tooltip =
+    conditions.length > 0
+      ? `Confidence ${pct}%:\n${conditions.map((c) => `• ${c}`).join('\n')}`
+      : `Confidence score: ${pct}%`
+
   return (
-    <tr className="hover:bg-gray-50">
-      <td className="px-4 py-2 font-semibold">{sig.symbol}</td>
-      <td className="px-4 py-2 text-gray-500">{sig.strategy_name}</td>
-      <td className="px-4 py-2">
-        {conf != null ? (
-          <span className={`px-2 py-0.5 rounded text-xs font-semibold ${conf >= 0.8 ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'}`}>
-            {(conf * 100).toFixed(0)}%
-          </span>
-        ) : '—'}
-      </td>
-      <td className="px-4 py-2">{sig.price_at_signal != null ? inr(sig.price_at_signal) : '—'}</td>
-      <td className="px-4 py-2 text-red-600">{sig.suggested_stop_loss != null ? inr(sig.suggested_stop_loss) : '—'}</td>
-      <td className="px-4 py-2 text-green-600">{sig.suggested_target != null ? inr(sig.suggested_target) : '—'}</td>
-      <td className="px-4 py-2">
-        <button
-          onClick={onEnter}
-          disabled={entering}
-          aria-label={`Enter position for ${sig.symbol}`}
-          className="px-3 py-1 bg-blue-600 text-white text-xs rounded hover:bg-blue-700 disabled:opacity-50"
-        >
-          Enter
-        </button>
-      </td>
-    </tr>
+    <span
+      className={`px-2 py-0.5 rounded text-xs font-semibold cursor-default ${color}`}
+      title={tooltip}
+    >
+      {pct}%
+    </span>
+  )
+}
+
+function SignalRow({
+  sig,
+  onEnter,
+  entering,
+}: {
+  sig: Signal
+  onEnter: () => void
+  entering: boolean
+}) {
+  const [expanded, setExpanded] = useState(false)
+  const { met, failed } = parseConditions(sig.reasoning_json)
+
+  const displayPrice = sig.latest_price ?? sig.price_at_signal
+  const priceStale =
+    sig.latest_price != null &&
+    sig.latest_price_date != null &&
+    sig.latest_price_date !== sig.signal_date
+
+  return (
+    <>
+      <tr className="hover:bg-gray-50">
+        <td className="px-2 py-2 text-center">
+          <button
+            onClick={() => setExpanded((v) => !v)}
+            aria-label={expanded ? 'Collapse reasoning' : 'Expand reasoning'}
+            className="text-gray-400 hover:text-gray-600 text-xs font-bold w-5 h-5 flex items-center justify-center rounded border border-gray-200 hover:border-gray-400"
+          >
+            {expanded ? '−' : '+'}
+          </button>
+        </td>
+        <td className="px-4 py-2 font-semibold">{sig.symbol}</td>
+        <td className="px-4 py-2 text-gray-500 max-w-[160px] truncate" title={sig.strategy_name}>
+          {sig.strategy_name}
+        </td>
+        <td className="px-4 py-2">
+          <ConfidenceBadge score={sig.confidence_score} conditions={met} />
+        </td>
+        <td className="px-4 py-2">
+          <span>{displayPrice != null ? inr(displayPrice) : '—'}</span>
+          {priceStale && (
+            <span className="block text-xs text-gray-400">{sig.latest_price_date}</span>
+          )}
+        </td>
+        <td className="px-4 py-2 text-red-600">
+          {sig.suggested_stop_loss != null ? inr(sig.suggested_stop_loss) : '—'}
+        </td>
+        <td className="px-4 py-2 text-green-600">
+          {sig.suggested_target != null ? inr(sig.suggested_target) : '—'}
+        </td>
+        <td className="px-4 py-2 text-gray-500">
+          {sig.holding_period_days != null ? `${sig.holding_period_days}d` : '—'}
+        </td>
+        <td className="px-4 py-2">
+          <button
+            onClick={onEnter}
+            disabled={entering}
+            aria-label={`Enter position for ${sig.symbol}`}
+            className="px-3 py-1 bg-blue-600 text-white text-xs rounded hover:bg-blue-700 disabled:opacity-50"
+          >
+            Enter
+          </button>
+        </td>
+      </tr>
+      {expanded && (
+        <tr className="bg-blue-50">
+          <td colSpan={9} className="px-6 py-3">
+            <div className="text-xs space-y-1">
+              <p className="font-semibold text-gray-700 mb-1">
+                Why {sig.symbol}? — {sig.strategy_name}
+              </p>
+              {met.length > 0 && (
+                <ul className="space-y-0.5">
+                  {met.map((c, i) => (
+                    <li key={i} className="flex items-start gap-1.5 text-green-700">
+                      <span className="mt-0.5">✓</span>
+                      <span>{c}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              {failed.length > 0 && (
+                <ul className="mt-1 space-y-0.5">
+                  {failed.map((c, i) => (
+                    <li key={i} className="flex items-start gap-1.5 text-gray-400">
+                      <span className="mt-0.5">✗</span>
+                      <span>{c}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              {sig.expected_upside_pct != null && (
+                <p className="mt-1 text-blue-600">
+                  Expected upside: {sig.expected_upside_pct.toFixed(1)}%
+                  {sig.holding_period_days != null && ` over ~${sig.holding_period_days} days`}
+                </p>
+              )}
+              <p className="mt-1 text-gray-400 italic">
+                Confidence {sig.confidence_score != null ? Math.round(sig.confidence_score * 100) : '—'}%
+                — based on how strongly the conditions above are satisfied
+              </p>
+            </div>
+          </td>
+        </tr>
+      )}
+    </>
   )
 }
