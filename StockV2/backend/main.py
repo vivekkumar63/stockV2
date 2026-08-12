@@ -38,22 +38,6 @@ def _run_bootstrap() -> None:
         db.close()
 
 
-def _precompute_strategies(strategy_ids: list[int]) -> None:
-    """Background thread: compute backtest results for strategies that have none yet."""
-    from domains.backtest.runner import BacktestRunner
-    logger.info("[precompute] starting for %d strategies", len(strategy_ids))
-    for sid in strategy_ids:
-        db = SessionLocal()
-        try:
-            count = BacktestRunner(db).precompute_all_for_strategy(sid)
-            logger.info("[precompute] strategy id=%d: %d symbols done", sid, count)
-        except Exception:
-            logger.exception("[precompute] strategy id=%d failed", sid)
-        finally:
-            db.close()
-    logger.info("[precompute] all strategies done")
-
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     Base.metadata.create_all(bind=engine)
@@ -69,33 +53,12 @@ async def lifespan(app: FastAPI):
     # Auto-bootstrap: if no price data exists, download 15 years in the background
     db3 = SessionLocal()
     try:
-        price_count = db3.execute(text("SELECT COUNT(*) FROM stock_prices_daily LIMIT 1")).scalar()
+        has_prices = db3.execute(text("SELECT 1 FROM stock_prices_daily LIMIT 1")).scalar()
     finally:
         db3.close()
-    if not price_count:
+    if not has_prices:
         logger.info("[startup] No price data found — auto-bootstrap starting in background (~20-60 min)")
         threading.Thread(target=_run_bootstrap, daemon=True, name="auto-bootstrap").start()
-
-    # Find strategies that have never been precomputed (no rows in strategy_performance)
-    db2 = SessionLocal()
-    try:
-        rows = db2.execute(text("""
-            SELECT id FROM strategies
-            WHERE is_active = 1
-            AND id NOT IN (SELECT DISTINCT strategy_id FROM strategy_performance)
-        """)).fetchall()
-        uncomputed_ids = [r[0] for r in rows]
-    finally:
-        db2.close()
-
-    if uncomputed_ids:
-        logger.info("[precompute] %d strategies need precomputation — running in background", len(uncomputed_ids))
-        threading.Thread(
-            target=_precompute_strategies,
-            args=(uncomputed_ids,),
-            daemon=True,
-            name="strategy-precompute",
-        ).start()
 
     from scheduler import scheduler, register_jobs
     register_jobs()

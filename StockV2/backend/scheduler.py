@@ -12,6 +12,7 @@ class JobIds:
     WEEKLY_FUNDAMENTALS = "weekly_fundamentals"
     MONTHLY_ML_RETRAIN = "monthly_ml_retrain"
     DAILY_DIGEST = "daily_digest"
+    WEEKLY_PRECOMPUTE = "weekly_precompute"
 
 
 scheduler = BackgroundScheduler(timezone="Asia/Kolkata")
@@ -126,6 +127,41 @@ def _weekly_fundamentals():
     logger.info("[scheduler] weekly_fundamentals — placeholder (implemented in Plan 2)")
 
 
+def _weekly_precompute():
+    """Compute strategy_performance rows for any strategy that has none yet.
+    Runs Sunday night so new strategies added during the week get their backtest data.
+    """
+    from database import SessionLocal
+    from sqlalchemy import text
+    from domains.backtest.runner import BacktestRunner
+    db = SessionLocal()
+    try:
+        rows = db.execute(text("""
+            SELECT id FROM strategies
+            WHERE is_active = 1
+            AND id NOT IN (SELECT DISTINCT strategy_id FROM strategy_performance)
+        """)).fetchall()
+        uncomputed_ids = [r[0] for r in rows]
+    finally:
+        db.close()
+
+    if not uncomputed_ids:
+        logger.info("[precompute] all strategies already computed — nothing to do")
+        return
+
+    logger.info("[precompute] starting for %d strategies", len(uncomputed_ids))
+    for sid in uncomputed_ids:
+        db = SessionLocal()
+        try:
+            count = BacktestRunner(db).precompute_all_for_strategy(sid)
+            logger.info("[precompute] strategy id=%d: %d symbols done", sid, count)
+        except Exception:
+            logger.exception("[precompute] strategy id=%d failed", sid)
+        finally:
+            db.close()
+    logger.info("[precompute] done")
+
+
 def _daily_digest():
     from datetime import date
     from database import SessionLocal
@@ -169,6 +205,12 @@ def register_jobs():
         _weekly_fundamentals,
         CronTrigger(day_of_week="sun", hour=20, minute=0),
         id=JobIds.WEEKLY_FUNDAMENTALS,
+        replace_existing=True,
+    )
+    scheduler.add_job(
+        _weekly_precompute,
+        CronTrigger(day_of_week="sun", hour=22, minute=0),
+        id=JobIds.WEEKLY_PRECOMPUTE,
         replace_existing=True,
     )
     scheduler.add_job(
