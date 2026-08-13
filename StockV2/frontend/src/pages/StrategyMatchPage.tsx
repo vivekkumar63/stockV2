@@ -5,6 +5,7 @@ import {
   type LeaderboardRow,
 } from '../api/leaderboard'
 import { getStrategies } from '../api/strategies'
+import { StrategyCard } from '../components/StrategyCard'
 import { inr } from '../utils/format'
 
 type SortKey = keyof LeaderboardRow
@@ -234,34 +235,39 @@ export function StrategyMatchPage() {
 
       {/* Filter bar */}
       {rows.length > 0 && (
-        <div className="flex flex-wrap gap-3 items-end">
-          <div>
-            <label className="block text-xs text-gray-500 mb-1">Filter by stock</label>
-            <input
-              placeholder="e.g. RELIANCE"
-              value={symbolFilter}
-              onChange={(e) => setSymbolFilter(e.target.value)}
-              className="border border-gray-300 rounded px-3 py-1.5 text-sm w-36"
-            />
+        <>
+          <div className="flex flex-wrap gap-3 items-end">
+            <div>
+              <label className="block text-xs text-gray-500 mb-1">Filter by stock</label>
+              <input
+                placeholder="e.g. RELIANCE"
+                value={symbolFilter}
+                onChange={(e) => setSymbolFilter(e.target.value)}
+                className="border border-gray-300 rounded px-3 py-1.5 text-sm w-36"
+              />
+            </div>
+            <div>
+              <label className="block text-xs text-gray-500 mb-1">Filter by strategy</label>
+              <select
+                value={stratFilter}
+                onChange={(e) => setStratFilter(e.target.value === '' ? '' : Number(e.target.value))}
+                className="border border-gray-300 rounded px-3 py-1.5 text-sm w-56"
+              >
+                <option value="">All strategies</option>
+                {strategies.filter((s) => s.is_active).map((s) => (
+                  <option key={s.id} value={s.id}>{s.name}</option>
+                ))}
+              </select>
+            </div>
+            <span className="text-xs text-gray-400 self-end pb-2">
+              {visible.length.toLocaleString()} pairs shown
+              {isFetching && <span className="ml-2 animate-pulse text-blue-400">refreshing…</span>}
+            </span>
           </div>
-          <div>
-            <label className="block text-xs text-gray-500 mb-1">Filter by strategy</label>
-            <select
-              value={stratFilter}
-              onChange={(e) => setStratFilter(e.target.value === '' ? '' : Number(e.target.value))}
-              className="border border-gray-300 rounded px-3 py-1.5 text-sm w-56"
-            >
-              <option value="">All strategies</option>
-              {strategies.filter((s) => s.is_active).map((s) => (
-                <option key={s.id} value={s.id}>{s.name}</option>
-              ))}
-            </select>
-          </div>
-          <span className="text-xs text-gray-400 self-end pb-2">
-            {visible.length.toLocaleString()} pairs shown
-            {isFetching && <span className="ml-2 animate-pulse text-blue-400">refreshing…</span>}
-          </span>
-        </div>
+          {stratFilter !== '' && (
+            <StrategyCard strategyId={stratFilter as number} />
+          )}
+        </>
       )}
 
       {/* Leaderboard table */}

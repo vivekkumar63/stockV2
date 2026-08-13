@@ -3,6 +3,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from database import get_db
@@ -21,6 +22,27 @@ class LiveScanRequest(BaseModel):
 @router.get("/strategies")
 def list_strategies(db: Session = Depends(get_db)):
     return StrategyService(db).get_all_strategies()
+
+
+@router.get("/strategies/{strategy_id}")
+def get_strategy_detail(strategy_id: int, db: Session = Depends(get_db)):
+    from domains.strategies.engine import ALL_STRATEGIES
+    row = db.execute(
+        text("SELECT id, name, type, description, is_active, created_at FROM strategies WHERE id = :id"),
+        {"id": strategy_id},
+    ).fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="Strategy not found")
+    data = dict(row._mapping)
+    instance = next((s for s in ALL_STRATEGIES if s.name == data["name"]), None)
+    if instance:
+        data["timeframe"] = instance.timeframe.value if hasattr(instance.timeframe, "value") else str(instance.timeframe)
+        data["min_holding_days"] = instance.min_holding_days
+        data["max_holding_days"] = instance.max_holding_days
+        data["weight"] = instance.weight
+        data["required_indicators"] = instance.get_required_indicators()
+        data["parameters"] = instance.get_parameters()
+    return data
 
 
 @router.get("/signals/today")

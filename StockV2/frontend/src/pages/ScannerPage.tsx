@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useMutation, useQuery } from '@tanstack/react-query'
 import { getStrategies } from '../api/strategies'
 import { runLiveScan, type LiveScanResult } from '../api/signals'
+import { StrategyCard } from '../components/StrategyCard'
 
 type SortKey = keyof LiveScanResult
 type SortDir = 'asc' | 'desc'
@@ -118,6 +119,10 @@ export function ScannerPage() {
           {scanMut.isPending ? 'Scanning…' : 'Run Scan'}
         </button>
       </div>
+
+      {strategyId && (
+        <StrategyCard strategyId={Number(strategyId)} />
+      )}
 
       {/* Status */}
       {scanMut.isPending && (
