@@ -28,11 +28,18 @@ _lb_state: dict = {
 _LEADERBOARD_FROM = date(2015, 1, 1)
 
 
+def _parse_date(val) -> Optional[date]:
+    """Parse a date value that may be a date object, 'YYYY-MM-DD', or 'YYYY-MM-DD HH:MM:SS'."""
+    if val is None:
+        return None
+    if isinstance(val, date):
+        return val
+    return date.fromisoformat(str(val)[:10])
+
+
 def _get_last_price_date(db) -> Optional[date]:
     row = db.execute(text("SELECT MAX(date) FROM stock_prices_daily")).scalar()
-    if row is None:
-        return None
-    return date.fromisoformat(str(row)) if isinstance(row, str) else row
+    return _parse_date(row)
 
 
 def _run_leaderboard_bg(stop_loss_pct: float, target_pct: float) -> None:
@@ -268,10 +275,7 @@ def leaderboard_status(
         """),
         {"sl": stop_loss_pct, "tgt": target_pct, "fd": str(_LEADERBOARD_FROM)},
     ).scalar()
-    cached_to_date = (
-        date.fromisoformat(str(cached_to_date_row)) if cached_to_date_row and isinstance(cached_to_date_row, str)
-        else cached_to_date_row
-    )
+    cached_to_date = _parse_date(cached_to_date_row)
     is_current = (
         last_price_date is not None
         and cached_to_date is not None
@@ -316,9 +320,8 @@ def trigger_leaderboard_compute(
                 """),
                 {"sl": stop_loss_pct, "tgt": target_pct, "fd": str(_LEADERBOARD_FROM)},
             ).scalar()
-            if cached_to is not None:
-                cached_date = date.fromisoformat(str(cached_to)) if isinstance(cached_to, str) else cached_to
-                if cached_date >= last_price_date:
+            cached_date = _parse_date(cached_to)
+            if cached_date is not None and cached_date >= last_price_date:
                     return {
                         "status": "up_to_date",
                         "message": f"Cache is already current as of {last_price_date}. Use force=true to recompute.",

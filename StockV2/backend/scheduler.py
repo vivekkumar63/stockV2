@@ -156,10 +156,9 @@ def _daily_data_refresh():
 
 def _leaderboard_refresh():
     """Auto-refresh leaderboard after EOD data lands. Skips if cache is already current."""
-    from domains.backtest.router import _run_leaderboard_bg, _get_last_price_date, _lb_state, _LEADERBOARD_FROM
+    from domains.backtest.router import _run_leaderboard_bg, _get_last_price_date, _parse_date, _lb_state, _LEADERBOARD_FROM
     from database import SessionLocal
     from sqlalchemy import text
-    from datetime import date
 
     db = SessionLocal()
     try:
@@ -173,11 +172,10 @@ def _leaderboard_refresh():
             """),
             {"fd": str(_LEADERBOARD_FROM)},
         ).scalar()
-        if cached_to is not None:
-            cached_date = date.fromisoformat(str(cached_to)) if isinstance(cached_to, str) else cached_to
-            if cached_date >= last_price_date:
-                logger.info("[leaderboard_refresh] cache already current as of %s — skip", last_price_date)
-                return
+        cached_date = _parse_date(cached_to)
+        if cached_date is not None and cached_date >= last_price_date:
+            logger.info("[leaderboard_refresh] cache already current as of %s — skip", last_price_date)
+            return
     finally:
         db.close()
 
