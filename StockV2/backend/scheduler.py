@@ -2,6 +2,7 @@ import logging
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 from ist import ist_today, ist_now
+from sqlalchemy import text as sa_text
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +24,33 @@ class JobIds:
 scheduler = BackgroundScheduler(timezone="Asia/Kolkata")
 
 
+def _send_sell_alerts_for_holdings(db) -> None:
+    """Query SELL signals for held stocks from the latest scan and fire Telegram alerts."""
+    from domains.alerts.telegram import AlertService
+    try:
+        rows = db.execute(sa_text("""
+            WITH latest_scan AS (
+                SELECT MAX(signal_date) AS max_date FROM strategy_signals
+            )
+            SELECT ph.symbol, ph.avg_buy_price,
+                   s.name AS strategy_name,
+                   ss.signal_date, ss.price_at_signal,
+                   ss.confidence_score, ss.reasoning_json
+            FROM portfolio_holdings ph
+            JOIN strategy_signals ss ON ss.symbol = ph.symbol AND ss.signal_type = 'SELL'
+            JOIN strategies s ON s.id = ss.strategy_id
+            JOIN latest_scan ls ON ss.signal_date = ls.max_date
+            WHERE ph.is_active = 1
+            ORDER BY ss.confidence_score DESC
+        """)).fetchall()
+        alerts = [dict(r._mapping) for r in rows]
+        if alerts:
+            logger.info("[scheduler] sell alerts for held stocks: %d signals", len(alerts))
+            AlertService().send_sell_alerts(alerts)
+    except Exception:
+        logger.exception("[scheduler] sell alert check failed")
+
+
 def _is_market_hours() -> bool:
     now = ist_now()
     return now.weekday() < 5 and 9 <= now.hour < 16
@@ -37,6 +65,7 @@ def _daily_eod_update():
         engine = StrategyEngine(db)
         results = engine.scan_all(NSE_SYMBOLS, ist_today())
         logger.info("[scheduler] daily_eod_update: %d signals generated", len(results))
+        _send_sell_alerts_for_holdings(db)
     except Exception:
         logger.exception("[scheduler] daily_eod_update failed")
     finally:
@@ -80,6 +109,7 @@ def _intraday_scan():
                 exits = ExitMonitor(db).scan_exits(current_prices)
                 if exits:
                     logger.info("[scheduler] intraday_scan: %d positions exited", len(exits))
+        _send_sell_alerts_for_holdings(db)
     except Exception:
         logger.exception("[scheduler] intraday_scan failed")
     finally:

@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { exitPosition, getClosedPnl, getHoldings, type ClosedTrade, type Holding } from '../api/portfolio'
+import { exitPosition, getClosedPnl, getHoldings, getSellAlerts, type ClosedTrade, type Holding, type SellAlert } from '../api/portfolio'
 import { inr } from '../utils/format'
 
 export function PortfolioPage() {
@@ -17,6 +17,12 @@ export function PortfolioPage() {
     queryFn: getClosedPnl,
   })
 
+  const { data: sellAlerts = [] } = useQuery({
+    queryKey: ['portfolio', 'sell-alerts'],
+    queryFn: getSellAlerts,
+    refetchInterval: 5 * 60 * 1000,
+  })
+
   const exitMut = useMutation({
     mutationFn: ({ symbol, price }: { symbol: string; price: number }) =>
       exitPosition(symbol, price, 'manual'),
@@ -27,6 +33,23 @@ export function PortfolioPage() {
   return (
     <div className="space-y-8">
       <h1 className="text-2xl font-bold text-gray-800">Portfolio</h1>
+
+      {/* Sell Alerts */}
+      {sellAlerts.length > 0 && (
+        <section>
+          <div className="flex items-center gap-2 mb-3">
+            <span className="text-base font-semibold text-red-700">Sell Signals for Your Holdings</span>
+            <span className="text-xs bg-red-100 text-red-700 border border-red-300 rounded-full px-2 py-0.5 font-bold">
+              {sellAlerts.length}
+            </span>
+          </div>
+          <div className="space-y-2">
+            {sellAlerts.map((a, i) => (
+              <SellAlertCard key={i} alert={a} />
+            ))}
+          </div>
+        </section>
+      )}
 
       {/* Open Positions */}
       <section>
@@ -159,6 +182,51 @@ function HoldingRow({
         </button>
       </td>
     </tr>
+  )
+}
+
+function SellAlertCard({ alert: a }: { alert: SellAlert }) {
+  const conf = a.confidence_score != null ? Math.round(a.confidence_score * 100) : null
+  const pnlPct = a.price_at_signal && a.avg_buy_price
+    ? ((a.price_at_signal - a.avg_buy_price) / a.avg_buy_price * 100)
+    : null
+
+  let conditions: string[] = []
+  try {
+    const r = JSON.parse(a.reasoning_json ?? '{}')
+    conditions = r.conditions_met ?? []
+  } catch { /* ignore */ }
+
+  return (
+    <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-3 flex flex-wrap gap-x-6 gap-y-1 items-start">
+      <div className="min-w-[80px]">
+        <div className="font-bold text-red-700 text-base">{a.symbol}</div>
+        <div className="text-xs text-gray-500">{a.signal_date}</div>
+      </div>
+      <div className="flex-1 min-w-[160px]">
+        <div className="text-sm font-medium text-gray-700 truncate" title={a.strategy_name}>
+          {a.strategy_name}
+        </div>
+        {conditions.length > 0 && (
+          <div className="text-xs text-gray-500 mt-0.5 line-clamp-1">
+            {conditions.slice(0, 2).join(' · ')}
+          </div>
+        )}
+      </div>
+      <div className="flex gap-4 text-sm flex-wrap">
+        {conf != null && (
+          <span className="text-red-600 font-semibold">{conf}% confidence</span>
+        )}
+        <span className="text-gray-600">
+          Signal ₹{a.price_at_signal.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+        </span>
+        {pnlPct != null && (
+          <span className={pnlPct >= 0 ? 'text-green-600 font-semibold' : 'text-red-600 font-semibold'}>
+            {pnlPct >= 0 ? '+' : ''}{pnlPct.toFixed(1)}% vs avg
+          </span>
+        )}
+      </div>
+    </div>
   )
 }
 

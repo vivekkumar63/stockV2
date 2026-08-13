@@ -81,3 +81,38 @@ class AlertService:
             )
 
         return self.send("\n".join(lines))
+
+    def send_sell_alerts(self, alerts: list[dict]) -> bool:
+        if not alerts:
+            return True
+        lines = [
+            f"<b>🚨 SELL ALERT — {len(alerts)} held stock{'s' if len(alerts) > 1 else ''} flagged</b>",
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+        ]
+        for a in alerts:
+            conf = int((a.get("confidence_score") or 0) * 100)
+            price = a.get("price_at_signal")
+            avg = a.get("avg_buy_price")
+            strategy = a.get("strategy_name", "")
+            signal_date = a.get("signal_date", "")
+
+            pnl_str = ""
+            if price and avg:
+                pnl_pct = (price - avg) / avg * 100
+                pnl_str = f"  |  P&L est: {pnl_pct:+.1f}%"
+
+            conditions: list[str] = []
+            try:
+                reasoning = json.loads(a.get("reasoning_json") or "{}")
+                conditions = reasoning.get("conditions_met", [])
+            except Exception:
+                pass
+            why = " | ".join(conditions[:2]) if conditions else strategy
+
+            lines.append(
+                f"\n🔴 <b>{a['symbol']}</b> — {conf}% confidence{pnl_str}\n"
+                f"   📌 {strategy}\n"
+                f"   💰 Signal price: ₹{price:,.0f}  (date: {signal_date})\n"
+                f"   💡 <i>{why}</i>"
+            )
+        return self.send("\n".join(lines))

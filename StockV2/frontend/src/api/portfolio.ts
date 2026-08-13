@@ -60,3 +60,18 @@ export const exitPosition = (symbol: string, price: number, reason = 'manual') =
     method: 'POST',
     body: JSON.stringify({ price, reason }),
   })
+
+export interface SellAlert {
+  symbol: string
+  avg_buy_price: number
+  strategy_id: number
+  strategy_name: string
+  signal_date: string
+  price_at_signal: number
+  confidence_score: number | null
+  suggested_stop_loss: number | null
+  suggested_target: number | null
+  reasoning_json: string | null
+}
+
+export const getSellAlerts = () => apiFetch<SellAlert[]>('/portfolio/sell-alerts')

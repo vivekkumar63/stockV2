@@ -2,6 +2,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from database import get_db
@@ -47,6 +48,34 @@ def portfolio_trades(
 @router.get("/portfolio/pnl")
 def portfolio_pnl(db: Session = Depends(get_db)):
     return PortfolioService(db).get_closed_pnl()
+
+
+@router.get("/portfolio/sell-alerts")
+def portfolio_sell_alerts(db: Session = Depends(get_db)):
+    """Return SELL signals from the most recent scan date for stocks currently held."""
+    rows = db.execute(text("""
+        WITH latest_scan AS (
+            SELECT MAX(signal_date) AS max_date FROM strategy_signals
+        )
+        SELECT
+            ph.symbol,
+            ph.avg_buy_price,
+            ss.strategy_id,
+            s.name  AS strategy_name,
+            ss.signal_date,
+            ss.price_at_signal,
+            ss.confidence_score,
+            ss.suggested_stop_loss,
+            ss.suggested_target,
+            ss.reasoning_json
+        FROM portfolio_holdings ph
+        JOIN strategy_signals ss ON ss.symbol = ph.symbol AND ss.signal_type = 'SELL'
+        JOIN strategies s ON s.id = ss.strategy_id
+        JOIN latest_scan ls ON ss.signal_date = ls.max_date
+        WHERE ph.is_active = 1
+        ORDER BY ss.confidence_score DESC
+    """)).fetchall()
+    return [dict(r._mapping) for r in rows]
 
 
 @router.post("/portfolio/enter/{signal_id}")
