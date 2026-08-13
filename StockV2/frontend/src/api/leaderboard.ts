@@ -21,6 +21,9 @@ export interface LeaderboardStatus {
   total_strategies: number
   pct_done: number
   error: string | null
+  is_current: boolean
+  last_price_date: string | null
+  cached_to_date: string | null
   params: { stop_loss_pct: number; target_pct: number; from_date: string }
 }
 
@@ -47,8 +50,8 @@ export const getLeaderboardStatus = (sl = 5.0, tgt = 10.0) =>
     `/backtest/leaderboard/status?stop_loss_pct=${sl}&target_pct=${tgt}`
   )
 
-export const triggerLeaderboardCompute = (sl = 5.0, tgt = 10.0) =>
+export const triggerLeaderboardCompute = (sl = 5.0, tgt = 10.0, force = false) =>
   apiFetch<{ status: string; message: string }>(
-    `/backtest/leaderboard/compute?stop_loss_pct=${sl}&target_pct=${tgt}`,
+    `/backtest/leaderboard/compute?stop_loss_pct=${sl}&target_pct=${tgt}&force=${force}`,
     { method: 'POST' }
   )

@@ -27,6 +27,13 @@ _lb_state: dict = {
 _LEADERBOARD_FROM = date(2015, 1, 1)
 
 
+def _get_last_price_date(db) -> Optional[date]:
+    row = db.execute(text("SELECT MAX(date) FROM stock_prices_daily")).scalar()
+    if row is None:
+        return None
+    return date.fromisoformat(str(row)) if isinstance(row, str) else row
+
+
 def _run_leaderboard_bg(stop_loss_pct: float, target_pct: float) -> None:
     global _lb_state
     with _lb_lock:
@@ -36,14 +43,15 @@ def _run_leaderboard_bg(stop_loss_pct: float, target_pct: float) -> None:
                            "sl": stop_loss_pct, "tgt": target_pct})
     db = SessionLocal()
     try:
+        to_date = _get_last_price_date(db) or date.today()
         BacktestRunner(db).scan_all(
             from_date=_LEADERBOARD_FROM,
-            to_date=date.today(),
+            to_date=to_date,
             stop_loss_pct=stop_loss_pct,
             target_pct=target_pct,
             limit=500,
         )
-        logger.info("[leaderboard] compute done sl=%s tgt=%s", stop_loss_pct, target_pct)
+        logger.info("[leaderboard] compute done sl=%s tgt=%s to_date=%s", stop_loss_pct, target_pct, to_date)
     except Exception as e:
         _lb_state["error"] = str(e)
         logger.exception("[leaderboard] compute failed")
@@ -249,6 +257,26 @@ def leaderboard_status(
 
     total_expected = total_symbols * total_strategies
 
+    last_price_date = _get_last_price_date(db)
+
+    # determine the to_date used when the cache was last built
+    cached_to_date_row = db.execute(
+        text("""
+            SELECT MAX(to_date) FROM scan_result_cache
+            WHERE stop_loss_pct = :sl AND target_pct = :tgt AND from_date = :fd
+        """),
+        {"sl": stop_loss_pct, "tgt": target_pct, "fd": str(_LEADERBOARD_FROM)},
+    ).scalar()
+    cached_to_date = (
+        date.fromisoformat(str(cached_to_date_row)) if cached_to_date_row and isinstance(cached_to_date_row, str)
+        else cached_to_date_row
+    )
+    is_current = (
+        last_price_date is not None
+        and cached_to_date is not None
+        and cached_to_date >= last_price_date
+    )
+
     return {
         "is_computing": _lb_state["is_computing"],
         "pairs_cached": pairs_cached,
@@ -257,6 +285,9 @@ def leaderboard_status(
         "total_strategies": total_strategies,
         "pct_done": round(pairs_cached / total_expected * 100, 1) if total_expected > 0 else 0,
         "error": _lb_state.get("error"),
+        "is_current": is_current,
+        "last_price_date": str(last_price_date) if last_price_date else None,
+        "cached_to_date": str(cached_to_date) if cached_to_date else None,
         "params": {"stop_loss_pct": stop_loss_pct, "target_pct": target_pct,
                    "from_date": str(_LEADERBOARD_FROM)},
     }
@@ -266,11 +297,32 @@ def leaderboard_status(
 def trigger_leaderboard_compute(
     stop_loss_pct: float = Query(5.0),
     target_pct: float = Query(10.0),
+    force: bool = Query(False),
+    db: Session = Depends(get_db),
 ):
     """Kick off background computation of win rates for all (stock, strategy) pairs."""
     if _lb_state["is_computing"]:
         return {"status": "already_running",
                 "message": "Computation already in progress — check /leaderboard/status"}
+
+    if not force:
+        last_price_date = _get_last_price_date(db)
+        if last_price_date:
+            cached_to = db.execute(
+                text("""
+                    SELECT MAX(to_date) FROM scan_result_cache
+                    WHERE stop_loss_pct = :sl AND target_pct = :tgt AND from_date = :fd
+                """),
+                {"sl": stop_loss_pct, "tgt": target_pct, "fd": str(_LEADERBOARD_FROM)},
+            ).scalar()
+            if cached_to is not None:
+                cached_date = date.fromisoformat(str(cached_to)) if isinstance(cached_to, str) else cached_to
+                if cached_date >= last_price_date:
+                    return {
+                        "status": "up_to_date",
+                        "message": f"Cache is already current as of {last_price_date}. Use force=true to recompute.",
+                    }
+
     t = threading.Thread(
         target=_run_leaderboard_bg,
         args=(stop_loss_pct, target_pct),

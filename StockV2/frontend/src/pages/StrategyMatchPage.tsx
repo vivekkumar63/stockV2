@@ -74,7 +74,7 @@ export function StrategyMatchPage() {
   })
 
   const computeMut = useMutation({
-    mutationFn: () => triggerLeaderboardCompute(sl, tgt),
+    mutationFn: (force = false) => triggerLeaderboardCompute(sl, tgt, force),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['leaderboard'] })
     },
@@ -144,11 +144,21 @@ export function StrategyMatchPage() {
           </div>
 
           <button
-            onClick={() => computeMut.mutate()}
+            onClick={() => computeMut.mutate(status?.is_current ? true : false)}
             disabled={computeMut.isPending || status?.is_computing}
-            className="px-4 py-1.5 bg-blue-600 text-white text-sm rounded hover:bg-blue-700 disabled:opacity-50"
+            className={`px-4 py-1.5 text-white text-sm rounded disabled:opacity-50 ${
+              status?.is_current
+                ? 'bg-gray-500 hover:bg-gray-600'
+                : 'bg-blue-600 hover:bg-blue-700'
+            }`}
           >
-            {status?.is_computing ? 'Computing…' : computeMut.isPending ? 'Starting…' : 'Compute Now'}
+            {status?.is_computing
+              ? 'Computing…'
+              : computeMut.isPending
+              ? 'Starting…'
+              : status?.is_current
+              ? 'Force Refresh'
+              : 'Compute Now'}
           </button>
 
           {computeMut.isSuccess && computeMut.data && (
@@ -181,6 +191,16 @@ export function StrategyMatchPage() {
               <p className="text-sm text-gray-500">
                 <span className="text-emerald-600 font-semibold">{status.pairs_cached.toLocaleString()}</span> pairs
                 computed across {status.total_symbols} stocks × {status.total_strategies} strategies
+                {status.is_current && status.last_price_date && (
+                  <span className="ml-2 text-emerald-600 font-medium">
+                    · up to date as of {status.last_price_date}
+                  </span>
+                )}
+                {!status.is_current && status.last_price_date && (
+                  <span className="ml-2 text-amber-600">
+                    · new data available ({status.last_price_date})
+                  </span>
+                )}
                 {status.error && <span className="text-red-500 ml-2">· last run had errors</span>}
               </p>
             ) : (

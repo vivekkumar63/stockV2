@@ -16,6 +16,7 @@ class JobIds:
     DIGEST_1200 = "digest_1200"
     DIGEST_1500 = "digest_1500"
     WEEKLY_PRECOMPUTE = "weekly_precompute"
+    LEADERBOARD_REFRESH = "leaderboard_refresh"
 
 
 scheduler = BackgroundScheduler(timezone="Asia/Kolkata")
@@ -126,6 +127,41 @@ def _daily_data_refresh():
         db.close()
 
 
+def _leaderboard_refresh():
+    """Auto-refresh leaderboard after EOD data lands. Skips if cache is already current."""
+    from domains.backtest.router import _run_leaderboard_bg, _get_last_price_date, _lb_state, _LEADERBOARD_FROM
+    from database import SessionLocal
+    from sqlalchemy import text
+    from datetime import date
+
+    db = SessionLocal()
+    try:
+        last_price_date = _get_last_price_date(db)
+        if last_price_date is None:
+            return
+        cached_to = db.execute(
+            text("""
+                SELECT MAX(to_date) FROM scan_result_cache
+                WHERE stop_loss_pct = 5.0 AND target_pct = 10.0 AND from_date = :fd
+            """),
+            {"fd": str(_LEADERBOARD_FROM)},
+        ).scalar()
+        if cached_to is not None:
+            cached_date = date.fromisoformat(str(cached_to)) if isinstance(cached_to, str) else cached_to
+            if cached_date >= last_price_date:
+                logger.info("[leaderboard_refresh] cache already current as of %s — skip", last_price_date)
+                return
+    finally:
+        db.close()
+
+    if _lb_state["is_computing"]:
+        logger.info("[leaderboard_refresh] already computing — skip")
+        return
+
+    logger.info("[leaderboard_refresh] starting background compute")
+    _run_leaderboard_bg(stop_loss_pct=5.0, target_pct=10.0)
+
+
 def _weekly_fundamentals():
     logger.info("[scheduler] weekly_fundamentals — placeholder (implemented in Plan 2)")
 
@@ -222,6 +258,13 @@ def register_jobs():
         _weekly_precompute,
         CronTrigger(day_of_week="sun", hour=22, minute=0),
         id=JobIds.WEEKLY_PRECOMPUTE,
+        replace_existing=True,
+    )
+    # 4:30pm — refresh leaderboard after EOD data lands (3:45 data fetch + 4:00 EOD scan)
+    scheduler.add_job(
+        _leaderboard_refresh,
+        CronTrigger(hour=16, minute=30, day_of_week="mon-fri"),
+        id=JobIds.LEADERBOARD_REFRESH,
         replace_existing=True,
     )
     for job_id, hour, minute in [
