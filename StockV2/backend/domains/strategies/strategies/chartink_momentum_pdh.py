@@ -4,7 +4,7 @@ from domains.strategies.base import BaseStrategy, Signal, StrategyType, Timefram
 
 class ChartinkMomentumPDH(BaseStrategy):
     """Chartink: Bullish Momentum — close breaks above previous day's high with SMA trend + RSI."""
-    name = "Momentum PDH Breakout"
+    name = "Chartink Momentum PDH Breakout"
     description = "Close > previous day high + SMA20>SMA50 + RSI>50 + above-average volume"
     strategy_type = StrategyType.TECHNICAL
     timeframe = Timeframe.DAILY

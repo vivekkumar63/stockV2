@@ -4,7 +4,7 @@ from domains.strategies.base import BaseStrategy, Signal, StrategyType, Timefram
 
 class ChartinkBullishHarami(BaseStrategy):
     """Chartink: Bullish Harami — small green candle inside a large red candle, bottom reversal."""
-    name = "Bullish Harami Pattern"
+    name = "Chartink Bullish Harami Pattern"
     description = "Small green candle body inside prev large red candle + RSI oversold + volume"
     strategy_type = StrategyType.TECHNICAL
     timeframe = Timeframe.DAILY

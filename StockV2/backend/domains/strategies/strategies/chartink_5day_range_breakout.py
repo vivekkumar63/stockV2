@@ -4,7 +4,7 @@ from domains.strategies.base import BaseStrategy, Signal, StrategyType, Timefram
 
 class Chartink5DayRangeBreakout(BaseStrategy):
     """Chartink: 5-Day Range Breakout — close above 5-day consolidation high with volume surge."""
-    name = "5-Day Range Breakout"
+    name = "Chartink 5-Day Range Breakout"
     description = "Close > 5-day high on volume surge + RSI bullish + MACD confirmation"
     strategy_type = StrategyType.TECHNICAL
     timeframe = Timeframe.DAILY

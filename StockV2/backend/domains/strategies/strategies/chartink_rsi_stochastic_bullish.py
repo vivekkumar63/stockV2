@@ -4,7 +4,7 @@ from domains.strategies.base import BaseStrategy, Signal, StrategyType, Timefram
 
 class ChartinkRSIStochasticBullish(BaseStrategy):
     """Chartink: Bullish RSI-Stochastic — both RSI and Stochastic in bullish zones simultaneously."""
-    name = "RSI + Stochastic Bullish"
+    name = "Chartink RSI + Stochastic Bullish"
     description = "RSI > 50 + Stoch K > D + Stoch K > 50 + MACD positive + uptrend (4/5 needed)"
     strategy_type = StrategyType.TECHNICAL
     timeframe = Timeframe.DAILY

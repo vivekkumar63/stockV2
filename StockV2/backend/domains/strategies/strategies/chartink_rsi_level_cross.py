@@ -4,7 +4,7 @@ from domains.strategies.base import BaseStrategy, Signal, StrategyType, Timefram
 
 class ChartinkRSILevelCross(BaseStrategy):
     """Chartink: Daily RSI Crossover — RSI crosses above 60 (momentum buy) or below 40 (momentum sell)."""
-    name = "RSI Level Crossover"
+    name = "Chartink RSI Level Crossover"
     description = "BUY when RSI(14) crosses above 60; SELL when crosses below 40"
     strategy_type = StrategyType.TECHNICAL
     timeframe = Timeframe.DAILY

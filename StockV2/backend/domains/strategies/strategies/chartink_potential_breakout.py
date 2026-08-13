@@ -4,7 +4,7 @@ from domains.strategies.base import BaseStrategy, Signal, StrategyType, Timefram
 
 class ChartinkPotentialBreakout(BaseStrategy):
     """Chartink: Potential Breakouts — consolidating within 5% of 200-day high, volume surging."""
-    name = "Potential Breakout"
+    name = "Chartink Potential Breakout"
     description = "Close within 5% below 200-day high + 30-day consolidation + above-average volume"
     strategy_type = StrategyType.TECHNICAL
     timeframe = Timeframe.DAILY

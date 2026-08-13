@@ -4,7 +4,7 @@ from domains.strategies.base import BaseStrategy, Signal, StrategyType, Timefram
 
 class ChartinkBTSTBBBreakout(BaseStrategy):
     """Chartink: BOSS BTST — closing above BB upper band with RSI>60 + MACD bullish + green candle."""
-    name = "BTST Bollinger Breakout"
+    name = "Chartink BTST Bollinger Breakout"
     description = "Close > BB upper + RSI>60 + MACD bullish + volume surge + green candle"
     strategy_type = StrategyType.TECHNICAL
     timeframe = Timeframe.DAILY

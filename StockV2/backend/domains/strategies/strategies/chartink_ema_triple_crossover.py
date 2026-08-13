@@ -4,7 +4,7 @@ from domains.strategies.base import BaseStrategy, Signal, StrategyType, Timefram
 
 class ChartinkEMATripleCrossover(BaseStrategy):
     """Chartink: EMA Triple Crossover — EMA5>EMA10>EMA21 alignment with MACD confirmation."""
-    name = "EMA 5-10-21 Crossover"
+    name = "Chartink EMA 5-10-21 Crossover"
     description = "EMA5 > EMA10 > EMA21 + MACD bullish + volume surge + RSI in sweet spot"
     strategy_type = StrategyType.TECHNICAL
     timeframe = Timeframe.DAILY

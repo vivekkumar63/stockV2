@@ -4,7 +4,7 @@ from domains.strategies.base import BaseStrategy, Signal, StrategyType, Timefram
 
 class Chartink52WeekLowBounce(BaseStrategy):
     """Chartink: 52-Week Low Bounce — price near 52-week low with RSI oversold + reversal signs."""
-    name = "52-Week Low Bounce"
+    name = "Chartink 52-Week Low Bounce"
     description = "Price within 5% of 52-week low + RSI oversold + green candle + volume spike"
     strategy_type = StrategyType.TECHNICAL
     timeframe = Timeframe.DAILY

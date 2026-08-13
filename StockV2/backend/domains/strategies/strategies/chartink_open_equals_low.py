@@ -4,7 +4,7 @@ from domains.strategies.base import BaseStrategy, Signal, StrategyType, Timefram
 
 class ChartinkOpenEqualsLow(BaseStrategy):
     """Chartink: BUY Open=Low — open equals day's low, full bullish candle from open."""
-    name = "Open = Low Bullish"
+    name = "Chartink Open = Low Bullish"
     description = "Open == Low (no early selling) + green candle + volume + RSI not overbought"
     strategy_type = StrategyType.TECHNICAL
     timeframe = Timeframe.DAILY

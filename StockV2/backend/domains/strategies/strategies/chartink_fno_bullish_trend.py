@@ -4,7 +4,7 @@ from domains.strategies.base import BaseStrategy, Signal, StrategyType, Timefram
 
 class ChartinkFNOBullishTrend(BaseStrategy):
     """Chartink: FNO Bullish Trend (Prabhu) — SMA + ADX + MACD triple confirmation trend filter."""
-    name = "FNO Bullish MA+ADX+MACD"
+    name = "Chartink FNO Bullish MA+ADX+MACD"
     description = "SMA20>SMA50 + ADX>25 + MACD bullish + close>SMA20 + volume (4/5 needed)"
     strategy_type = StrategyType.TECHNICAL
     timeframe = Timeframe.DAILY

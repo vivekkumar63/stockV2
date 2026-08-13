@@ -4,7 +4,7 @@ from domains.strategies.base import BaseStrategy, Signal, StrategyType, Timefram
 
 class ChartinkNR7Uptrend(BaseStrategy):
     """Chartink: NR7 Uptrend — smallest daily range in 7 days inside a SMA10>SMA50 uptrend."""
-    name = "NR7 Uptrend"
+    name = "Chartink NR7 Uptrend"
     description = "Narrowest trading range of last 7 days + SMA10>SMA50 trend + volume filter"
     strategy_type = StrategyType.TECHNICAL
     timeframe = Timeframe.DAILY

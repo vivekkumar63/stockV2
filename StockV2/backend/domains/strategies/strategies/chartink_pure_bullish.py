@@ -4,7 +4,7 @@ from domains.strategies.base import BaseStrategy, Signal, StrategyType, Timefram
 
 class ChartinkPureBullish(BaseStrategy):
     """Chartink: Pure Bullish Trend — 8+ of 11 technical indicators aligned bullishly."""
-    name = "Pure Bullish Confluence"
+    name = "Chartink Pure Bullish Confluence"
     description = "MACD+RSI+CCI+MFI+Williams+Stoch+SMA+ADX+BB+Volume+Green candle — needs 8/11"
     strategy_type = StrategyType.TECHNICAL
     timeframe = Timeframe.DAILY

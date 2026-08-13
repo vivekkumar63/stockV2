@@ -4,7 +4,7 @@ from domains.strategies.base import BaseStrategy, Signal, StrategyType, Timefram
 
 class Chartink52WeekHighBreakout(BaseStrategy):
     """Chartink: 52-Week High Breakout — price breaking out to new highs with volume confirmation."""
-    name = "52-Week High Breakout"
+    name = "Chartink 52-Week High Breakout"
     description = "Close within 1% of 52-week high + volume surge + MACD bullish + RSI 55-80"
     strategy_type = StrategyType.TECHNICAL
     timeframe = Timeframe.DAILY

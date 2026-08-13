@@ -4,7 +4,7 @@ from domains.strategies.base import BaseStrategy, Signal, StrategyType, Timefram
 
 class ChartinkPerfectSell(BaseStrategy):
     """Chartink: Perfect Sell — lower high reversal after upswing, entry open, SL prev high."""
-    name = "Perfect Sell Reversal"
+    name = "Chartink Perfect Sell Reversal"
     description = "Prev high > 2d-ago high + today lower high + volume surge = bearish reversal"
     strategy_type = StrategyType.TECHNICAL
     timeframe = Timeframe.DAILY

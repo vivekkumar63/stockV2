@@ -4,7 +4,7 @@ from domains.strategies.base import BaseStrategy, Signal, StrategyType, Timefram
 
 class ChartinkNR4Pattern(BaseStrategy):
     """Chartink: NR4 — narrowest range of last 4 days, tighter coil than NR7."""
-    name = "NR4 Range Compression"
+    name = "Chartink NR4 Range Compression"
     description = "Narrowest range of last 4 days + trend confirmation + volume filter"
     strategy_type = StrategyType.TECHNICAL
     timeframe = Timeframe.DAILY

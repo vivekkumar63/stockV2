@@ -4,7 +4,7 @@ from domains.strategies.base import BaseStrategy, Signal, StrategyType, Timefram
 
 class ChartinkConsecutiveHigherCloses(BaseStrategy):
     """Chartink: Strong Stocks — 5 consecutive days of higher closes with volume confirmation."""
-    name = "Consecutive Higher Closes"
+    name = "Chartink Consecutive Higher Closes"
     description = "5 straight days of higher closes + volume above average + RSI not overbought"
     strategy_type = StrategyType.TECHNICAL
     timeframe = Timeframe.DAILY

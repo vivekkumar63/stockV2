@@ -4,7 +4,7 @@ from domains.strategies.base import BaseStrategy, Signal, StrategyType, Timefram
 
 class ChartinkSupertrendFlipBearish(BaseStrategy):
     """Chartink: SuperTrend Flip Bearish — SuperTrend switches from bullish to bearish."""
-    name = "SuperTrend Flip Bearish"
+    name = "Chartink SuperTrend Flip Bearish"
     description = "SuperTrend flips from +1 to -1 (bearish trend start) + RSI < 50 + volume"
     strategy_type = StrategyType.TECHNICAL
     timeframe = Timeframe.DAILY

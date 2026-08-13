@@ -4,7 +4,7 @@ from domains.strategies.base import BaseStrategy, Signal, StrategyType, Timefram
 
 class ChartinkNR7Bearish(BaseStrategy):
     """Chartink: NR7 Bearish — narrowest range in 7 days inside a downtrend, breakdown setup."""
-    name = "NR7 Bearish Breakdown"
+    name = "Chartink NR7 Bearish Breakdown"
     description = "Narrowest range of 7 days + SMA20<SMA50 downtrend + RSI<50 = breakdown setup"
     strategy_type = StrategyType.TECHNICAL
     timeframe = Timeframe.DAILY

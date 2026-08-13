@@ -4,7 +4,7 @@ from domains.strategies.base import BaseStrategy, Signal, StrategyType, Timefram
 
 class ChartinkDojiReversal(BaseStrategy):
     """Chartink: Doji Pattern — indecision candle after trend, often signals reversal."""
-    name = "Doji Reversal Pattern"
+    name = "Chartink Doji Reversal Pattern"
     description = "Body < 10% of range (Doji) after downtrend with RSI support + next-day confirmation"
     strategy_type = StrategyType.TECHNICAL
     timeframe = Timeframe.DAILY

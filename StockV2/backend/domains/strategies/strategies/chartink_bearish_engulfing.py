@@ -4,7 +4,7 @@ from domains.strategies.base import BaseStrategy, Signal, StrategyType, Timefram
 
 class ChartinkBearishEngulfing(BaseStrategy):
     """Chartink: Bearish Engulfing — today's red candle body fully engulfs previous green candle."""
-    name = "Bearish Engulfing Reversal"
+    name = "Chartink Bearish Engulfing Reversal"
     description = "Today red candle engulfs prev green + RSI > 60 + volume expanding = distribution top"
     strategy_type = StrategyType.TECHNICAL
     timeframe = Timeframe.DAILY

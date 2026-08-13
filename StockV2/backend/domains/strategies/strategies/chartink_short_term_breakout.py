@@ -4,7 +4,7 @@ from domains.strategies.base import BaseStrategy, Signal, StrategyType, Timefram
 
 class ChartinkShortTermBreakout(BaseStrategy):
     """Chartink: Short Term Breakouts — price breaking 4-month high with volume surge and green candle."""
-    name = "Short Term Breakout"
+    name = "Chartink Short Term Breakout"
     description = "5-day close > 1.05x 120-day high + above-average volume + green candle"
     strategy_type = StrategyType.TECHNICAL
     timeframe = Timeframe.DAILY

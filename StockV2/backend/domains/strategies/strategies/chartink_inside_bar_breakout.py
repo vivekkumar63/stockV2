@@ -4,7 +4,7 @@ from domains.strategies.base import BaseStrategy, Signal, StrategyType, Timefram
 
 class ChartinkInsideBarBreakout(BaseStrategy):
     """Chartink: Inside Bar — today's range inside previous day's range (NR4 variant), compression setup."""
-    name = "Inside Bar Compression"
+    name = "Chartink Inside Bar Compression"
     description = "Today high < prev high + today low > prev low (inside bar) in uptrend = coiled spring"
     strategy_type = StrategyType.TECHNICAL
     timeframe = Timeframe.DAILY
