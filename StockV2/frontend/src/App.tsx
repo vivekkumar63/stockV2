@@ -5,6 +5,7 @@ import { DashboardPage } from './pages/DashboardPage'
 import { PortfolioPage } from './pages/PortfolioPage'
 import { BacktestPage } from './pages/BacktestPage'
 import { ScannerPage } from './pages/ScannerPage'
+import { StrategyMatchPage } from './pages/StrategyMatchPage'
 
 const queryClient = new QueryClient()
 
@@ -20,6 +21,7 @@ export function App() {
               <Route path="/portfolio" element={<PortfolioPage />} />
               <Route path="/backtest" element={<BacktestPage />} />
               <Route path="/scanner" element={<ScannerPage />} />
+              <Route path="/strategy-match" element={<StrategyMatchPage />} />
             </Routes>
           </main>
         </div>

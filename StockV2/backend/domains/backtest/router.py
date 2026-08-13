@@ -1,16 +1,55 @@
-from datetime import date
+import logging
+import threading
+from datetime import date, timedelta
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field, model_validator
 from sqlalchemy.orm import Session
 
-from database import get_db
+from database import get_db, SessionLocal
 from sqlalchemy import text
 from domains.backtest.runner import BacktestRunner
 from domains.backtest.service import BacktestService
 
+logger = logging.getLogger(__name__)
 router = APIRouter(tags=["backtest"])
+
+# ── Leaderboard background state ─────────────────────────────────────────────
+_lb_lock = threading.Lock()
+_lb_state: dict = {
+    "is_computing": False,
+    "pairs_done": 0,
+    "error": None,
+    "sl": 5.0,
+    "tgt": 10.0,
+}
+_LEADERBOARD_FROM = date(2015, 1, 1)
+
+
+def _run_leaderboard_bg(stop_loss_pct: float, target_pct: float) -> None:
+    global _lb_state
+    with _lb_lock:
+        if _lb_state["is_computing"]:
+            return
+        _lb_state.update({"is_computing": True, "error": None,
+                           "sl": stop_loss_pct, "tgt": target_pct})
+    db = SessionLocal()
+    try:
+        BacktestRunner(db).scan_all(
+            from_date=_LEADERBOARD_FROM,
+            to_date=date.today(),
+            stop_loss_pct=stop_loss_pct,
+            target_pct=target_pct,
+            limit=500,
+        )
+        logger.info("[leaderboard] compute done sl=%s tgt=%s", stop_loss_pct, target_pct)
+    except Exception as e:
+        _lb_state["error"] = str(e)
+        logger.exception("[leaderboard] compute failed")
+    finally:
+        _lb_state["is_computing"] = False
+        db.close()
 
 
 class BacktestRunRequest(BaseModel):
@@ -141,3 +180,104 @@ def get_result_trades(
     if not svc.get_result(result_id):
         raise HTTPException(status_code=404, detail="Backtest result not found")
     return svc.get_trades(result_id, limit=limit)
+
+
+# ── Leaderboard ───────────────────────────────────────────────────────────────
+
+@router.get("/backtest/leaderboard")
+def get_leaderboard(
+    stop_loss_pct: float = Query(5.0),
+    target_pct: float = Query(10.0),
+    min_trades: int = Query(3, ge=1),
+    limit: int = Query(500, le=5000),
+    symbol: Optional[str] = Query(None),
+    strategy_id: Optional[int] = Query(None),
+    db: Session = Depends(get_db),
+):
+    """Top (stock, strategy) pairs by win rate for a fixed SL/target."""
+    q = """
+        SELECT src.symbol, src.strategy_id, s.name AS strategy_name,
+               src.total_trades, src.win_rate, src.cagr, src.sharpe_ratio,
+               src.max_drawdown, src.profit_factor, src.total_pnl
+        FROM scan_result_cache src
+        JOIN strategies s ON src.strategy_id = s.id
+        WHERE src.stop_loss_pct = :sl AND src.target_pct = :tgt
+          AND src.total_trades >= :mt
+          AND src.from_date = :fd
+    """
+    params: dict = {
+        "sl": stop_loss_pct, "tgt": target_pct,
+        "mt": min_trades, "fd": str(_LEADERBOARD_FROM),
+    }
+    if symbol:
+        q += " AND src.symbol = :sym"
+        params["sym"] = symbol.upper()
+    if strategy_id is not None:
+        q += " AND src.strategy_id = :sid"
+        params["sid"] = strategy_id
+    q += " ORDER BY src.win_rate DESC NULLS LAST, src.cagr DESC NULLS LAST LIMIT :lim"
+    params["lim"] = limit
+    rows = db.execute(text(q), params).fetchall()
+    return [dict(r._mapping) for r in rows]
+
+
+@router.get("/backtest/leaderboard/status")
+def leaderboard_status(
+    stop_loss_pct: float = Query(5.0),
+    target_pct: float = Query(10.0),
+    db: Session = Depends(get_db),
+):
+    pairs_cached = db.execute(
+        text("""
+            SELECT COUNT(*) FROM scan_result_cache
+            WHERE stop_loss_pct = :sl AND target_pct = :tgt AND from_date = :fd
+        """),
+        {"sl": stop_loss_pct, "tgt": target_pct, "fd": str(_LEADERBOARD_FROM)},
+    ).scalar() or 0
+
+    total_symbols = db.execute(
+        text("""
+            SELECT COUNT(DISTINCT symbol) FROM stock_prices_daily
+            WHERE date >= :fd
+        """),
+        {"fd": str(_LEADERBOARD_FROM)},
+    ).scalar() or 0
+
+    total_strategies = db.execute(
+        text("SELECT COUNT(*) FROM strategies WHERE is_active = 1")
+    ).scalar() or 0
+
+    total_expected = total_symbols * total_strategies
+
+    return {
+        "is_computing": _lb_state["is_computing"],
+        "pairs_cached": pairs_cached,
+        "total_expected": total_expected,
+        "total_symbols": total_symbols,
+        "total_strategies": total_strategies,
+        "pct_done": round(pairs_cached / total_expected * 100, 1) if total_expected > 0 else 0,
+        "error": _lb_state.get("error"),
+        "params": {"stop_loss_pct": stop_loss_pct, "target_pct": target_pct,
+                   "from_date": str(_LEADERBOARD_FROM)},
+    }
+
+
+@router.post("/backtest/leaderboard/compute")
+def trigger_leaderboard_compute(
+    stop_loss_pct: float = Query(5.0),
+    target_pct: float = Query(10.0),
+):
+    """Kick off background computation of win rates for all (stock, strategy) pairs."""
+    if _lb_state["is_computing"]:
+        return {"status": "already_running",
+                "message": "Computation already in progress — check /leaderboard/status"}
+    t = threading.Thread(
+        target=_run_leaderboard_bg,
+        args=(stop_loss_pct, target_pct),
+        daemon=True,
+    )
+    t.start()
+    return {
+        "status": "started",
+        "message": f"Computing leaderboard: SL={stop_loss_pct}% · Target={target_pct}% · from {_LEADERBOARD_FROM}",
+    }

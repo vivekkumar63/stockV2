@@ -10,6 +10,7 @@ export function NavBar() {
       <NavLink to="/portfolio" className={link}>Portfolio</NavLink>
       <NavLink to="/backtest" className={link}>Backtest</NavLink>
       <NavLink to="/scanner" className={link}>Scanner</NavLink>
+      <NavLink to="/strategy-match" className={link}>Strategy Match</NavLink>
     </nav>
   )
 }
