@@ -66,15 +66,12 @@ export function StrategyMatchPage() {
   const { data: rows = [], isFetching } = useQuery({
     queryKey: ['leaderboard', 'data', sl, tgt, minTrades],
     queryFn: () => getLeaderboard({ stop_loss_pct: sl, target_pct: tgt, min_trades: minTrades }),
-    refetchInterval: (query) => {
-      // keep refreshing while computing so new results appear
-      return status?.is_computing ? 8000 : false
-    },
+    refetchInterval: () => (status?.is_computing ? 8000 : false),
     enabled: (status?.pairs_cached ?? 0) > 0,
   })
 
   const computeMut = useMutation({
-    mutationFn: (force = false) => triggerLeaderboardCompute(sl, tgt, force),
+    mutationFn: (force: boolean) => triggerLeaderboardCompute(sl, tgt, force),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['leaderboard'] })
     },
@@ -144,7 +141,7 @@ export function StrategyMatchPage() {
           </div>
 
           <button
-            onClick={() => computeMut.mutate(status?.is_current ? true : false)}
+            onClick={() => computeMut.mutate(!!status?.is_current)}
             disabled={computeMut.isPending || status?.is_computing}
             className={`px-4 py-1.5 text-white text-sm rounded disabled:opacity-50 ${
               status?.is_current
