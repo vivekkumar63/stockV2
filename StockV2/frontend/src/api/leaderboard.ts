@@ -55,3 +55,24 @@ export const triggerLeaderboardCompute = (sl = 5.0, tgt = 10.0, force = false) =
     `/backtest/leaderboard/compute?stop_loss_pct=${sl}&target_pct=${tgt}&force=${force}`,
     { method: 'POST' }
   )
+
+export interface TradeDetail {
+  entry_date: string
+  entry_price: number
+  exit_date: string
+  exit_price: number
+  pnl: number
+  pnl_pct: number
+  exit_reason: string
+  holding_days: number
+}
+
+export const getLeaderboardTrades = (
+  symbol: string,
+  strategyId: number,
+  sl = 5.0,
+  tgt = 10.0,
+) =>
+  apiFetch<TradeDetail[]>(
+    `/backtest/leaderboard/trades?symbol=${symbol}&strategy_id=${strategyId}&stop_loss_pct=${sl}&target_pct=${tgt}`
+  )

@@ -2,7 +2,8 @@ import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   getLeaderboard, getLeaderboardStatus, triggerLeaderboardCompute,
-  type LeaderboardRow,
+  getLeaderboardTrades,
+  type LeaderboardRow, type TradeDetail,
 } from '../api/leaderboard'
 import { getStrategies } from '../api/strategies'
 import { StrategyCard } from '../components/StrategyCard'
@@ -49,6 +50,7 @@ export function StrategyMatchPage() {
   const [stratFilter, setStratFilter] = useState<number | ''>('')
   const [sort, setSort] = useState<SortKey>('win_rate')
   const [dir, setDir] = useState<SortDir>('desc')
+  const [selectedKey, setSelectedKey] = useState<string | null>(null)
 
   const { data: strategies = [] } = useQuery({
     queryKey: ['strategies'],
@@ -290,33 +292,55 @@ export function StrategyMatchPage() {
             </thead>
             <tbody className="bg-white divide-y divide-gray-100">
               {visible.map((r, i) => {
+                const key = `${r.symbol}-${r.strategy_id}`
                 const wr = r.win_rate ?? 0
-                const rowBg = wr >= 0.65 ? 'hover:bg-green-50' : wr >= 0.5 ? 'hover:bg-amber-50' : 'hover:bg-gray-50'
+                const isSelected = selectedKey === key
+                const rowBg = isSelected
+                  ? 'bg-blue-50'
+                  : wr >= 0.65 ? 'hover:bg-green-50' : wr >= 0.5 ? 'hover:bg-amber-50' : 'hover:bg-gray-50'
                 return (
-                  <tr key={`${r.symbol}-${r.strategy_id}`} className={`transition-colors ${rowBg}`}>
-                    <td className="px-3 py-2 text-gray-400 text-xs">{i + 1}</td>
-                    <td className="px-3 py-2 font-semibold text-gray-800">{r.symbol}</td>
-                    <td className="px-3 py-2 text-gray-500 text-xs max-w-[180px] truncate" title={r.strategy_name}>
-                      {r.strategy_name}
-                    </td>
-                    <td className="px-3 py-2">{winBadge(r.win_rate)}</td>
-                    <td className="px-3 py-2 text-gray-600">{r.total_trades}</td>
-                    <td className={`px-3 py-2 font-semibold ${(r.cagr ?? 0) >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                      {r.cagr != null ? `${r.cagr.toFixed(1)}%` : '—'}
-                    </td>
-                    <td className={`px-3 py-2 ${r.total_pnl >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                      {inr(r.total_pnl)}
-                    </td>
-                    <td className="px-3 py-2 text-gray-500">
-                      {r.sharpe_ratio != null ? r.sharpe_ratio.toFixed(2) : '—'}
-                    </td>
-                    <td className="px-3 py-2 text-red-500">
-                      {r.max_drawdown != null ? `${r.max_drawdown.toFixed(1)}%` : '—'}
-                    </td>
-                    <td className="px-3 py-2 text-gray-500">
-                      {r.profit_factor != null ? r.profit_factor.toFixed(2) : '—'}
-                    </td>
-                  </tr>
+                  <>
+                    <tr
+                      key={key}
+                      onClick={() => setSelectedKey(isSelected ? null : key)}
+                      className={`transition-colors cursor-pointer ${rowBg}`}
+                    >
+                      <td className="px-3 py-2 text-gray-400 text-xs">{i + 1}</td>
+                      <td className="px-3 py-2 font-semibold text-gray-800">{r.symbol}</td>
+                      <td className="px-3 py-2 text-gray-500 text-xs max-w-[180px] truncate" title={r.strategy_name}>
+                        {r.strategy_name}
+                      </td>
+                      <td className="px-3 py-2">{winBadge(r.win_rate)}</td>
+                      <td className="px-3 py-2 text-gray-600">{r.total_trades}</td>
+                      <td className={`px-3 py-2 font-semibold ${(r.cagr ?? 0) >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                        {r.cagr != null ? `${r.cagr.toFixed(1)}%` : '—'}
+                      </td>
+                      <td className={`px-3 py-2 ${r.total_pnl >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                        {inr(r.total_pnl)}
+                      </td>
+                      <td className="px-3 py-2 text-gray-500">
+                        {r.sharpe_ratio != null ? r.sharpe_ratio.toFixed(2) : '—'}
+                      </td>
+                      <td className="px-3 py-2 text-red-500">
+                        {r.max_drawdown != null ? `${r.max_drawdown.toFixed(1)}%` : '—'}
+                      </td>
+                      <td className="px-3 py-2 text-gray-500">
+                        {r.profit_factor != null ? r.profit_factor.toFixed(2) : '—'}
+                      </td>
+                    </tr>
+                    {isSelected && (
+                      <tr key={`${key}-trades`}>
+                        <td colSpan={10} className="p-0 bg-blue-50 border-b border-blue-200">
+                          <TradesPanel
+                            symbol={r.symbol}
+                            strategyId={r.strategy_id}
+                            sl={sl}
+                            tgt={tgt}
+                          />
+                        </td>
+                      </tr>
+                    )}
+                  </>
                 )
               })}
             </tbody>
@@ -325,6 +349,87 @@ export function StrategyMatchPage() {
       ) : (status?.pairs_cached ?? 0) === 0 ? null : (
         <p className="text-gray-500 text-sm">No results match the current filters.</p>
       )}
+    </div>
+  )
+}
+
+const EXIT_REASON_LABEL: Record<string, string> = {
+  target_hit: 'Target',
+  stop_loss: 'Stop Loss',
+  max_holding_days: 'Time Exit',
+  end_of_data: 'End',
+}
+
+function TradesPanel({
+  symbol, strategyId, sl, tgt,
+}: { symbol: string; strategyId: number; sl: number; tgt: number }) {
+  const { data: trades, isLoading, isError } = useQuery({
+    queryKey: ['leaderboard-trades', symbol, strategyId, sl, tgt],
+    queryFn: () => getLeaderboardTrades(symbol, strategyId, sl, tgt),
+    staleTime: 10 * 60 * 1000,
+  })
+
+  if (isLoading) {
+    return (
+      <div className="px-6 py-4 text-sm text-blue-500 animate-pulse">
+        Loading trades… (first load runs the backtest from 2015, may take a few seconds)
+      </div>
+    )
+  }
+  if (isError) {
+    return <div className="px-6 py-3 text-sm text-red-600">Failed to load trades.</div>
+  }
+  if (!trades || trades.length === 0) {
+    return <div className="px-6 py-3 text-sm text-gray-400">No trades found for this combination.</div>
+  }
+
+  return (
+    <div className="px-4 py-3">
+      <p className="text-xs text-gray-500 mb-2 font-medium">
+        {trades.length} trades — {symbol} × {trades[0] ? trades[0].entry_date.slice(0, 4) : ''} to present
+      </p>
+      <div className="overflow-x-auto rounded border border-blue-200">
+        <table className="w-full text-xs">
+          <thead className="bg-blue-100 text-gray-600">
+            <tr>
+              <th className="px-3 py-1.5 text-left">#</th>
+              <th className="px-3 py-1.5 text-left">Entry</th>
+              <th className="px-3 py-1.5 text-right">Entry ₹</th>
+              <th className="px-3 py-1.5 text-left">Exit</th>
+              <th className="px-3 py-1.5 text-right">Exit ₹</th>
+              <th className="px-3 py-1.5 text-right">P&L ₹</th>
+              <th className="px-3 py-1.5 text-right">P&L %</th>
+              <th className="px-3 py-1.5 text-left">Reason</th>
+              <th className="px-3 py-1.5 text-right">Days</th>
+            </tr>
+          </thead>
+          <tbody className="bg-white divide-y divide-blue-50">
+            {trades.map((t: TradeDetail, i: number) => (
+              <tr key={i} className="hover:bg-blue-50">
+                <td className="px-3 py-1.5 text-gray-400">{i + 1}</td>
+                <td className="px-3 py-1.5 text-gray-600">{t.entry_date}</td>
+                <td className="px-3 py-1.5 text-right text-gray-700">
+                  {t.entry_price.toLocaleString('en-IN', { maximumFractionDigits: 1 })}
+                </td>
+                <td className="px-3 py-1.5 text-gray-600">{t.exit_date}</td>
+                <td className="px-3 py-1.5 text-right text-gray-700">
+                  {t.exit_price.toLocaleString('en-IN', { maximumFractionDigits: 1 })}
+                </td>
+                <td className={`px-3 py-1.5 text-right font-semibold ${t.pnl >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                  {inr(t.pnl)}
+                </td>
+                <td className={`px-3 py-1.5 text-right ${t.pnl_pct >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                  {t.pnl_pct >= 0 ? '+' : ''}{t.pnl_pct.toFixed(1)}%
+                </td>
+                <td className="px-3 py-1.5 text-gray-500">
+                  {EXIT_REASON_LABEL[t.exit_reason] ?? t.exit_reason}
+                </td>
+                <td className="px-3 py-1.5 text-right text-gray-500">{t.holding_days}d</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   )
 }

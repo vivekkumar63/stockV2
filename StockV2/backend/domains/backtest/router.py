@@ -200,6 +200,58 @@ def get_result_trades(
 
 # ── Leaderboard ───────────────────────────────────────────────────────────────
 
+@router.get("/backtest/leaderboard/trades")
+def get_leaderboard_trades(
+    symbol: str = Query(...),
+    strategy_id: int = Query(...),
+    stop_loss_pct: float = Query(5.0),
+    target_pct: float = Query(10.0),
+    db: Session = Depends(get_db),
+):
+    """Return individual trades for a (stock, strategy) pair from the leaderboard date range.
+    Re-uses a cached backtest_result if one exists; otherwise runs fresh and caches it.
+    """
+    from_date = _LEADERBOARD_FROM
+    to_date = _get_last_price_date(db) or ist_today()
+
+    # Look for an existing result covering this symbol/strategy from the leaderboard start date
+    existing = db.execute(
+        text("""
+            SELECT id FROM backtest_results
+            WHERE symbol = :sym AND strategy_id = :sid AND from_date = :fd
+            ORDER BY ran_at DESC LIMIT 1
+        """),
+        {"sym": symbol.upper(), "sid": strategy_id, "fd": str(from_date)},
+    ).fetchone()
+
+    if existing:
+        result_id = existing[0]
+    else:
+        result = BacktestRunner(db).run(
+            symbol=symbol.upper(),
+            from_date=from_date,
+            to_date=to_date,
+            strategy_id=strategy_id,
+            stop_loss_pct=stop_loss_pct,
+            target_pct=target_pct,
+        )
+        if "error" in result:
+            raise HTTPException(status_code=400, detail=result["error"])
+        result_id = result["result_id"]
+
+    trades = db.execute(
+        text("""
+            SELECT entry_date, entry_price, exit_date, exit_price,
+                   pnl, pnl_pct, exit_reason, holding_days
+            FROM backtest_trades
+            WHERE backtest_result_id = :rid
+            ORDER BY entry_date ASC
+        """),
+        {"rid": result_id},
+    ).fetchall()
+    return [dict(r._mapping) for r in trades]
+
+
 @router.get("/backtest/leaderboard")
 def get_leaderboard(
     stop_loss_pct: float = Query(5.0),
