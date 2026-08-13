@@ -13,10 +13,11 @@ class JobIds:
     INTRADAY_SCAN = "intraday_scan"
     WEEKLY_FUNDAMENTALS = "weekly_fundamentals"
     MONTHLY_ML_RETRAIN = "monthly_ml_retrain"
-    DIGEST_900 = "digest_0900"
-    DIGEST_915 = "digest_0915"
+    DIGEST_0915 = "digest_0915"
+    DIGEST_1030 = "digest_1030"
     DIGEST_1200 = "digest_1200"
-    DIGEST_1500 = "digest_1500"
+    DIGEST_1400 = "digest_1400"
+    DIGEST_1515 = "digest_1515"
     WEEKLY_PRECOMPUTE = "weekly_precompute"
     LEADERBOARD_REFRESH = "leaderboard_refresh"
 
@@ -109,7 +110,6 @@ def _intraday_scan():
                 exits = ExitMonitor(db).scan_exits(current_prices)
                 if exits:
                     logger.info("[scheduler] intraday_scan: %d positions exited", len(exits))
-        _send_sell_alerts_for_holdings(db)
     except Exception:
         logger.exception("[scheduler] intraday_scan failed")
     finally:
@@ -229,7 +229,7 @@ def _weekly_precompute():
 
 
 def _intraday_digest():
-    """Run a fresh strategy scan then immediately send top BUY signals to Telegram."""
+    """Scan all stocks, send top BUY signals + sell alerts for held positions to Telegram."""
     from database import SessionLocal
     from domains.strategies.engine import StrategyEngine
     from domains.data.nse_universe import NSE_SYMBOLS
@@ -249,6 +249,9 @@ def _intraday_digest():
         top_10 = sorted(buy_signals, key=lambda x: x.get("confidence_score") or 0, reverse=True)[:10]
         AlertService().send_daily_digest(top_10, scan_date=today)
         logger.info("[scheduler] intraday_digest sent: %d buy signals", len(top_10))
+
+        # Also fire sell alerts for any held positions
+        _send_sell_alerts_for_holdings(db)
     except Exception:
         logger.exception("[scheduler] intraday_digest failed")
     finally:
@@ -295,10 +298,11 @@ def register_jobs():
         replace_existing=True,
     )
     for job_id, hour, minute in [
-        (JobIds.DIGEST_900,  9,  0),
-        (JobIds.DIGEST_915,  9, 15),
-        (JobIds.DIGEST_1200, 12,  0),
-        (JobIds.DIGEST_1500, 15,  0),
+        (JobIds.DIGEST_0915,  9, 15),   # market open
+        (JobIds.DIGEST_1030, 10, 30),   # mid-morning
+        (JobIds.DIGEST_1200, 12,  0),   # midday
+        (JobIds.DIGEST_1400, 14,  0),   # afternoon
+        (JobIds.DIGEST_1515, 15, 15),   # pre-close (15 min before 3:30)
     ]:
         scheduler.add_job(
             _intraday_digest,
