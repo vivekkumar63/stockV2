@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from database import get_db, SessionLocal
 from sqlalchemy import text
 from domains.backtest.runner import BacktestRunner
+from ist import ist_today
 from domains.backtest.service import BacktestService
 
 logger = logging.getLogger(__name__)
@@ -43,7 +44,7 @@ def _run_leaderboard_bg(stop_loss_pct: float, target_pct: float) -> None:
                            "sl": stop_loss_pct, "tgt": target_pct})
     db = SessionLocal()
     try:
-        to_date = _get_last_price_date(db) or date.today()
+        to_date = _get_last_price_date(db) or ist_today()
         BacktestRunner(db).scan_all(
             from_date=_LEADERBOARD_FROM,
             to_date=to_date,

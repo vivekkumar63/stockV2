@@ -6,6 +6,7 @@ from typing import Optional
 import httpx
 
 from settings import settings
+from ist import ist_today
 
 logger = logging.getLogger(__name__)
 
@@ -38,7 +39,7 @@ class AlertService:
             return False
 
     def send_daily_digest(self, top_signals: list[dict], scan_date: Optional[date] = None) -> bool:
-        today = scan_date or date.today()
+        today = scan_date or ist_today()
         lines = [
             f"<b>📊 StockV2 Daily Digest — {today.strftime('%d %b %Y')}</b>",
             "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",

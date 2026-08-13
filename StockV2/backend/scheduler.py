@@ -1,6 +1,7 @@
 import logging
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
+from ist import ist_today, ist_now
 
 logger = logging.getLogger(__name__)
 
@@ -23,21 +24,18 @@ scheduler = BackgroundScheduler(timezone="Asia/Kolkata")
 
 
 def _is_market_hours() -> bool:
-    from datetime import datetime
-    from zoneinfo import ZoneInfo
-    now = datetime.now(ZoneInfo("Asia/Kolkata"))
+    now = ist_now()
     return now.weekday() < 5 and 9 <= now.hour < 16
 
 
 def _daily_eod_update():
-    from datetime import date
     from database import SessionLocal
     from domains.strategies.engine import StrategyEngine
     from domains.data.nse_universe import NSE_SYMBOLS
     db = SessionLocal()
     try:
         engine = StrategyEngine(db)
-        results = engine.scan_all(NSE_SYMBOLS, date.today())
+        results = engine.scan_all(NSE_SYMBOLS, ist_today())
         logger.info("[scheduler] daily_eod_update: %d signals generated", len(results))
     except Exception:
         logger.exception("[scheduler] daily_eod_update failed")
@@ -46,7 +44,6 @@ def _daily_eod_update():
 
 
 def _intraday_scan():
-    from datetime import date
     from database import SessionLocal
     from domains.strategies.engine import StrategyEngine
     from domains.data.nse_universe import NSE_SYMBOLS
@@ -57,7 +54,7 @@ def _intraday_scan():
     try:
         # Strategy scan
         engine = StrategyEngine(db)
-        results = engine.scan_all(NSE_SYMBOLS, date.today())
+        results = engine.scan_all(NSE_SYMBOLS, ist_today())
         logger.info("[scheduler] intraday_scan: %d signals", len(results))
 
         # Exit monitor: get open positions and their last known close prices
@@ -91,7 +88,7 @@ def _intraday_scan():
 
 def _daily_data_refresh():
     """Download only the missing OHLCV days for every stock (incremental, not full re-download)."""
-    from datetime import date, timedelta
+    from datetime import timedelta
     from database import SessionLocal
     from domains.data.feeds.yfinance_feed import YFinanceFeed
     from domains.data.nse_universe import NSE_SYMBOLS
@@ -99,7 +96,7 @@ def _daily_data_refresh():
 
     db = SessionLocal()
     feed = YFinanceFeed()
-    today = date.today()
+    today = ist_today()
     updated = 0
     skipped = 0
     failed = 0
@@ -203,24 +200,24 @@ def _weekly_precompute():
 
 def _intraday_digest():
     """Run a fresh strategy scan then immediately send top BUY signals to Telegram."""
-    from datetime import date
     from database import SessionLocal
     from domains.strategies.engine import StrategyEngine
     from domains.data.nse_universe import NSE_SYMBOLS
     from domains.strategies.service import StrategyService
     from domains.alerts.telegram import AlertService
 
+    today = ist_today()
     db = SessionLocal()
     try:
         engine = StrategyEngine(db)
-        scan_count = len(engine.scan_all(NSE_SYMBOLS, date.today()))
+        scan_count = len(engine.scan_all(NSE_SYMBOLS, today))
         logger.info("[scheduler] intraday_digest scan: %d signals generated", scan_count)
 
-        today_str = date.today().strftime("%Y-%m-%d")
+        today_str = today.strftime("%Y-%m-%d")
         signals = StrategyService(db).get_today_signals(signal_date=today_str)
         buy_signals = [s for s in signals if s["signal_type"] == "BUY"]
         top_10 = sorted(buy_signals, key=lambda x: x.get("confidence_score") or 0, reverse=True)[:10]
-        AlertService().send_daily_digest(top_10, scan_date=date.today())
+        AlertService().send_daily_digest(top_10, scan_date=today)
         logger.info("[scheduler] intraday_digest sent: %d buy signals", len(top_10))
     except Exception:
         logger.exception("[scheduler] intraday_digest failed")

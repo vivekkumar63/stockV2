@@ -1,12 +1,13 @@
 import json
 import logging
-from datetime import date, timedelta
+from datetime import timedelta
 from typing import Optional
 
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from domains.portfolio.position_sizer import PositionSizer
+from ist import ist_today
 
 logger = logging.getLogger(__name__)
 
@@ -146,7 +147,7 @@ class PaperTrader:
 
     def _insert_exit_rule(self, trade_id: int, symbol: str, entry_price: float,
                           stop_loss_price: float, target_price: float, holding_days: int):
-        max_exit = date.today() + timedelta(days=holding_days)
+        max_exit = ist_today() + timedelta(days=holding_days)
         self.db.execute(
             text("""
                 INSERT INTO exit_rules

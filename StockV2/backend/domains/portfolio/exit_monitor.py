@@ -5,6 +5,8 @@ from typing import Optional
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from ist import ist_today
+
 logger = logging.getLogger(__name__)
 
 
@@ -37,7 +39,7 @@ class ExitMonitor:
             return "target_hit"
         if rule["max_exit_date"]:
             max_date = date.fromisoformat(str(rule["max_exit_date"]))
-            if date.today() >= max_date:
+            if ist_today() >= max_date:
                 return "max_holding_days"
         return None
 

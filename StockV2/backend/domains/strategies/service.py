@@ -1,8 +1,9 @@
-from datetime import datetime
 from typing import Optional
 
 from sqlalchemy import text
 from sqlalchemy.orm import Session
+
+from ist import ist_today
 
 
 class StrategyService:
@@ -17,7 +18,7 @@ class StrategyService:
 
     def get_today_signals(self, signal_date: Optional[str] = None) -> list[dict]:
         """Return signals for the requested date. If none exist, fall back to the most recent scan date."""
-        date_str = signal_date or datetime.utcnow().strftime("%Y-%m-%d")
+        date_str = signal_date or ist_today().strftime("%Y-%m-%d")
 
         # Check if there are any signals for today; if not, use the most recent date available
         latest_date = self.db.execute(
