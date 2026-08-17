@@ -46,6 +46,7 @@ class WalkForwardRunner:
         db: Session,
         train_months: int = 12,
         test_months: int = 3,
+        initial_capital: float = 500_000.0,
         round_trip_cost_pct: float = 0.30,
     ) -> WalkForwardResult:
         row = db.execute(
@@ -90,7 +91,7 @@ class WalkForwardRunner:
 
             df_window = df[(df["date"] >= train_start) & (df["date"] <= test_end)]
             if df_window.empty or len(df_window) < 50:
-                test_start += timedelta(days=test_months * 30)
+                test_start += timedelta(days=test_months * 30 + 1)
                 continue
 
             df_ind = IndicatorEngine.compute(df_window)
@@ -101,12 +102,12 @@ class WalkForwardRunner:
                 to_date=test_end,
                 strategies=[strat],
                 use_aggregator=False,
-                initial_capital=500_000.0,
+                initial_capital=initial_capital,
                 _df_ind_precomputed=df_ind,
                 round_trip_cost_pct=round_trip_cost_pct,
             )
 
-            oos_metrics = compute_metrics(trades, 500_000.0, test_start, test_end)
+            oos_metrics = compute_metrics(trades, initial_capital, test_start, test_end)
             windows.append(WalkForwardWindow(
                 window_index=window_idx,
                 train_from=train_start,
@@ -117,7 +118,7 @@ class WalkForwardRunner:
             ))
 
             window_idx += 1
-            test_start += timedelta(days=test_months * 30)
+            test_start += timedelta(days=test_months * 30 + 1)
 
         if not windows:
             return WalkForwardResult(
@@ -138,10 +139,10 @@ class WalkForwardRunner:
             symbol=symbol, prices_df=df,
             from_date=min_date, to_date=max_date,
             strategies=[strat], use_aggregator=False,
-            initial_capital=500_000.0, _df_ind_precomputed=df_ind_full,
+            initial_capital=initial_capital, _df_ind_precomputed=df_ind_full,
             round_trip_cost_pct=round_trip_cost_pct,
         )
-        is_metrics = compute_metrics(is_trades, 500_000.0, min_date, max_date)
+        is_metrics = compute_metrics(is_trades, initial_capital, min_date, max_date)
 
         return WalkForwardResult(
             symbol=symbol,
