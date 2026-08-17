@@ -27,6 +27,7 @@ class SimTrade:
     pnl: float
     pnl_pct: float
     holding_days: int
+    commission: float = 0.0
 
 
 @dataclass
@@ -54,6 +55,7 @@ class BacktestSimulator:
         _df_ind_precomputed: Optional[pd.DataFrame] = None,
         stop_loss_pct_override: Optional[float] = None,
         target_pct_override: Optional[float] = None,
+        round_trip_cost_pct: float = 0.0,
     ) -> list[SimTrade]:
         cfg = SimpleNamespace(
             total_capital=initial_capital,
@@ -97,7 +99,7 @@ class BacktestSimulator:
             if open_pos:
                 reason = self._check_exit(open_pos, current_price, current_date)
                 if reason:
-                    trades.append(self._close(symbol, open_pos, current_price, current_date, reason))
+                    trades.append(self._close(symbol, open_pos, current_price, current_date, reason, round_trip_cost_pct))
                     open_pos = None
 
             if open_pos is None:
@@ -151,7 +153,7 @@ class BacktestSimulator:
             last_row = df[df["date"] <= to_date].iloc[-1]
             last_price = float(last_row["close"])
             actual_last_date = last_row["date"]
-            trades.append(self._close(symbol, open_pos, last_price, actual_last_date, "end_of_period"))
+            trades.append(self._close(symbol, open_pos, last_price, actual_last_date, "end_of_period", round_trip_cost_pct))
 
         return trades
 
@@ -165,8 +167,11 @@ class BacktestSimulator:
         return None
 
     def _close(self, symbol: str, pos: _OpenPosition, price: float,
-               exit_date: date, reason: str) -> SimTrade:
-        pnl = round((price - pos.entry_price) * pos.quantity, 2)
+               exit_date: date, reason: str, round_trip_cost_pct: float = 0.0) -> SimTrade:
+        raw_pnl = round((price - pos.entry_price) * pos.quantity, 2)
+        entry_value = pos.entry_price * pos.quantity
+        commission = round(entry_value * round_trip_cost_pct / 100, 2)
+        net_pnl = round(raw_pnl - commission, 2)
         pnl_pct = round((price - pos.entry_price) / pos.entry_price * 100, 2)
         return SimTrade(
             symbol=symbol,
@@ -178,7 +183,8 @@ class BacktestSimulator:
             stop_loss_price=pos.stop_loss_price,
             target_price=pos.target_price,
             exit_reason=reason,
-            pnl=pnl,
+            pnl=net_pnl,
             pnl_pct=pnl_pct,
             holding_days=(exit_date - pos.entry_date).days,
+            commission=commission,
         )

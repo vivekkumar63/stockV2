@@ -117,3 +117,62 @@ def test_simulator_aggregator_requires_three_buy_signals():
         initial_capital=500_000.0,
     )
     assert trades == []
+
+
+def test_round_trip_cost_reduces_pnl():
+    """Verify round-trip cost deducts from raw PnL."""
+    from domains.backtest.simulator import BacktestSimulator
+    df = _make_prices(250)
+    from_date, to_date = df["date"][50], df["date"].iloc[-1]
+
+    trades_no_cost = BacktestSimulator().run(
+        symbol="TCS", prices_df=df,
+        from_date=from_date, to_date=to_date,
+        strategies=[_AlwaysBuyStrategy()],
+        use_aggregator=False, initial_capital=500_000.0,
+        round_trip_cost_pct=0.0,
+    )
+
+    trades_with_cost = BacktestSimulator().run(
+        symbol="TCS", prices_df=df,
+        from_date=from_date, to_date=to_date,
+        strategies=[_AlwaysBuyStrategy()],
+        use_aggregator=False, initial_capital=500_000.0,
+        round_trip_cost_pct=0.30,
+    )
+
+    assert len(trades_no_cost) == len(trades_with_cost)
+    for t_no, t_yes in zip(trades_no_cost, trades_with_cost):
+        assert t_yes.pnl < t_no.pnl
+        assert t_yes.commission > 0
+        entry_value = t_yes.entry_price * t_yes.quantity
+        expected_commission = round(entry_value * 0.30 / 100, 2)
+        assert abs(t_yes.commission - expected_commission) < 0.01
+
+
+def test_zero_cost_pnl_unchanged():
+    """Verify 0% cost produces same PnL as default (backward compat check)."""
+    from domains.backtest.simulator import BacktestSimulator
+    df = _make_prices(250)
+    from_date, to_date = df["date"][50], df["date"].iloc[-1]
+
+    trades_default = BacktestSimulator().run(
+        symbol="TCS", prices_df=df,
+        from_date=from_date, to_date=to_date,
+        strategies=[_AlwaysBuyStrategy()],
+        use_aggregator=False, initial_capital=500_000.0,
+    )
+
+    trades_explicit_zero = BacktestSimulator().run(
+        symbol="TCS", prices_df=df,
+        from_date=from_date, to_date=to_date,
+        strategies=[_AlwaysBuyStrategy()],
+        use_aggregator=False, initial_capital=500_000.0,
+        round_trip_cost_pct=0.0,
+    )
+
+    assert len(trades_default) == len(trades_explicit_zero)
+    for t1, t2 in zip(trades_default, trades_explicit_zero):
+        assert t1.pnl == t2.pnl
+        assert t1.commission == 0.0
+        assert t2.commission == 0.0
