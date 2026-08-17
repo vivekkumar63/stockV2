@@ -108,6 +108,8 @@ export function DashboardPage() {
                   <th className="px-4 py-2" scope="col">Stop Loss</th>
                   <th className="px-4 py-2" scope="col">Target</th>
                   <th className="px-4 py-2" scope="col">Hold</th>
+                  <th className="px-4 py-2" scope="col">History Win%</th>
+                  <th className="px-4 py-2" scope="col">Opp Score</th>
                   <th className="px-4 py-2" scope="col" />
                 </tr>
               </thead>
@@ -159,6 +161,24 @@ function parseConditions(reasoningJson: string | null): { met: string[]; failed:
   } catch {
     return { met: [], failed: [] }
   }
+}
+
+function OpportunityBadge({ score, grade }: { score: number | null; grade: string | null }) {
+  if (score == null) return <span className="text-gray-300 text-sm">—</span>
+  const color =
+    score >= 80 ? 'bg-emerald-100 text-emerald-700' :
+    score >= 65 ? 'bg-green-100 text-green-700' :
+    score >= 50 ? 'bg-yellow-100 text-yellow-700' :
+    score >= 35 ? 'bg-orange-100 text-orange-700' :
+    'bg-red-100 text-red-600'
+  return (
+    <span
+      className={`px-2 py-0.5 rounded text-xs font-semibold cursor-default ${color}`}
+      title={`Opportunity score: ${score}/100 (grade ${grade})`}
+    >
+      {score} {grade}
+    </span>
+  )
 }
 
 function ConfidenceBadge({ score, conditions }: { score: number | null; conditions: string[] }) {
@@ -235,6 +255,18 @@ function SignalRow({
           {sig.holding_period_days != null ? `${sig.holding_period_days}d` : '—'}
         </td>
         <td className="px-4 py-2">
+          {sig.historical_win_rate != null ? (
+            <span className={`text-sm font-medium ${sig.historical_win_rate >= 0.6 ? 'text-green-600' : sig.historical_win_rate >= 0.4 ? 'text-yellow-600' : 'text-red-500'}`}>
+              {(sig.historical_win_rate * 100).toFixed(0)}%
+            </span>
+          ) : (
+            <span className="text-gray-300 text-sm">—</span>
+          )}
+        </td>
+        <td className="px-4 py-2">
+          <OpportunityBadge score={sig.opportunity_score} grade={sig.opportunity_grade} />
+        </td>
+        <td className="px-4 py-2">
           <button
             onClick={onEnter}
             disabled={entering}
@@ -247,7 +279,7 @@ function SignalRow({
       </tr>
       {expanded && (
         <tr className="bg-blue-50">
-          <td colSpan={9} className="px-6 py-3">
+          <td colSpan={11} className="px-6 py-3">
             <div className="text-xs space-y-1">
               <p className="font-semibold text-gray-700 mb-1">
                 Why {sig.symbol}? — {sig.strategy_name}

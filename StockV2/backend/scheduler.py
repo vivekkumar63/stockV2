@@ -154,6 +154,23 @@ def _daily_data_refresh():
         db.close()
 
 
+def _market_regime_compute():
+    """Compute and persist today's market regime after EOD prices are available."""
+    from database import SessionLocal
+    from domains.market.regime import MarketRegimeEngine
+    db = SessionLocal()
+    try:
+        engine = MarketRegimeEngine()
+        result = engine.compute(db)
+        engine.save(db, result)
+        logger.info("[regime] %s confidence=%.0f%% breadth_sma50=%.0f%%",
+                    result.regime, result.confidence * 100, result.pct_above_sma50 * 100)
+    except Exception:
+        logger.exception("[regime] compute failed")
+    finally:
+        db.close()
+
+
 def _leaderboard_refresh():
     """Auto-refresh leaderboard after EOD data lands. Skips if cache is already current."""
     from domains.backtest.router import _run_leaderboard_bg, _get_last_price_date, _parse_date, _lb_state, _LEADERBOARD_FROM
@@ -185,6 +202,36 @@ def _leaderboard_refresh():
 
     logger.info("[leaderboard_refresh] starting background compute")
     _run_leaderboard_bg(stop_loss_pct=5.0, target_pct=10.0)
+
+
+def _signal_outcome_compute():
+    """Evaluate outcomes for BUY signals that are old enough (nightly)."""
+    from database import SessionLocal
+    from domains.intelligence.false_signal_detector import FalseSignalDetector
+    db = SessionLocal()
+    try:
+        n = FalseSignalDetector().compute_outcomes(db)
+        logger.info("[signal_outcomes] %d new outcomes recorded", n)
+    except Exception:
+        logger.exception("[signal_outcomes] failed")
+    finally:
+        db.close()
+
+
+def _strategy_correlation_compute():
+    """Recompute strategy signal-overlap correlation matrix (weekly)."""
+    from database import SessionLocal
+    from domains.intelligence.strategy_correlation import StrategyCorrelationEngine
+    db = SessionLocal()
+    try:
+        engine = StrategyCorrelationEngine()
+        pairs = engine.compute(db)
+        engine.save(db, pairs)
+        logger.info("[correlations] %d strategy pairs computed", len(pairs))
+    except Exception:
+        logger.exception("[correlations] failed")
+    finally:
+        db.close()
 
 
 def _weekly_fundamentals():
@@ -244,7 +291,12 @@ def _intraday_digest():
         today_str = today.strftime("%Y-%m-%d")
         signals = StrategyService(db).get_today_signals(signal_date=today_str)
         buy_signals = [s for s in signals if s["signal_type"] == "BUY"]
-        top_10 = sorted(buy_signals, key=lambda x: x.get("confidence_score") or 0, reverse=True)[:10]
+        # Only suggest stocks where historical win rate >= 40% (skip if no history yet)
+        qualified = [
+            s for s in buy_signals
+            if s.get("historical_win_rate") is None or (s["historical_win_rate"] or 0) >= 0.40
+        ]
+        top_10 = sorted(qualified, key=lambda x: x.get("confidence_score") or 0, reverse=True)[:10]
         AlertService().send_daily_digest(top_10, scan_date=today)
         logger.info("[scheduler] intraday_digest sent: %d buy signals", len(top_10))
 
@@ -288,11 +340,32 @@ def register_jobs():
         id=JobIds.WEEKLY_PRECOMPUTE,
         replace_existing=True,
     )
+    # 4:15pm — compute market regime after EOD data (3:45 fetch + 4:00 scan)
+    scheduler.add_job(
+        _market_regime_compute,
+        CronTrigger(hour=16, minute=15, day_of_week="mon-fri"),
+        id="market_regime_compute",
+        replace_existing=True,
+    )
     # 4:30pm — refresh leaderboard after EOD data lands (3:45 data fetch + 4:00 EOD scan)
     scheduler.add_job(
         _leaderboard_refresh,
         CronTrigger(hour=16, minute=30, day_of_week="mon-fri"),
         id=JobIds.LEADERBOARD_REFRESH,
+        replace_existing=True,
+    )
+    # 4:45pm — evaluate signal outcomes for signals old enough (holding period elapsed)
+    scheduler.add_job(
+        _signal_outcome_compute,
+        CronTrigger(hour=16, minute=45, day_of_week="mon-fri"),
+        id="signal_outcome_compute",
+        replace_existing=True,
+    )
+    # Sunday 21:00 — recompute strategy correlation matrix weekly
+    scheduler.add_job(
+        _strategy_correlation_compute,
+        CronTrigger(day_of_week="sun", hour=21, minute=0),
+        id="strategy_correlation_compute",
         replace_existing=True,
     )
     for job_id, hour, minute in [

@@ -396,3 +396,101 @@ class DataQualityLog(Base):
     details: Mapped[Optional[str]] = mapped_column(Text)
     resolved: Mapped[bool] = mapped_column(Boolean, default=False)
     logged_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+# ─── Market Intelligence ──────────────────────────────────────────────────────
+
+class MarketRegime(Base):
+    """Daily snapshot of broad market regime computed from stock-universe breadth."""
+    __tablename__ = "market_regime"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    date: Mapped[date] = mapped_column(Date, nullable=False, unique=True, index=True)
+    # One of: STRONG_BULL | BULL | SIDEWAYS | BEAR | STRONG_BEAR | HIGH_VOLATILITY
+    regime: Mapped[str] = mapped_column(String(20), nullable=False)
+    confidence: Mapped[Optional[float]] = mapped_column(Float)
+    pct_above_sma50: Mapped[Optional[float]] = mapped_column(Float)
+    pct_above_sma200: Mapped[Optional[float]] = mapped_column(Float)
+    advance_decline_ratio: Mapped[Optional[float]] = mapped_column(Float)
+    avg_atr_ratio: Mapped[Optional[float]] = mapped_column(Float)
+    stocks_counted: Mapped[Optional[int]] = mapped_column(Integer)
+    computed_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class SupportResistanceLevel(Base):
+    """Computed support and resistance levels per symbol, refreshed daily."""
+    __tablename__ = "support_resistance_levels"
+    __table_args__ = (
+        UniqueConstraint("symbol", "computed_date", "level_source"),
+        Index("idx_sr_symbol_date", "symbol", "computed_date"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    symbol: Mapped[str] = mapped_column(String(20), nullable=False)
+    computed_date: Mapped[date] = mapped_column(Date, nullable=False)
+    level_type: Mapped[str] = mapped_column(String(15), nullable=False)   # SUPPORT | RESISTANCE
+    level_source: Mapped[str] = mapped_column(String(30), nullable=False) # SWING_HIGH | SMA50 | 52W_HIGH | …
+    price: Mapped[float] = mapped_column(Float, nullable=False)
+    strength: Mapped[Optional[float]] = mapped_column(Float)   # 0–1, significance of this level
+    distance_pct: Mapped[Optional[float]] = mapped_column(Float)  # from current price; negative = below
+
+
+class SignalOutcome(Base):
+    """
+    Tracks actual outcome for each strategy signal after its holding period.
+    Populated nightly by FalseSignalDetector for signals old enough to evaluate.
+    """
+    __tablename__ = "signal_outcomes"
+    __table_args__ = (
+        UniqueConstraint("signal_id", name="uq_signal_outcome"),
+        Index("idx_signal_outcome_strategy", "strategy_id", "signal_date"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    signal_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    symbol: Mapped[str] = mapped_column(String(20), nullable=False)
+    strategy_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    signal_date: Mapped[date] = mapped_column(Date, nullable=False)
+    signal_type: Mapped[str] = mapped_column(String(10), nullable=False)  # BUY | SELL
+    price_at_signal: Mapped[float] = mapped_column(Float, nullable=False)
+    outcome_price: Mapped[Optional[float]] = mapped_column(Float)
+    outcome_date: Mapped[Optional[date]] = mapped_column(Date)
+    pnl_pct: Mapped[Optional[float]] = mapped_column(Float)       # % change at outcome
+    is_profitable: Mapped[Optional[bool]] = mapped_column(Boolean)
+    holding_days_actual: Mapped[Optional[int]] = mapped_column(Integer)
+    computed_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class StrategyCorrelation(Base):
+    """
+    Pairwise signal-overlap correlation between strategies.
+    High value = both strategies tend to fire on the same stock simultaneously.
+    """
+    __tablename__ = "strategy_correlations"
+    __table_args__ = (
+        UniqueConstraint("strategy_id_a", "strategy_id_b", name="uq_strat_corr"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    strategy_id_a: Mapped[int] = mapped_column(Integer, nullable=False)
+    strategy_id_b: Mapped[int] = mapped_column(Integer, nullable=False)
+    correlation: Mapped[float] = mapped_column(Float, nullable=False)   # 0.0–1.0
+    shared_signals: Mapped[int] = mapped_column(Integer, default=0)
+    computed_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class StrategyRegimePerformance(Base):
+    """Per-strategy win-rate breakdown by market regime. Populated by RegimePerformanceEngine."""
+    __tablename__ = "strategy_regime_performance"
+    __table_args__ = (
+        UniqueConstraint("strategy_id", "regime", name="uq_regime_perf"),
+        Index("idx_regime_perf_strategy", "strategy_id"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    strategy_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    regime: Mapped[str] = mapped_column(String(20), nullable=False)
+    total_trades: Mapped[int] = mapped_column(Integer, default=0)
+    win_rate: Mapped[Optional[float]] = mapped_column(Float)       # 0.0–1.0
+    avg_pnl_pct: Mapped[Optional[float]] = mapped_column(Float)    # average % return per trade
+    computed_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)

@@ -7,6 +7,24 @@ import { StrategyCard } from '../components/StrategyCard'
 type SortKey = keyof LiveScanResult
 type SortDir = 'asc' | 'desc'
 
+function OppScoreBadge({ score, grade }: { score: number | null; grade: string | null }) {
+  if (score == null) return <span className="text-gray-300 text-sm">—</span>
+  const color =
+    score >= 80 ? 'bg-emerald-100 text-emerald-700' :
+    score >= 65 ? 'bg-green-100 text-green-700' :
+    score >= 50 ? 'bg-yellow-100 text-yellow-700' :
+    score >= 35 ? 'bg-orange-100 text-orange-700' :
+    'bg-red-100 text-red-600'
+  return (
+    <span
+      className={`px-2 py-0.5 rounded text-xs font-semibold ${color}`}
+      title={`Opportunity score: ${score}/100 (grade ${grade})`}
+    >
+      {score} {grade}
+    </span>
+  )
+}
+
 export function ScannerPage() {
   const [strategyId, setStrategyId] = useState<string>('')
   const [signalType, setSignalType] = useState<string>('')
@@ -164,6 +182,8 @@ export function ScannerPage() {
                     <Th label="Stop Loss %" col="stop_loss_pct" />
                     <Th label="Target %" col="target_pct" />
                     <Th label="Hold Days" col="holding_days" />
+                    <Th label="History Win%" col="historical_win_rate" />
+                    <Th label="Opp Score" col="opportunity_score" />
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100">
@@ -194,6 +214,18 @@ export function ScannerPage() {
                       </td>
                       <td className="px-3 py-2 text-gray-500">
                         {r.holding_days != null ? `${r.holding_days}d` : '—'}
+                      </td>
+                      <td className="px-3 py-2">
+                        {r.historical_win_rate != null ? (
+                          <span className={`font-medium ${r.historical_win_rate >= 0.6 ? 'text-green-600' : r.historical_win_rate >= 0.4 ? 'text-yellow-600' : 'text-red-500'}`}>
+                            {(r.historical_win_rate * 100).toFixed(0)}%
+                          </span>
+                        ) : (
+                          <span className="text-gray-300">—</span>
+                        )}
+                      </td>
+                      <td className="px-3 py-2">
+                        <OppScoreBadge score={r.opportunity_score} grade={r.opportunity_grade} />
                       </td>
                     </tr>
                   ))}

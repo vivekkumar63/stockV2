@@ -104,3 +104,9 @@ app.include_router(portfolio_router, prefix="/api/v1", dependencies=[Depends(ver
 
 from domains.backtest.router import router as backtest_router  # noqa: E402
 app.include_router(backtest_router, prefix="/api/v1", dependencies=[Depends(verify_api_key)])
+
+from domains.market.router import router as market_router  # noqa: E402
+app.include_router(market_router, prefix="/api/v1", dependencies=[Depends(verify_api_key)])
+
+from domains.intelligence.router import router as intelligence_router  # noqa: E402
+app.include_router(intelligence_router, prefix="/api/v1", dependencies=[Depends(verify_api_key)])

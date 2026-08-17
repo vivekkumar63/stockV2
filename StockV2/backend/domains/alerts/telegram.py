@@ -57,11 +57,13 @@ class AlertService:
             upside = sig.get("expected_upside_pct")
             hold = sig.get("holding_period_days")
             strategy = sig.get("strategy_name", "")
+            win_rate = sig.get("historical_win_rate")
 
             # Format prices
             price_str = f"₹{price:,.0f}" if price else "—"
             sl_str = f"₹{sl:,.0f}" if sl else "—"
             tgt_str = f"₹{tgt:,.0f}" if tgt else "—"
+            win_str = f"{int(win_rate * 100)}% hist. win rate" if win_rate is not None else "no history yet"
 
             # Parse reasoning
             conditions: list[str] = []
@@ -77,6 +79,7 @@ class AlertService:
                 f"   📌 {strategy}\n"
                 f"   💰 Price: {price_str}  |  SL: {sl_str}  |  Target: {tgt_str}\n"
                 + (f"   📈 Upside: {upside:.1f}%  |  Hold: {hold}d\n" if upside and hold else "")
+                + f"   📊 {win_str}\n"
                 + f"   💡 <i>{why}</i>"
             )
 

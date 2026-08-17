@@ -1,9 +1,12 @@
+import logging
 from typing import Optional
 
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from ist import ist_today
+
+logger = logging.getLogger(__name__)
 
 
 class StrategyService:
@@ -36,7 +39,8 @@ class StrategyService:
                        ss.confidence_score, ss.risk_score, ss.expected_upside_pct,
                        ss.suggested_stop_loss, ss.suggested_target,
                        ss.holding_period_days, ss.reasoning_json,
-                       lp.close AS latest_price, lp.date AS latest_price_date
+                       lp.close AS latest_price, lp.date AS latest_price_date,
+                       src.win_rate AS historical_win_rate
                 FROM strategy_signals ss
                 JOIN strategies s ON ss.strategy_id = s.id
                 LEFT JOIN (
@@ -47,12 +51,53 @@ class StrategyService:
                         WHERE sp2.symbol = sp.symbol
                     )
                 ) lp ON lp.symbol = ss.symbol
+                LEFT JOIN (
+                    SELECT symbol, strategy_id, win_rate
+                    FROM scan_result_cache
+                    WHERE stop_loss_pct = 5.0 AND target_pct = 10.0
+                      AND from_date = '2015-01-01'
+                ) src ON src.symbol = ss.symbol AND src.strategy_id = ss.strategy_id
                 WHERE ss.signal_date = :d
                 ORDER BY ss.confidence_score DESC
             """),
             {"d": effective_date},
         ).fetchall()
-        return [dict(r._mapping) for r in rows]
+        signals = [dict(r._mapping) for r in rows]
+        self._attach_opportunity_scores(signals)
+        return signals
+
+    def _attach_opportunity_scores(self, signals: list[dict]) -> None:
+        """Attach opportunity_score and opportunity_grade to each signal in-place."""
+        if not signals:
+            return
+        try:
+            from domains.intelligence.opportunity_scorer import OpportunityScorer
+            from domains.intelligence.regime_performance import RegimePerformanceEngine
+            from domains.market.regime import MarketRegimeEngine
+
+            regime_result = MarketRegimeEngine().get_or_compute(self.db)
+            regime = regime_result.regime
+            regime_perf = RegimePerformanceEngine().get_for_regime(self.db, regime)
+            scorer = OpportunityScorer()
+
+            for sig in signals:
+                sid = sig.get("strategy_id")
+                regime_wr = regime_perf.get(sid)
+                opp = scorer.quick_score(
+                    symbol=sig["symbol"],
+                    strategy_id=sid,
+                    confidence=float(sig.get("confidence_score") or 0.5),
+                    historical_win_rate=sig.get("historical_win_rate"),
+                    regime=regime,
+                    regime_strategy_win_rate=regime_wr.win_rate if regime_wr else None,
+                )
+                sig["opportunity_score"] = opp.score
+                sig["opportunity_grade"] = opp.grade
+        except Exception:
+            logger.warning("[StrategyService] opportunity scoring failed", exc_info=True)
+            for sig in signals:
+                sig["opportunity_score"] = None
+                sig["opportunity_grade"] = None
 
     def get_signals(
         self,

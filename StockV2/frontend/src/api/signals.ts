@@ -17,6 +17,9 @@ export interface Signal {
   latest_price: number | null
   latest_price_date: string | null
   reasoning_json: string | null
+  historical_win_rate: number | null
+  opportunity_score: number | null
+  opportunity_grade: string | null
 }
 
 export interface LiveScanRequest {
@@ -35,6 +38,9 @@ export interface LiveScanResult {
   stop_loss_pct: number | null
   target_pct: number | null
   holding_days: number | null
+  historical_win_rate: number | null
+  opportunity_score: number | null
+  opportunity_grade: string | null
 }
 
 export const runLiveScan = (req: LiveScanRequest) =>
