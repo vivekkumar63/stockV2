@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 
 from database import get_db
 from domains.intelligence.false_signal_detector import FalseSignalDetector
+from domains.intelligence.ml_scorer import MLSignalScorer, regime_to_code
 from domains.intelligence.opportunity_scorer import OpportunityScorer
 from domains.intelligence.regime_performance import RegimePerformanceEngine
 from domains.intelligence.strategy_correlation import StrategyCorrelationEngine
@@ -101,10 +102,9 @@ def get_opportunity_score(
     # ML probability
     ml_prob: Optional[float] = None
     if strategy_id:
-        from domains.intelligence.ml_scorer import MLSignalScorer, _REGIME_MAP
         ml_prob = MLSignalScorer().predict({
             "confidence_score": 0.5,
-            "regime_code": _REGIME_MAP.get(regime, 3),
+            "regime_code": regime_to_code(regime),
             "strategy_id": strategy_id,
             "month": date.today().month,
             "day_of_week": date.today().weekday(),

@@ -356,7 +356,7 @@ def register_jobs():
     )
     scheduler.add_job(
         _monthly_ml_retrain,
-        CronTrigger(day_of_week="sun", hour=22, minute=30),
+        CronTrigger(day_of_week="sun", hour=22, minute=30, day="1-7"),
         id=JobIds.MONTHLY_ML_RETRAIN,
         replace_existing=True,
     )

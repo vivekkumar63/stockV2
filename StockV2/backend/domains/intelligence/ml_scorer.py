@@ -22,6 +22,10 @@ _REGIME_MAP = {
 }
 
 
+def regime_to_code(regime: str) -> int:
+    return _REGIME_MAP.get(regime, 3)
+
+
 class MLSignalScorer:
     """
     ML-based signal profitability predictor.
