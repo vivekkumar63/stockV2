@@ -479,5 +479,18 @@ def _run_walk_forward_bg(symbol: str, strategy_id: int) -> None:
                     symbol, strategy_id, result.n_windows, result.consistency_score)
     except Exception:
         logger.exception("[walk-forward] %s/%d failed", symbol, strategy_id)
+        # Store n_windows=-1 as failure sentinel so GET returns 200 instead of 404
+        try:
+            db.execute(
+                text("""
+                    INSERT OR REPLACE INTO walk_forward_results
+                        (symbol, strategy_id, n_windows, consistency_score, computed_at)
+                    VALUES (:sym, :sid, -1, 0.0, datetime('now'))
+                """),
+                {"sym": symbol, "sid": strategy_id},
+            )
+            db.commit()
+        except Exception:
+            pass
     finally:
         db.close()
