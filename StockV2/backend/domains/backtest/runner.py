@@ -79,6 +79,7 @@ class BacktestRunner:
             initial_capital=initial_capital,
             stop_loss_pct_override=stop_loss_pct,
             target_pct_override=target_pct,
+            round_trip_cost_pct=0.30,
         )
 
         metrics = compute_metrics(trades, initial_capital, from_date, to_date)
@@ -202,6 +203,7 @@ class BacktestRunner:
                         _df_ind_precomputed=df_ind,
                         stop_loss_pct_override=stop_loss_pct,
                         target_pct_override=target_pct,
+                        round_trip_cost_pct=0.30,
                     )
                     m = compute_metrics(trades, initial_capital, from_date, to_date)
                     computed_map[(symbol, sid)] = m
@@ -294,6 +296,7 @@ class BacktestRunner:
                     from_date=from_date, to_date=to_date,
                     strategies=[strat], use_aggregator=False,
                     initial_capital=500_000.0,
+                    round_trip_cost_pct=0.30,
                 )
                 m = compute_metrics(trades, 500_000.0, from_date, to_date)
                 self.db.execute(
