@@ -249,6 +249,26 @@ class BacktestTrade(Base):
     holding_days: Mapped[Optional[int]] = mapped_column(Integer)
 
 
+class WalkForwardResult(Base):
+    """Out-of-sample walk-forward consistency metrics per (symbol, strategy)."""
+    __tablename__ = "walk_forward_results"
+    __table_args__ = (
+        UniqueConstraint("symbol", "strategy_id", name="uq_wf_result"),
+        Index("idx_wf_strategy", "strategy_id"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    symbol: Mapped[str] = mapped_column(String(20), nullable=False)
+    strategy_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    n_windows: Mapped[int] = mapped_column(Integer, default=0)
+    oos_win_rate_mean: Mapped[Optional[float]] = mapped_column(Float)
+    oos_win_rate_std: Mapped[Optional[float]] = mapped_column(Float)
+    consistency_score: Mapped[float] = mapped_column(Float, default=0.0)
+    in_sample_win_rate: Mapped[Optional[float]] = mapped_column(Float)
+    windows_json: Mapped[Optional[str]] = mapped_column(Text)
+    computed_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
 # ─── Portfolio ────────────────────────────────────────────────────────────────
 
 class PortfolioHolding(Base):

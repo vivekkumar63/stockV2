@@ -3,7 +3,7 @@ import threading
 from datetime import date, timedelta
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from pydantic import BaseModel, Field, model_validator
 from sqlalchemy.orm import Session
 
@@ -389,3 +389,95 @@ def trigger_leaderboard_compute(
         "status": "started",
         "message": f"Computing leaderboard: SL={stop_loss_pct}% · Target={target_pct}% · from {_LEADERBOARD_FROM}",
     }
+
+
+# ── Walk-Forward ──────────────────────────────────────────────────────────────
+
+@router.post("/backtests/walk-forward")
+def trigger_walk_forward(
+    background_tasks: BackgroundTasks,
+    symbol: str = Query(...),
+    strategy_id: int = Query(...),
+    db: Session = Depends(get_db),
+):
+    """Trigger walk-forward OOS backtest. Runs in background — returns immediately."""
+    background_tasks.add_task(_run_walk_forward_bg, symbol.upper(), strategy_id)
+    return {"status": "started", "symbol": symbol.upper(), "strategy_id": strategy_id}
+
+
+@router.get("/backtests/walk-forward/{symbol}/{strategy_id}")
+def get_walk_forward_result(
+    symbol: str,
+    strategy_id: int,
+    db: Session = Depends(get_db),
+):
+    """Return stored walk-forward result for (symbol, strategy). 404 if not yet computed."""
+    import json
+    row = db.execute(
+        text("""
+            SELECT symbol, strategy_id, n_windows, oos_win_rate_mean, oos_win_rate_std,
+                   consistency_score, in_sample_win_rate, windows_json, computed_at
+            FROM walk_forward_results
+            WHERE symbol = :sym AND strategy_id = :sid
+            LIMIT 1
+        """),
+        {"sym": symbol.upper(), "sid": strategy_id},
+    ).fetchone()
+
+    if not row:
+        raise HTTPException(status_code=404, detail="Walk-forward result not found")
+
+    windows = json.loads(row[7]) if row[7] else []
+    return {
+        "symbol": row[0],
+        "strategy_id": row[1],
+        "n_windows": row[2],
+        "oos_win_rate_mean": row[3],
+        "oos_win_rate_std": row[4],
+        "consistency_score": row[5],
+        "in_sample_win_rate": row[6],
+        "windows": windows,
+        "computed_at": str(row[8]),
+    }
+
+
+def _run_walk_forward_bg(symbol: str, strategy_id: int) -> None:
+    import json
+    from database import SessionLocal
+    from domains.backtest.walk_forward import WalkForwardRunner
+
+    db = SessionLocal()
+    try:
+        result = WalkForwardRunner().run(symbol=symbol, strategy_id=strategy_id, db=db)
+        windows_json = json.dumps([
+            {
+                "window_index": w.window_index,
+                "train_from": str(w.train_from),
+                "train_to": str(w.train_to),
+                "test_from": str(w.test_from),
+                "test_to": str(w.test_to),
+                "oos_metrics": w.oos_metrics,
+            }
+            for w in result.windows
+        ])
+        db.execute(
+            text("""
+                INSERT OR REPLACE INTO walk_forward_results
+                    (symbol, strategy_id, n_windows, oos_win_rate_mean, oos_win_rate_std,
+                     consistency_score, in_sample_win_rate, windows_json, computed_at)
+                VALUES (:sym, :sid, :nw, :mean, :std, :cs, :iswr, :wj, datetime('now'))
+            """),
+            {
+                "sym": result.symbol, "sid": result.strategy_id,
+                "nw": result.n_windows, "mean": result.oos_win_rate_mean,
+                "std": result.oos_win_rate_std, "cs": result.consistency_score,
+                "iswr": result.in_sample_win_rate, "wj": windows_json,
+            },
+        )
+        db.commit()
+        logger.info("[walk-forward] %s/%d: %d windows, consistency=%.2f",
+                    symbol, strategy_id, result.n_windows, result.consistency_score)
+    except Exception:
+        logger.exception("[walk-forward] %s/%d failed", symbol, strategy_id)
+    finally:
+        db.close()
