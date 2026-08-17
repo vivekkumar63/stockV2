@@ -238,6 +238,20 @@ def _weekly_fundamentals():
     logger.info("[scheduler] weekly_fundamentals — placeholder (implemented in Plan 2)")
 
 
+def _monthly_ml_retrain():
+    """Retrain ML signal probability model after signal outcomes accumulate."""
+    from database import SessionLocal
+    from domains.intelligence.ml_scorer import MLSignalScorer
+    db = SessionLocal()
+    try:
+        n = MLSignalScorer().train(db)
+        logger.info("[ml_retrain] trained on %d signal outcomes", n)
+    except Exception:
+        logger.exception("[ml_retrain] failed")
+    finally:
+        db.close()
+
+
 def _weekly_precompute():
     """Compute strategy_performance rows for any strategy that has none yet.
     Runs Sunday night so new strategies added during the week get their backtest data.
@@ -338,6 +352,12 @@ def register_jobs():
         _weekly_precompute,
         CronTrigger(day_of_week="sun", hour=22, minute=0),
         id=JobIds.WEEKLY_PRECOMPUTE,
+        replace_existing=True,
+    )
+    scheduler.add_job(
+        _monthly_ml_retrain,
+        CronTrigger(day_of_week="sun", hour=22, minute=30),
+        id=JobIds.MONTHLY_ML_RETRAIN,
         replace_existing=True,
     )
     # 4:15pm — compute market regime after EOD data (3:45 fetch + 4:00 scan)

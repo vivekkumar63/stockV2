@@ -98,6 +98,18 @@ def get_opportunity_score(
     if strategy_id:
         false_rate = FalseSignalDetector().get_rate_for_strategy(db, strategy_id)
 
+    # ML probability
+    ml_prob: Optional[float] = None
+    if strategy_id:
+        from domains.intelligence.ml_scorer import MLSignalScorer, _REGIME_MAP
+        ml_prob = MLSignalScorer().predict({
+            "confidence_score": 0.5,
+            "regime_code": _REGIME_MAP.get(regime, 3),
+            "strategy_id": strategy_id,
+            "month": date.today().month,
+            "day_of_week": date.today().weekday(),
+        })
+
     opp = OpportunityScorer().full_score(
         symbol=sym,
         strategy_id=strategy_id,
@@ -109,6 +121,7 @@ def get_opportunity_score(
         volume_score=vol_score,
         sr_score=sr_score,
         false_signal_rate=false_rate,
+        ml_probability=ml_prob,
     )
 
     return {
@@ -118,6 +131,7 @@ def get_opportunity_score(
         "grade":       opp.grade,
         "regime":      regime,
         "mtf_alignment_score": mtf_score,
+        "ml_probability": ml_prob,
         "breakdown":   opp.breakdown,
     }
 

@@ -122,3 +122,34 @@ def test_train_and_predict():
     assert prob is not None
     assert 0.0 <= prob <= 1.0
     db.close()
+
+
+def test_probability_in_breakdown():
+    """full_score with ml_probability → ml_signal_probability in breakdown."""
+    from domains.intelligence.opportunity_scorer import OpportunityScorer
+    from domains.intelligence.ml_scorer import MLSignalScorer
+
+    # Train model first
+    db = _make_db_with_outcomes(n_outcomes=60)
+    _remove_model()
+    MLSignalScorer().train(db)
+    db.close()
+
+    scorer = OpportunityScorer()
+    opp = scorer.full_score(
+        symbol="TCS",
+        strategy_id=1,
+        confidence=0.75,
+        historical_win_rate=0.60,
+        regime="BULL",
+        regime_strategy_win_rate=0.55,
+        mtf_alignment=0.8,
+        volume_score=0.7,
+        sr_score=0.6,
+        false_signal_rate=0.30,
+        ml_probability=0.65,
+    )
+
+    assert "ml_signal_probability" in opp.breakdown
+    assert opp.breakdown["ml_signal_probability"] == 0.65
+    assert opp.score > 0
