@@ -172,7 +172,7 @@ class BacktestSimulator:
         entry_value = pos.entry_price * pos.quantity
         commission = round(entry_value * round_trip_cost_pct / 100, 2)
         net_pnl = round(raw_pnl - commission, 2)
-        pnl_pct = round((price - pos.entry_price) / pos.entry_price * 100, 2)
+        pnl_pct = round(net_pnl / entry_value * 100, 2)
         return SimTrade(
             symbol=symbol,
             entry_date=pos.entry_date,
