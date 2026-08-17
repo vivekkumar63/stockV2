@@ -9,4 +9,4 @@ dist/
 *.egg-info/
 /data/
 stock_models/
-ml_models*/
+ml_models/*.pkl
