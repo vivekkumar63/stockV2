@@ -36,6 +36,10 @@ class MLSignalScorer:
             logger.warning("[ml_scorer] insufficient training samples: %d < %d", len(X), MIN_TRAINING_SAMPLES)
             return 0
 
+        if len(np.unique(y)) < 2:
+            logger.warning("[ml_scorer] training data has only one class — skipping")
+            return 0
+
         from sklearn.ensemble import GradientBoostingClassifier
         model = GradientBoostingClassifier(
             n_estimators=100,
@@ -70,7 +74,11 @@ class MLSignalScorer:
             features["month"],
             features["day_of_week"],
         ]])
-        prob = model.predict_proba(X_row)[0][1]
+        classes = list(model.classes_)
+        if 1 not in classes:
+            return 1.0  # model only saw profitable signals
+        col = classes.index(1)
+        prob = model.predict_proba(X_row)[0][col]
         return round(float(prob), 4)
 
     def _load_model(self):
