@@ -428,10 +428,11 @@ def get_walk_forward_result(
         raise HTTPException(status_code=404, detail="Walk-forward result not found")
 
     windows = json.loads(row[7]) if row[7] else []
-    return {
+    row_n_windows = row[2]
+    result = {
         "symbol": row[0],
         "strategy_id": row[1],
-        "n_windows": row[2],
+        "n_windows": row_n_windows,
         "oos_win_rate_mean": row[3],
         "oos_win_rate_std": row[4],
         "consistency_score": row[5],
@@ -439,6 +440,12 @@ def get_walk_forward_result(
         "windows": windows,
         "computed_at": str(row[8]),
     }
+    if row_n_windows == -1:
+        result["status"] = "failed"
+        result["error"] = "Walk-forward computation failed — check server logs"
+    else:
+        result["status"] = "ok"
+    return result
 
 
 def _run_walk_forward_bg(symbol: str, strategy_id: int) -> None:
@@ -491,6 +498,6 @@ def _run_walk_forward_bg(symbol: str, strategy_id: int) -> None:
             )
             db.commit()
         except Exception:
-            pass
+            logger.exception("[walk-forward] %s/%s: failed to store failure sentinel", symbol, strategy_id)
     finally:
         db.close()

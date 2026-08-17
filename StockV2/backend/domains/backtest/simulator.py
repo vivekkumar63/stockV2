@@ -170,6 +170,7 @@ class BacktestSimulator:
                exit_date: date, reason: str, round_trip_cost_pct: float = 0.0) -> SimTrade:
         raw_pnl = round((price - pos.entry_price) * pos.quantity, 2)
         entry_value = pos.entry_price * pos.quantity
+        # round_trip_cost_pct covers the full round trip (entry + exit); applied to entry value as a simplification
         commission = round(entry_value * round_trip_cost_pct / 100, 2)
         net_pnl = round(raw_pnl - commission, 2)
         pnl_pct = round(net_pnl / entry_value * 100, 2)

@@ -2,6 +2,7 @@ import logging
 import statistics
 from dataclasses import dataclass
 from datetime import date, timedelta
+from dateutil.relativedelta import relativedelta
 from typing import Optional
 
 import pandas as pd
@@ -81,17 +82,17 @@ class WalkForwardRunner:
         window_idx = 0
         simulator = BacktestSimulator()
 
-        test_start = min_date + timedelta(days=train_months * 30)
+        test_start = min_date + relativedelta(months=train_months)
         while test_start <= max_date:
-            test_end = test_start + timedelta(days=test_months * 30)
+            test_end = test_start + relativedelta(months=test_months)
             if test_end > max_date:
                 test_end = max_date
 
-            train_start = test_start - timedelta(days=train_months * 30)
+            train_start = test_start - relativedelta(months=train_months)
 
             df_window = df[(df["date"] >= train_start) & (df["date"] <= test_end)]
             if df_window.empty or len(df_window) < 50:
-                test_start += timedelta(days=test_months * 30 + 1)
+                test_start += relativedelta(months=test_months) + timedelta(days=1)
                 continue
 
             df_ind = IndicatorEngine.compute(df_window)
@@ -118,7 +119,7 @@ class WalkForwardRunner:
             ))
 
             window_idx += 1
-            test_start += timedelta(days=test_months * 30 + 1)
+            test_start += relativedelta(months=test_months) + timedelta(days=1)
 
         if not windows:
             return WalkForwardResult(

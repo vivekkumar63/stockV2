@@ -80,7 +80,7 @@ class MLSignalScorer:
         ]])
         classes = list(model.classes_)
         if 1 not in classes:
-            return 1.0  # model only saw profitable signals
+            return 0.0  # model never saw a profitable outcome — minimum probability
         col = classes.index(1)
         prob = model.predict_proba(X_row)[0][col]
         return round(float(prob), 4)
