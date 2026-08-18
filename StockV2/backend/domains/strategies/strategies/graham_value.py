@@ -65,7 +65,7 @@ class GrahamValueStrategy(BaseStrategy):
 
         if len(met) == 3:
             margin = ((_PRICE_TO_GRAHAM * graham_num) - close) / (_PRICE_TO_GRAHAM * graham_num) if graham_num else 0
-            confidence = round(min(_CONF_MAX, max(_CONF_MIN, 0.60 + margin)), 4)
+            confidence = round(min(_CONF_MAX, max(_CONF_MIN, margin)), 4)
             return Signal(
                 signal_type="BUY",
                 confidence=confidence,

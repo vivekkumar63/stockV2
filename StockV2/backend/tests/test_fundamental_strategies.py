@@ -148,7 +148,7 @@ def test_graham_value_buy_when_undervalued():
     f = {**_good_fundamentals(), "eps": 50.0, "pb_ratio": 1.2, "pe_ratio": 8.0}
     signal = GrahamValueStrategy().generate_signal(df, f)
     assert signal.signal_type == "BUY"
-    assert signal.confidence >= 0.4
+    assert 0.4 <= signal.confidence <= 1.0
 
 
 def test_graham_value_none_when_fundamentals_empty():
