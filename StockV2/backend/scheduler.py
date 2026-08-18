@@ -20,6 +20,7 @@ class JobIds:
     DIGEST_1515 = "digest_1515"
     WEEKLY_PRECOMPUTE = "weekly_precompute"
     LEADERBOARD_REFRESH = "leaderboard_refresh"
+    COMBINATION_ANALYSIS = "combination_analysis"
 
 
 scheduler = BackgroundScheduler(timezone="Asia/Kolkata")
@@ -333,6 +334,21 @@ def _intraday_digest():
         db.close()
 
 
+def _combination_analysis():
+    """Weekly combination analysis: discover best strategy combinations."""
+    from database import SessionLocal
+    from domains.combinations.engine import CombinationEngine
+    db = SessionLocal()
+    try:
+        engine = CombinationEngine(db)
+        run_id = engine.run_full_analysis()
+        logger.info("[combination_analysis] complete: run_id=%d", run_id)
+    except Exception:
+        logger.exception("[combination_analysis] failed")
+    finally:
+        db.close()
+
+
 def register_jobs():
     # 3:45pm — fetch today's closing data before EOD scan runs at 4pm
     scheduler.add_job(
@@ -412,4 +428,11 @@ def register_jobs():
             id=job_id,
             replace_existing=True,
         )
+    # Sunday 23:00 — weekly combination analysis (after 22:00 precompute)
+    scheduler.add_job(
+        _combination_analysis,
+        CronTrigger(day_of_week="sun", hour=23, minute=0),
+        id=JobIds.COMBINATION_ANALYSIS,
+        replace_existing=True,
+    )
     logger.info("APScheduler jobs registered: %s", [j.id for j in scheduler.get_jobs()])
