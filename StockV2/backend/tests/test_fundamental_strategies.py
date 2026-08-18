@@ -31,7 +31,7 @@ def _make_df(n=100, close=100.0, volume=1_500_000.0, vol_sma=1_000_000.0,
 def _good_fundamentals():
     """Fundamentals dict that passes all criteria for all fundamental strategies."""
     return {
-        "pe_ratio":       20.0,
+        "pe_ratio":       15.0,   # was 20.0 — changed to pass Magic Formula PE < 20
         "pb_ratio":       2.0,
         "eps":            50.0,
         "revenue":        1e10,
@@ -117,5 +117,19 @@ def test_magic_formula_none_when_earnings_yield_too_low():
     # EPS=50, close=2000 → earnings yield = 50/2000 = 2.5% < 6%
     df = _make_df(close=2000.0)
     f = {**_good_fundamentals(), "pe_ratio": 15.0}
+    signal = MagicFormulaStrategy().generate_signal(df, f)
+    assert signal.signal_type == "NONE"
+
+
+def test_magic_formula_none_when_fundamentals_is_none():
+    from domains.strategies.strategies.magic_formula import MagicFormulaStrategy
+    signal = MagicFormulaStrategy().generate_signal(_make_df(), None)
+    assert signal.signal_type == "NONE"
+
+
+def test_magic_formula_none_when_pe_at_boundary():
+    from domains.strategies.strategies.magic_formula import MagicFormulaStrategy
+    df = _make_df(close=500.0)
+    f = {**_good_fundamentals(), "pe_ratio": 20.0}  # exactly at threshold — strict < means NONE
     signal = MagicFormulaStrategy().generate_signal(df, f)
     assert signal.signal_type == "NONE"

@@ -5,6 +5,7 @@ _EARNINGS_YIELD_MIN = 0.06   # EPS/price minimum
 _ROE_MIN            = 0.15   # minimum ROE (decimal)
 _PE_MAX             = 20.0   # maximum P/E ratio
 _DE_MAX             = 1.0    # maximum D/E ratio
+_BUY_CONFIDENCE     = 0.75   # fixed confidence when all 4 criteria met
 
 
 class MagicFormulaStrategy(BaseStrategy):
@@ -61,7 +62,7 @@ class MagicFormulaStrategy(BaseStrategy):
         if len(met) == 4:
             return Signal(
                 signal_type="BUY",
-                confidence=0.75,
+                confidence=_BUY_CONFIDENCE,
                 risk_score=0.30,
                 expected_upside_pct=25.0,
                 stop_loss_pct=8.0,
