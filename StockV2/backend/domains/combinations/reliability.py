@@ -1,6 +1,5 @@
 # backend/domains/combinations/reliability.py
 from dataclasses import dataclass
-from typing import Optional
 
 from domains.combinations.metrics import ExtendedMetrics
 
@@ -106,12 +105,7 @@ class ReliabilityScorer:
         result: ReliabilityResult,
         sensitivity_score: float,
     ) -> ReliabilityResult:
-        """Pass 2: cap label if sensitivity is poor. Score value is unchanged.
-
-        Rules:
-        - sensitivity_score < 40 AND label is "Strong evidence" → downgrade to "Moderate evidence"
-        - sensitivity_score < 20 AND label in ("Strong evidence", "Moderate evidence") → downgrade to "Weak evidence"
-        """
+        """Pass 2: cap label if sensitivity is poor. Score value is unchanged."""
         new_label = result.label
 
         if sensitivity_score < 20 and result.label in ("Strong evidence", "Moderate evidence"):
@@ -119,11 +113,21 @@ class ReliabilityScorer:
         elif sensitivity_score < 40 and result.label == "Strong evidence":
             new_label = "Moderate evidence"
 
+        if new_label != result.label:
+            # Label changed — rebuild evidence summary to match new label
+            # We don't have oos/wf_consistency here, so use a generic override
+            new_summary = (
+                f"{new_label} (sensitivity cap applied, original score={result.score:.0f}; "
+                f"sensitivity_score={sensitivity_score:.0f} below threshold)"
+            )
+        else:
+            new_summary = result.evidence_summary
+
         return ReliabilityResult(
             score=result.score,
             label=new_label,
             component_scores=result.component_scores,
-            evidence_summary=result.evidence_summary,
+            evidence_summary=new_summary,
         )
 
 
