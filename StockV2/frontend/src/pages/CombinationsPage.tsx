@@ -9,6 +9,7 @@ export function CombinationsPage() {
   const { data: status } = useQuery({
     queryKey: ['combinations-status'],
     queryFn: getRunStatus,
+    refetchInterval: (query) => query.state.data?.status === 'running' ? 10_000 : false,
   })
 
   const { data: best } = useQuery({
