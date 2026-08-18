@@ -194,11 +194,29 @@ def get_top_opportunities(
     # False signal rates — bulk dict {strategy_id: rate}
     false_rates = FalseSignalDetector().get_false_signal_rates(db)
 
+    # Pre-compute per-symbol data once to avoid redundant DB calls
+    unique_symbols = list({r[1] for r in rows})
+    mtf_cache: dict[str, object] = {}
+    vol_cache: dict[str, object] = {}
+    sr_cache:  dict[str, object] = {}
+    for sym in unique_symbols:
+        mtf_cache[sym] = MultiTimeframeEngine().compute(db, sym)
+        vol_cache[sym] = _compute_volume_score(db, sym)
+        sr_cache[sym]  = SupportResistanceEngine().compute(db, sym)
+    ml_scorer  = MLSignalScorer()
+    opp_scorer = OpportunityScorer()
+
+    seen: set[tuple] = set()
     results = []
     for r in rows:
         (signal_id, symbol, strategy_id, strategy_name,
          signal_date, confidence_score, price_at_signal,
          stop_loss_pct, target_pct, holding_days, reasoning_json) = r
+
+        pair = (symbol, strategy_id)
+        if pair in seen:
+            continue
+        seen.add(pair)
 
         sl_pct = stop_loss_pct or 7.0
         tgt_pct = target_pct or 15.0
@@ -212,15 +230,15 @@ def get_top_opportunities(
         regime_wr  = regime_perf[strategy_id].win_rate if strategy_id in regime_perf else None
         false_rate = false_rates.get(strategy_id)
 
-        mtf_result = MultiTimeframeEngine().compute(db, symbol)
+        mtf_result = mtf_cache[symbol]
         mtf_score  = mtf_result.alignment_score if mtf_result.daily else None
 
-        vol_score = _compute_volume_score(db, symbol)
+        vol_score = vol_cache[symbol]
 
-        sr_result = SupportResistanceEngine().compute(db, symbol)
+        sr_result = sr_cache[symbol]
         sr_score  = _compute_sr_score(sr_result)
 
-        ml_prob = MLSignalScorer().predict({
+        ml_prob = ml_scorer.predict({
             "confidence_score": confidence_score or 0.5,
             "regime_code":      regime_to_code(regime),
             "strategy_id":      strategy_id,
@@ -228,7 +246,7 @@ def get_top_opportunities(
             "day_of_week":      today.weekday(),
         })
 
-        opp = OpportunityScorer().full_score(
+        opp = opp_scorer.full_score(
             symbol=symbol,
             strategy_id=strategy_id,
             confidence=confidence_score or 0.5,
