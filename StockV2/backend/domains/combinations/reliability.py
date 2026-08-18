@@ -20,7 +20,9 @@ class ReliabilityScorer:
         oos: ExtendedMetrics,
         wf_consistency: float,
     ) -> ReliabilityResult:
-        """Pass 1: 6-component scoring without sensitivity.
+        """Score reliability using OOS performance, WF consistency, and train→OOS stability.
+
+        val is accepted for interface completeness (reserved for future val degradation check).
 
         Components and weights:
         - OOS performance   30%  min(1, max(0, oos_cagr / 20.0)) * 30

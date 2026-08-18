@@ -105,17 +105,21 @@ class CombinationEngine:
             # Step 9: Sensitivity analysis on top-N only
             logger.info("[engine] Step 9: Sensitivity analysis on top %d", len(top_n))
             for cr in top_n:
-                sens_score = self.sensitivity_analyzer.test(
-                    cr["combination"], symbols_data,
-                    cr["oos_from"], cr["oos_to"]
-                )
-                cr["sensitivity_score"] = sens_score
+                try:
+                    sens_score = self.sensitivity_analyzer.test(
+                        cr["combination"], symbols_data,
+                        cr["oos_from"], cr["oos_to"]
+                    )
+                    cr["sensitivity_score"] = sens_score
+                except Exception:
+                    logger.warning("[engine] sensitivity test failed for %s, defaulting to 50", cr.get("combo_name"))
+                    cr["sensitivity_score"] = 50.0
 
             # Step 10: Apply sensitivity cap (Pass 2)
             logger.info("[engine] Step 10: Applying sensitivity cap (Pass 2)")
             for cr in top_n:
                 cr["reliability_result"] = self.scorer.apply_sensitivity_cap(
-                    cr["reliability_result"], cr.get("sensitivity_score", 50.0)
+                    cr["reliability_result"], cr["sensitivity_score"]
                 )
 
             # Step 11: Generate explanations for top-explanation_top_n
@@ -396,6 +400,18 @@ class CombinationEngine:
                     "sens_score": cr.get("sensitivity_score"),
                     "exp_json": exp_json,
                 })
+
+                # Write per-regime performance (win_rate available; trade_count/avg_pnl_pct/cagr are NULL)
+                for regime_label, win_rate in oos.regime_win_rates.items():
+                    if win_rate is not None:
+                        self.db.execute(text("""
+                            INSERT INTO combination_regime_perf
+                                (combination_id, run_id, regime, win_rate)
+                            VALUES (:cid, :rid, :regime, :wr)
+                        """), {
+                            "cid": combo_id, "rid": run_id,
+                            "regime": regime_label, "wr": win_rate,
+                        })
             except Exception:
                 logger.exception("[engine] persist failed for %s", cr.get("combo_name"))
                 continue

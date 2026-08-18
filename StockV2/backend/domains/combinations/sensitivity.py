@@ -26,11 +26,14 @@ class SensitivityAnalyzer:
         variations = [0.80, 0.90, 1.00, 1.10, 1.20]
         thresholds = [base_threshold * v for v in variations]
 
+        # Precompute indicators once per symbol (threshold loop only varies signal aggregation)
+        df_ind_map = {sym: IndicatorEngine.compute(df) for sym, df in prices_df_map.items()}
+
         buy_counts: list[int] = []
 
         for threshold in thresholds:
             total_buys = self._count_buy_signals(
-                combination, prices_df_map, from_date, to_date, threshold
+                combination, prices_df_map, from_date, to_date, threshold, df_ind_map
             )
             buy_counts.append(total_buys)
 
@@ -51,6 +54,7 @@ class SensitivityAnalyzer:
         from_date: date,
         to_date: date,
         threshold: float,
+        df_ind_map: dict[str, pd.DataFrame] | None = None,
     ) -> int:
         """Count how many BUY signals the combination generates at a given threshold."""
         total_buys = 0
@@ -64,7 +68,10 @@ class SensitivityAnalyzer:
                 continue
 
             try:
-                df_ind = IndicatorEngine.compute(prices_df)  # compute on full history for warmup
+                if df_ind_map is not None and symbol in df_ind_map:
+                    df_ind = df_ind_map[symbol]
+                else:
+                    df_ind = IndicatorEngine.compute(prices_df)  # compute on full history for warmup
                 df_ind_range = df_ind[df_ind["date"] >= from_date].reset_index(drop=True)
             except Exception:
                 continue
