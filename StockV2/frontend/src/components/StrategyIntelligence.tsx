@@ -6,6 +6,8 @@ import {
   getStrategyRanking,
 } from '../api/intelligence'
 
+const HIGH_CORR_THRESHOLD = 0.70
+
 export function StrategyIntelligence({ regime }: { regime: string | undefined }) {
   const [open, setOpen] = useState(false)
 
@@ -28,7 +30,7 @@ export function StrategyIntelligence({ regime }: { regime: string | undefined })
   })
 
   const highCorr = correlations
-    .filter(p => p.correlation > 0.70)
+    .filter(p => p.correlation > HIGH_CORR_THRESHOLD)
     .sort((a, b) => b.correlation - a.correlation)
 
   const regimeLabel = regime?.replace(/_/g, ' ') ?? 'Current Regime'
@@ -168,7 +170,7 @@ export function StrategyIntelligence({ regime }: { regime: string | undefined })
                 <p className="text-gray-400 text-sm">Loading…</p>
               ) : highCorr.length === 0 ? (
                 <p className="text-gray-400 text-sm">
-                  No high-correlation pairs (threshold: 0.70). Run correlation compute first.
+                  {`No high-correlation pairs (threshold: ${HIGH_CORR_THRESHOLD}). Run correlation compute first.`}
                 </p>
               ) : (
                 <div className="overflow-x-auto rounded-lg border border-gray-200">
