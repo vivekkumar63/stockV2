@@ -1,6 +1,14 @@
 import pandas as pd
 from domains.strategies.base import BaseStrategy, Signal, StrategyType, Timeframe
 
+_ROE_MIN        = 0.15   # A: minimum ROE (decimal)
+_PE_MAX         = 30.0   # L: maximum P/E ratio
+_HIGH_LOOKBACK  = 200    # N: rolling window bars
+_HIGH_MIN_PRDS  = 100    # N: min_periods for rolling window
+_NEAR_HIGH_PCT  = 0.85   # N: price must be >= 85% of rolling high
+_BUY_THRESHOLD  = 5      # minimum criteria met to issue BUY
+_TOTAL_CRITERIA = 6      # total criteria evaluated
+
 
 class CANSLIMStrategy(BaseStrategy):
     name = "CANSLIM"
@@ -28,7 +36,7 @@ class CANSLIMStrategy(BaseStrategy):
         last  = df.iloc[-1]
         close = float(last["close"])
 
-        high_200 = df["high"].rolling(200, min_periods=100).max().iloc[-1]
+        high_200 = df["high"].rolling(_HIGH_LOOKBACK, min_periods=_HIGH_MIN_PRDS).max().iloc[-1]
         sma_50   = float(last.get("sma_50", float("nan")))
         vol      = float(last["volume"])
         vol_sma  = float(last.get("volume_sma_20", float("nan")))
@@ -43,13 +51,13 @@ class CANSLIMStrategy(BaseStrategy):
             missed.append("C: EPS not positive")
 
         # A: ROE > 15% (quality earnings)
-        if roe is not None and roe > 0.15:
+        if roe is not None and roe > _ROE_MIN:
             met.append(f"A: ROE={roe*100:.1f}% > 15%")
         else:
             missed.append("A: ROE <= 15%")
 
         # N: Price within 15% of 200-day high
-        if not pd.isna(high_200) and close >= high_200 * 0.85:
+        if not pd.isna(high_200) and close >= high_200 * _NEAR_HIGH_PCT:
             met.append(f"N: close {close:.1f} within 15% of 200-day high {high_200:.1f}")
         else:
             missed.append("N: price not near 200-day high")
@@ -61,7 +69,7 @@ class CANSLIMStrategy(BaseStrategy):
             missed.append("S: volume not above average")
 
         # L: PE < 30 (not wildly overvalued)
-        if pe is not None and pe < 30:
+        if pe is not None and pe < _PE_MAX:
             met.append(f"L: PE={pe:.1f} < 30")
         else:
             missed.append("L: PE >= 30 or unknown")
@@ -72,8 +80,8 @@ class CANSLIMStrategy(BaseStrategy):
         else:
             missed.append("M: price below SMA50")
 
-        if len(met) >= 5:
-            confidence = round(len(met) / 6, 4)
+        if len(met) >= _BUY_THRESHOLD:
+            confidence = round(len(met) / _TOTAL_CRITERIA, 4)
             return Signal(
                 signal_type="BUY",
                 confidence=confidence,

@@ -67,3 +67,29 @@ def test_canslim_none_when_only_2_criteria_met():
     f = {**_good_fundamentals(), "eps": -5.0, "roe": 0.05}  # C, A also fail
     signal = CANSLIMStrategy().generate_signal(df, f)
     assert signal.signal_type == "NONE"
+
+
+def test_canslim_none_when_fundamentals_is_none():
+    from domains.strategies.strategies.canslim import CANSLIMStrategy
+    df = _make_df()
+    signal = CANSLIMStrategy().generate_signal(df, None)
+    assert signal.signal_type == "NONE"
+
+
+def test_canslim_none_when_exactly_4_criteria_met():
+    from domains.strategies.strategies.canslim import CANSLIMStrategy
+    # Fail M (sma_50 > close) and C (eps < 0): only 4 of 6 met
+    df = _make_df(close=100.0, sma_50=110.0)
+    f = {**_good_fundamentals(), "eps": -1.0}
+    signal = CANSLIMStrategy().generate_signal(df, f)
+    assert signal.signal_type == "NONE"
+
+
+def test_canslim_buy_confidence_is_five_sixths_when_5_of_6_met():
+    from domains.strategies.strategies.canslim import CANSLIMStrategy
+    # M fails (close < sma_50), 5/6 criteria met
+    df = _make_df(close=100.0, sma_50=110.0)
+    f = _good_fundamentals()  # eps>0, roe>0.15, pe<30 all good
+    signal = CANSLIMStrategy().generate_signal(df, f)
+    assert signal.signal_type == "BUY"
+    assert abs(signal.confidence - round(5 / 6, 4)) < 1e-4
