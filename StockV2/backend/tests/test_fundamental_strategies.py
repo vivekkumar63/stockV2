@@ -133,3 +133,40 @@ def test_magic_formula_none_when_pe_at_boundary():
     f = {**_good_fundamentals(), "pe_ratio": 20.0}  # exactly at threshold — strict < means NONE
     signal = MagicFormulaStrategy().generate_signal(df, f)
     assert signal.signal_type == "NONE"
+
+
+# ── Graham Value ──────────────────────────────────────────────────────────────
+
+def test_graham_value_buy_when_undervalued():
+    from domains.strategies.strategies.graham_value import GrahamValueStrategy
+    # EPS=50, PB=1.2, close=400
+    # BookValue = 400/1.2 = 333.3
+    # Graham = sqrt(22.5 * 50 * 333.3) = sqrt(374962) ≈ 612
+    # 1.3 * 612 = 796 → close=400 < 796 ✓
+    # PE = 400/50 = 8 < 15 ✓ (we override pe_ratio below), PB = 1.2 < 1.5 ✓
+    df = _make_df(close=400.0)
+    f = {**_good_fundamentals(), "eps": 50.0, "pb_ratio": 1.2, "pe_ratio": 8.0}
+    signal = GrahamValueStrategy().generate_signal(df, f)
+    assert signal.signal_type == "BUY"
+    assert signal.confidence >= 0.4
+
+
+def test_graham_value_none_when_fundamentals_empty():
+    from domains.strategies.strategies.graham_value import GrahamValueStrategy
+    signal = GrahamValueStrategy().generate_signal(_make_df(), {})
+    assert signal.signal_type == "NONE"
+
+
+def test_graham_value_none_when_overvalued():
+    from domains.strategies.strategies.graham_value import GrahamValueStrategy
+    # High PE = 30 (>15), PB = 3 (>1.5) — both fail
+    df = _make_df(close=1500.0)
+    f = {**_good_fundamentals(), "eps": 50.0, "pb_ratio": 3.0, "pe_ratio": 30.0}
+    signal = GrahamValueStrategy().generate_signal(df, f)
+    assert signal.signal_type == "NONE"
+
+
+def test_graham_value_none_when_fundamentals_is_none():
+    from domains.strategies.strategies.graham_value import GrahamValueStrategy
+    signal = GrahamValueStrategy().generate_signal(_make_df(), None)
+    assert signal.signal_type == "NONE"
