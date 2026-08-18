@@ -61,7 +61,8 @@ function ScoreBreakdown({ opp }: { opp: TopOpportunity }) {
   return (
     <div className="space-y-1.5">
       {SCORE_COMPONENTS.map(({ key, label, weight }) => {
-        const val = bd[key] as number | null
+        const raw = bd[key]
+        const val = typeof raw === 'number' ? raw : null
         const pct = val != null ? Math.round(val * 100) : null
         return (
           <div key={key} className="flex items-center gap-2 text-xs">
@@ -160,8 +161,8 @@ function OpportunityRow({
                 </p>
                 {met.length > 0 && (
                   <ul className="space-y-0.5 mb-1">
-                    {met.map((c, i) => (
-                      <li key={i} className="flex items-start gap-1.5 text-green-700">
+                    {met.map((c) => (
+                      <li key={c} className="flex items-start gap-1.5 text-green-700">
                         <span className="mt-0.5">✓</span><span>{c}</span>
                       </li>
                     ))}
@@ -169,8 +170,8 @@ function OpportunityRow({
                 )}
                 {failed.length > 0 && (
                   <ul className="space-y-0.5">
-                    {failed.map((c, i) => (
-                      <li key={i} className="flex items-start gap-1.5 text-gray-400">
+                    {failed.map((c) => (
+                      <li key={c} className="flex items-start gap-1.5 text-gray-400">
                         <span className="mt-0.5">✗</span><span>{c}</span>
                       </li>
                     ))}
