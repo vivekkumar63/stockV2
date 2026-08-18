@@ -43,6 +43,14 @@ async def lifespan(app: FastAPI):
     Base.metadata.create_all(bind=engine)
     logger.info("Database tables verified")
 
+    # Phase F: safe migration — add dividend_yield to existing DBs
+    with engine.connect() as _conn:
+        try:
+            _conn.execute(text("ALTER TABLE fundamentals ADD COLUMN dividend_yield REAL"))
+            _conn.commit()
+        except Exception:
+            pass  # column already exists
+
     from domains.strategies.seed import seed_strategies
     db = SessionLocal()
     try:

@@ -78,6 +78,7 @@ class Fundamental(Base):
     promoter_holding: Mapped[Optional[float]] = mapped_column(Float)
     fii_holding: Mapped[Optional[float]] = mapped_column(Float)
     dii_holding: Mapped[Optional[float]] = mapped_column(Float)
+    dividend_yield: Mapped[Optional[float]] = mapped_column(Float)   # Phase F
     data_as_of: Mapped[Optional[date]] = mapped_column(Date)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
