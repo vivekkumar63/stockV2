@@ -151,7 +151,7 @@ def get_top_opportunities(
         text("""
             SELECT ss.id, ss.symbol, ss.strategy_id, s.name AS strategy_name,
                    ss.signal_date, ss.confidence_score, ss.price_at_signal,
-                   ss.stop_loss_pct, ss.target_pct, ss.holding_days,
+                   ss.suggested_stop_loss, ss.suggested_target, ss.holding_period_days,
                    ss.reasoning_json
             FROM strategy_signals ss
             JOIN strategies s ON s.id = ss.strategy_id
@@ -227,7 +227,7 @@ def get_top_opportunities(
     for r in rows:
         (signal_id, symbol, strategy_id, strategy_name,
          signal_date, confidence_score, price_at_signal,
-         stop_loss_pct, target_pct, holding_days, reasoning_json) = r
+         suggested_stop_loss, suggested_target, holding_period_days, reasoning_json) = r
 
         pair = (symbol, strategy_id)
         if pair in seen:
@@ -237,8 +237,8 @@ def get_top_opportunities(
         if price_at_signal is None:
             stop_loss_price = target_price = rr = None
         else:
-            sl_pct  = stop_loss_pct or 7.0
-            tgt_pct = target_pct   or 15.0
+            sl_pct  = suggested_stop_loss or 7.0
+            tgt_pct = suggested_target    or 15.0
             stop_loss_price = round(price_at_signal * (1 - sl_pct / 100), 2)
             target_price    = round(price_at_signal * (1 + tgt_pct / 100), 2)
             rr = round(
@@ -289,9 +289,9 @@ def get_top_opportunities(
             "price_at_signal":  price_at_signal,
             "stop_loss_price":  stop_loss_price,
             "target_price":     target_price,
-            "stop_loss_pct":    stop_loss_pct,
-            "target_pct":       target_pct,
-            "holding_days":     holding_days,
+            "stop_loss_pct":    suggested_stop_loss,
+            "target_pct":       suggested_target,
+            "holding_days":     holding_period_days,
             "rr":               rr,
             "reasoning_json":   reasoning_json,
             "score":            opp.score,

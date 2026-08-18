@@ -23,14 +23,6 @@ def _make_engine():
         poolclass=StaticPool,
     )
     Base.metadata.create_all(engine)
-    # The router SQL references stop_loss_pct, target_pct, holding_days on
-    # strategy_signals; the ORM model uses older column names.  Add the columns
-    # the endpoint expects so the SELECT does not raise OperationalError.
-    with engine.connect() as conn:
-        conn.execute(text("ALTER TABLE strategy_signals ADD COLUMN stop_loss_pct REAL"))
-        conn.execute(text("ALTER TABLE strategy_signals ADD COLUMN target_pct REAL"))
-        conn.execute(text("ALTER TABLE strategy_signals ADD COLUMN holding_days INTEGER"))
-        conn.commit()
     return engine
 
 
@@ -53,8 +45,8 @@ def client():
     db.execute(text("""
         INSERT INTO strategy_signals
             (symbol, strategy_id, signal_date, signal_type,
-             confidence_score, price_at_signal, stop_loss_pct, target_pct,
-             holding_days, created_at)
+             confidence_score, price_at_signal, suggested_stop_loss, suggested_target,
+             holding_period_days, created_at)
         VALUES
             ('RELIANCE', 1, :today, 'BUY', 0.80, 2400.0, 5.0, 10.0, 15, CURRENT_TIMESTAMP),
             ('TCS',      2, :today, 'BUY', 0.60, 3500.0, 5.0, 10.0, 15, CURRENT_TIMESTAMP),
