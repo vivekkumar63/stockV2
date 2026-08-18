@@ -1,7 +1,8 @@
 import { useState } from 'react'
-import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { enterPosition } from '../api/portfolio'
-import type { TopOpportunity, OpportunityBreakdown } from '../api/intelligence'
+import type { TopOpportunity, OpportunityBreakdown, SignalExplanation } from '../api/intelligence'
+import { getSignalExplanation } from '../api/intelligence'
 import { inr } from '../utils/format'
 
 const REGIME_PILL: Record<string, string> = {
@@ -94,6 +95,13 @@ function OpportunityRow({
   enterError: string | null; onEnter: () => void
 }) {
   const [expanded, setExpanded] = useState(false)
+  const [showExplain, setShowExplain] = useState(false)
+  const { data: explanation, isLoading: explainLoading, isError: explainError } = useQuery({
+    queryKey: ['signal-explanation', opp.signal_id],
+    queryFn: () => getSignalExplanation(opp.signal_id),
+    enabled: showExplain,
+    staleTime: 6 * 60 * 60 * 1000, // 6 hours — matches server-side cache TTL
+  })
   const { met, failed } = parseConditions(opp.reasoning_json)
   const regClass = REGIME_PILL[opp.regime] ?? 'bg-gray-100 text-gray-600'
   const regShort = REGIME_SHORT[opp.regime] ?? opp.regime
@@ -132,14 +140,28 @@ function OpportunityRow({
           {opp.strategy_name}
         </td>
         <td className="px-4 py-2">
-          <button
-            onClick={onEnter}
-            disabled={entering}
-            aria-label={`Enter position for ${opp.symbol}`}
-            className="px-3 py-1 bg-blue-600 text-white text-xs rounded hover:bg-blue-700 disabled:opacity-50"
-          >
-            Enter
-          </button>
+          <div className="flex items-center gap-1.5">
+            <button
+              onClick={onEnter}
+              disabled={entering}
+              aria-label={`Enter position for ${opp.symbol}`}
+              className="px-3 py-1 bg-blue-600 text-white text-xs rounded hover:bg-blue-700 disabled:opacity-50"
+            >
+              Enter
+            </button>
+            <button
+              onClick={() => setShowExplain(v => !v)}
+              aria-label={`AI explanation for ${opp.symbol}`}
+              className={`px-2 py-1 text-xs rounded border ${
+                showExplain
+                  ? 'bg-violet-100 text-violet-700 border-violet-300'
+                  : 'bg-gray-50 text-gray-500 border-gray-300 hover:border-violet-300 hover:text-violet-600'
+              }`}
+              title="Get AI analysis"
+            >
+              AI
+            </button>
+          </div>
           {enterError && (
             <p className="text-red-600 text-xs mt-0.5">{enterError}</p>
           )}
@@ -191,7 +213,89 @@ function OpportunityRow({
           </td>
         </tr>
       )}
+      {showExplain && (
+        <tr className="bg-violet-50">
+          <td colSpan={13} className="px-6 py-4">
+            {explainLoading && <p className="text-sm text-gray-400">Fetching AI analysis…</p>}
+            {explainError && <p className="text-sm text-red-600">AI explanation unavailable.</p>}
+            {explanation && <ExplanationPanel explanation={explanation} symbol={opp.symbol} />}
+          </td>
+        </tr>
+      )}
     </>
+  )
+}
+
+function ExplanationPanel({ explanation, symbol }: { explanation: SignalExplanation; symbol: string }) {
+  const riskColor =
+    explanation.risk_rating === 'LOW'    ? 'bg-green-100 text-green-700' :
+    explanation.risk_rating === 'MEDIUM' ? 'bg-yellow-100 text-yellow-700' :
+    explanation.risk_rating === 'HIGH'   ? 'bg-red-100 text-red-700' :
+    'bg-gray-100 text-gray-600'
+
+  return (
+    <div className="space-y-3 text-xs max-w-3xl">
+      <div className="flex items-center gap-2">
+        <span className="font-semibold text-violet-700">AI Analysis — {symbol}</span>
+        {explanation.risk_rating && (
+          <span className={`px-2 py-0.5 rounded text-xs font-medium ${riskColor}`}>
+            {explanation.risk_rating} RISK
+          </span>
+        )}
+        {explanation.action && (
+          <span className="px-2 py-0.5 rounded bg-orange-100 text-orange-700 text-xs font-medium">
+            {explanation.action}
+          </span>
+        )}
+      </div>
+
+      {explanation.summary && (
+        <p className="text-gray-700">{explanation.summary}</p>
+      )}
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+        {explanation.bull_case && explanation.bull_case.length > 0 && (
+          <div>
+            <p className="font-semibold text-green-700 mb-1">Bull Case</p>
+            <ul className="space-y-0.5">
+              {explanation.bull_case.map((c, i) => (
+                <li key={i} className="flex items-start gap-1.5 text-green-700">
+                  <span className="mt-0.5 shrink-0">✓</span><span>{c}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+        {explanation.bear_case && explanation.bear_case.length > 0 && (
+          <div>
+            <p className="font-semibold text-gray-500 mb-1">Bear Case</p>
+            <ul className="space-y-0.5">
+              {explanation.bear_case.map((c, i) => (
+                <li key={i} className="flex items-start gap-1.5 text-gray-500">
+                  <span className="mt-0.5 shrink-0">✗</span><span>{c}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+        {explanation.exit_reasons && explanation.exit_reasons.length > 0 && (
+          <div>
+            <p className="font-semibold text-orange-700 mb-1">Exit Reasons</p>
+            <ul className="space-y-0.5">
+              {explanation.exit_reasons.map((c, i) => (
+                <li key={i} className="flex items-start gap-1.5 text-orange-700">
+                  <span className="mt-0.5 shrink-0">→</span><span>{c}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+      </div>
+
+      {explanation.confidence_reasoning && (
+        <p className="text-gray-500 italic">{explanation.confidence_reasoning}</p>
+      )}
+    </div>
   )
 }
 
