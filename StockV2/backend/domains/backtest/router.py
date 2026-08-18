@@ -57,7 +57,7 @@ def _run_leaderboard_bg(stop_loss_pct: float, target_pct: float) -> None:
             to_date=to_date,
             stop_loss_pct=stop_loss_pct,
             target_pct=target_pct,
-            limit=500,
+            limit=10_000,
         )
         logger.info("[leaderboard] compute done sl=%s tgt=%s to_date=%s", stop_loss_pct, target_pct, to_date)
     except Exception as e:

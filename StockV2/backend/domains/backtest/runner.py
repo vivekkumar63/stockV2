@@ -185,7 +185,11 @@ class BacktestRunner:
 
             df = pd.DataFrame([dict(r._mapping) for r in rows])
             df["date"] = pd.to_datetime(df["date"]).dt.date
-            df_ind = IndicatorEngine.compute(df)
+            try:
+                df_ind = IndicatorEngine.compute(df)
+            except Exception as e:
+                logger.warning("[scan] %s: indicator compute failed: %s", symbol, e)
+                continue
 
             new_entries: list[tuple[str, int, dict]] = []
             for sid, sname, strat in strats_to_run:
