@@ -208,3 +208,38 @@ def test_growth_buy_when_exactly_4_criteria_met():
     signal = GrowthInvestingStrategy().generate_signal(_make_df(), f)
     assert signal.signal_type == "BUY"
     assert signal.confidence == pytest.approx(4 / 5)
+
+
+# ── Dividend Investing ────────────────────────────────────────────────────────
+
+def test_dividend_buy_when_all_criteria_met():
+    from domains.strategies.strategies.dividend_investing import DividendInvestingStrategy
+    signal = DividendInvestingStrategy().generate_signal(_make_df(), _good_fundamentals())
+    assert signal.signal_type == "BUY"
+    assert signal.confidence == pytest.approx(0.70)
+
+
+def test_dividend_none_when_fundamentals_empty():
+    from domains.strategies.strategies.dividend_investing import DividendInvestingStrategy
+    signal = DividendInvestingStrategy().generate_signal(_make_df(), {})
+    assert signal.signal_type == "NONE"
+
+
+def test_dividend_none_when_fundamentals_is_none():
+    from domains.strategies.strategies.dividend_investing import DividendInvestingStrategy
+    signal = DividendInvestingStrategy().generate_signal(_make_df(), None)
+    assert signal.signal_type == "NONE"
+
+
+def test_dividend_none_when_low_yield():
+    from domains.strategies.strategies.dividend_investing import DividendInvestingStrategy
+    f = {**_good_fundamentals(), "dividend_yield": 0.005}  # 0.5% < 2%
+    signal = DividendInvestingStrategy().generate_signal(_make_df(), f)
+    assert signal.signal_type == "NONE"
+
+
+def test_dividend_none_when_high_debt():
+    from domains.strategies.strategies.dividend_investing import DividendInvestingStrategy
+    f = {**_good_fundamentals(), "debt_equity": 0.8}  # D/E > 0.5
+    signal = DividendInvestingStrategy().generate_signal(_make_df(), f)
+    assert signal.signal_type == "NONE"
