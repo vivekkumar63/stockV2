@@ -23,8 +23,6 @@ def _make_mock_db(perf_row, wf_row=None, strategy_ids=None):
         # strategy_ids is {name: id}; DB rows are (id, name)
         strategies_rows = [(v, k) for k, v in strategy_ids.items()]
 
-    call_count = [0]
-
     def mock_execute(query, params=None):
         mock_result = MagicMock()
         q = str(query) if not isinstance(query, str) else query

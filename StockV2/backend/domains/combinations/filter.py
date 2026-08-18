@@ -1,7 +1,6 @@
 # backend/domains/combinations/filter.py
 import logging
 from dataclasses import dataclass
-from typing import Optional
 
 from sqlalchemy import text
 from sqlalchemy.orm import Session
@@ -25,9 +24,9 @@ class FilterConfig:
 
 
 class StrategyFilter:
-    def __init__(self, db: Session, config: FilterConfig = FilterConfig()):
+    def __init__(self, db: Session, config: FilterConfig | None = None):
         self.db = db
-        self.config = config
+        self.config = config if config is not None else FilterConfig()
         self._strategy_id_map: dict[str, int] = self._load_strategy_ids()
 
     def _load_strategy_ids(self) -> dict[str, int]:
