@@ -17,7 +17,13 @@ def test_extended_metrics_includes_sortino():
     db = MagicMock()
     db.execute.return_value.fetchone.return_value = None  # no regime data
 
-    trades = [_make_trade(2000.0, 4.0), _make_trade(-800.0, -1.6)]
+    # Give trades separate exit dates so each loss lands on its own day,
+    # ensuring at least 2 downside returns in the daily equity curve.
+    trades = [
+        _make_trade(2000.0, 4.0, exit_date=date(2024, 1, 15)),
+        _make_trade(-800.0, -1.6, exit_date=date(2024, 2, 1)),
+        _make_trade(-600.0, -1.2, exit_date=date(2024, 2, 15)),
+    ]
 
     result = compute_extended_metrics(
         trades, 500_000.0, date(2024, 1, 1), date(2024, 3, 31), db, {}

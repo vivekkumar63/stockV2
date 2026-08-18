@@ -1,13 +1,13 @@
 import statistics
+from collections import defaultdict
 from dataclasses import dataclass
 from datetime import date
 from typing import Optional
 
-import pandas as pd
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from domains.backtest.metrics import compute_metrics
+from domains.backtest.metrics import compute_metrics, _build_equity_curve
 
 
 @dataclass
@@ -44,18 +44,22 @@ def compute_extended_metrics(
     """
     base = compute_metrics(trades, initial_capital, from_date, to_date)
 
-    # Sortino ratio — downside deviation only
-    # When there are >= 2 downside samples use population stdev; when exactly 1,
-    # use abs(single loss) as the downside deviation (avoids a zero-division on pstdev).
+    # Sortino ratio — downside deviation on daily equity curve returns
     sortino = None
     if trades:
-        returns = [t.pnl_pct / 100.0 for t in trades]
-        downside = [r for r in returns if r < 0]
-        if len(downside) >= 1:
-            mean_r = statistics.mean(returns)
-            downside_std = statistics.pstdev(downside) if len(downside) > 1 else abs(downside[0])
-            if downside_std > 0:
-                sortino = round(mean_r / downside_std * (252 ** 0.5), 4)
+        curve = _build_equity_curve(trades, initial_capital, from_date, to_date)
+        if len(curve) >= 3:
+            returns = [
+                (curve[i] - curve[i - 1]) / curve[i - 1]
+                for i in range(1, len(curve))
+                if curve[i - 1] != 0.0
+            ]
+            downside = [r for r in returns if r < 0]
+            if len(downside) >= 2:
+                mean_r = statistics.mean(returns)
+                downside_std = statistics.stdev(downside)
+                if downside_std > 0:
+                    sortino = round(mean_r / downside_std * (252 ** 0.5), 4)
 
     # Median trade return
     median_return_pct = None
@@ -65,7 +69,6 @@ def compute_extended_metrics(
     # Regime win rates — group trades dynamically by whatever regime appears
     regime_win_rates: dict[str, Optional[float]] = {}
     if trades:
-        from collections import defaultdict
         regime_buckets: dict[str, list] = defaultdict(list)
         for t in trades:
             regime = _get_regime_for_date(db, t.exit_date)
