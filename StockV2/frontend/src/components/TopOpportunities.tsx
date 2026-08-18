@@ -87,9 +87,10 @@ function ScoreBreakdown({ opp }: { opp: TopOpportunity }) {
 }
 
 function OpportunityRow({
-  opp, rank, entering, onEnter,
+  opp, rank, entering, enterError, onEnter,
 }: {
-  opp: TopOpportunity; rank: number; entering: boolean; onEnter: () => void
+  opp: TopOpportunity; rank: number; entering: boolean
+  enterError: string | null; onEnter: () => void
 }) {
   const [expanded, setExpanded] = useState(false)
   const { met, failed } = parseConditions(opp.reasoning_json)
@@ -138,6 +139,9 @@ function OpportunityRow({
           >
             Enter
           </button>
+          {enterError && (
+            <p className="text-red-600 text-xs mt-0.5">{enterError}</p>
+          )}
         </td>
       </tr>
       {expanded && (
@@ -173,8 +177,8 @@ function OpportunityRow({
                   </ul>
                 )}
                 <div className="mt-2 space-y-0.5 text-gray-500">
-                  <p>SL: {opp.stop_loss_price != null ? inr(opp.stop_loss_price) : '—'} ({opp.stop_loss_pct?.toFixed(1)}%)</p>
-                  <p>Target: {opp.target_price != null ? inr(opp.target_price) : '—'} (+{opp.target_pct?.toFixed(1)}%)</p>
+                  <p>SL: {opp.stop_loss_price != null ? inr(opp.stop_loss_price) : '—'}{opp.stop_loss_pct != null ? ` (${opp.stop_loss_pct.toFixed(1)}%)` : ''}</p>
+                  <p>Target: {opp.target_price != null ? inr(opp.target_price) : '—'}{opp.target_pct != null ? ` (+${opp.target_pct.toFixed(1)}%)` : ''}</p>
                   {opp.rr != null && <p>R:R 1:{opp.rr.toFixed(1)}</p>}
                   {opp.holding_days != null && <p>Hold: ~{opp.holding_days}d</p>}
                   {opp.ml_probability != null && (
@@ -242,17 +246,17 @@ export function TopOpportunities({
                 opp={opp}
                 rank={i + 1}
                 entering={enterMut.isPending && enterMut.variables?.signalId === opp.signal_id}
+                enterError={
+                  enterMut.isError && enterMut.variables?.signalId === opp.signal_id
+                    ? String(enterMut.error)
+                    : null
+                }
                 onEnter={() => enterMut.mutate({ signalId: opp.signal_id, price: opp.price_at_signal })}
               />
             ))}
           </tbody>
         </table>
       </div>
-      {enterMut.isError && (
-        <p className="text-red-600 text-sm mt-2">
-          Failed to enter position: {String(enterMut.error)}
-        </p>
-      )}
     </>
   )
 }
