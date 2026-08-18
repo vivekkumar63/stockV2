@@ -243,3 +243,39 @@ def test_dividend_none_when_high_debt():
     f = {**_good_fundamentals(), "debt_equity": 0.8}  # D/E > 0.5
     signal = DividendInvestingStrategy().generate_signal(_make_df(), f)
     assert signal.signal_type == "NONE"
+
+
+# ── FII/DII Accumulation ──────────────────────────────────────────────────────
+
+def test_fii_dii_buy_when_accumulation_pattern():
+    from domains.strategies.strategies.fii_dii_accumulation import FIIDIIAccumulationStrategy
+    # volume=1_600_000 > vol_sma=1_000_000 * 1.5 = 1_500_000 (all 5 bars)
+    # close=100 > sma_50=95 (all 5 bars), rsi=55 in 40-70
+    df = _make_df(close=100.0, volume=1_600_000.0, vol_sma=1_000_000.0, rsi=55.0, sma_50=95.0)
+    signal = FIIDIIAccumulationStrategy().generate_signal(df)
+    assert signal.signal_type == "BUY"
+    assert signal.confidence == pytest.approx(0.65)
+
+
+def test_fii_dii_none_when_low_volume():
+    from domains.strategies.strategies.fii_dii_accumulation import FIIDIIAccumulationStrategy
+    # volume = vol_sma (ratio 1.0, not 1.5 — no accumulation signal)
+    df = _make_df(close=100.0, volume=1_000_000.0, vol_sma=1_000_000.0, rsi=55.0, sma_50=95.0)
+    signal = FIIDIIAccumulationStrategy().generate_signal(df)
+    assert signal.signal_type == "NONE"
+
+
+def test_fii_dii_none_when_rsi_overbought():
+    from domains.strategies.strategies.fii_dii_accumulation import FIIDIIAccumulationStrategy
+    df = _make_df(close=100.0, volume=1_600_000.0, vol_sma=1_000_000.0, rsi=80.0, sma_50=95.0)
+    signal = FIIDIIAccumulationStrategy().generate_signal(df)
+    assert signal.signal_type == "NONE"
+
+
+def test_fii_dii_works_without_fundamentals():
+    from domains.strategies.strategies.fii_dii_accumulation import FIIDIIAccumulationStrategy
+    df = _make_df(close=100.0, volume=1_600_000.0, vol_sma=1_000_000.0, rsi=55.0, sma_50=95.0)
+    signal_none = FIIDIIAccumulationStrategy().generate_signal(df, fundamentals=None)
+    signal_empty = FIIDIIAccumulationStrategy().generate_signal(df, fundamentals={})
+    assert signal_none.signal_type == "BUY"
+    assert signal_empty.signal_type == "BUY"
