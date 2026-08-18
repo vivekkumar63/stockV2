@@ -184,3 +184,6 @@ app.include_router(market_router, prefix="/api/v1", dependencies=[Depends(verify
 
 from domains.intelligence.router import router as intelligence_router  # noqa: E402
 app.include_router(intelligence_router, prefix="/api/v1", dependencies=[Depends(verify_api_key)])
+
+from domains.combinations.router import router as combinations_router  # noqa: E402
+app.include_router(combinations_router, prefix="/api/v1", dependencies=[Depends(verify_api_key)])
