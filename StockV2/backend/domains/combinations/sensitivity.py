@@ -4,7 +4,6 @@ import statistics
 from datetime import date
 
 import pandas as pd
-from sqlalchemy.orm import Session
 
 from domains.data.indicators import IndicatorEngine
 
@@ -39,9 +38,6 @@ class SensitivityAnalyzer:
             return 0.0
 
         mean_count = statistics.mean(buy_counts)
-        if mean_count == 0:
-            return 0.0
-
         std_count = statistics.stdev(buy_counts) if len(buy_counts) > 1 else 0.0
         cv = std_count / mean_count  # coefficient of variation
 
