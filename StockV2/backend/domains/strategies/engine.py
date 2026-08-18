@@ -87,9 +87,11 @@ class StrategyEngine:
             if df.empty or len(df) < 30:
                 continue
             df = IndicatorEngine.compute(df)
+            from domains.data.fundamentals import FundamentalsService
+            fundamentals = FundamentalsService(self.db).get_latest(symbol)
             symbol_signals: list[tuple[BaseStrategy, Signal]] = []
             for strategy in ALL_STRATEGIES:
-                signal = strategy.generate_signal(df)
+                signal = strategy.generate_signal(df, fundamentals=fundamentals)
                 symbol_signals.append((strategy, signal))
                 if signal.signal_type != "NONE":
                     self._save_signal(symbol, strategy, signal, float(df["close"].iloc[-1]), scan_date)

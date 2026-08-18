@@ -35,3 +35,33 @@ def get_prices(
     if not stock:
         raise HTTPException(status_code=404, detail=f"Stock '{symbol}' not found")
     return DataService(db).get_prices(symbol, from_date=from_date, to_date=to_date, limit=limit)
+
+
+@router.post("/data/fundamentals/refresh")
+def trigger_fundamentals_refresh(db: Session = Depends(get_db)):
+    import threading
+    from domains.data.fundamentals import FundamentalsService
+    from domains.data.nse_universe import NSE_SYMBOLS
+
+    def _run():
+        from database import SessionLocal
+        _db = SessionLocal()
+        try:
+            FundamentalsService(_db).refresh_all(NSE_SYMBOLS)
+        except Exception:
+            import logging
+            logging.getLogger(__name__).exception("[fundamentals/refresh] failed")
+        finally:
+            _db.close()
+
+    threading.Thread(target=_run, daemon=True).start()
+    return {"status": "started", "symbols": len(NSE_SYMBOLS)}
+
+
+@router.get("/data/fundamentals/{symbol}")
+def get_fundamentals(symbol: str, db: Session = Depends(get_db)):
+    from domains.data.fundamentals import FundamentalsService
+    data = FundamentalsService(db).get_latest(symbol.upper())
+    if not data:
+        raise HTTPException(status_code=404, detail=f"No fundamentals data for {symbol}")
+    return {"symbol": symbol.upper(), **data}

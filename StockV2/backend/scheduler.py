@@ -235,7 +235,18 @@ def _strategy_correlation_compute():
 
 
 def _weekly_fundamentals():
-    logger.info("[scheduler] weekly_fundamentals — placeholder (implemented in Plan 2)")
+    from database import SessionLocal
+    from domains.data.fundamentals import FundamentalsService
+    from domains.data.nse_universe import NSE_SYMBOLS
+    db = SessionLocal()
+    try:
+        result = FundamentalsService(db).refresh_all(NSE_SYMBOLS)
+        logger.info("[weekly_fundamentals] updated=%d skipped=%d",
+                    result["updated"], result["skipped"])
+    except Exception:
+        logger.exception("[weekly_fundamentals] failed")
+    finally:
+        db.close()
 
 
 def _monthly_ml_retrain():
