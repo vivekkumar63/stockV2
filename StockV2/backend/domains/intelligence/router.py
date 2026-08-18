@@ -4,9 +4,11 @@ import logging
 from datetime import date
 from typing import Optional
 
+from ist import ist_today
+
 import pandas as pd
-from fastapi import APIRouter, BackgroundTasks, Depends, Query
-from sqlalchemy import text
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
+from sqlalchemy import bindparam, text
 from sqlalchemy.orm import Session
 
 from database import get_db
@@ -143,7 +145,6 @@ def get_top_opportunities(
     limit: int = Query(20, ge=1, le=100),
     db: Session = Depends(get_db),
 ):
-    from ist import ist_today
     today = ist_today()
 
     rows = db.execute(
@@ -156,6 +157,7 @@ def get_top_opportunities(
             JOIN strategies s ON s.id = ss.strategy_id
             WHERE ss.signal_date = :today AND ss.signal_type = 'BUY'
             ORDER BY ss.confidence_score DESC
+            LIMIT 500
         """),
         {"today": str(today)},
     ).fetchall()
@@ -164,15 +166,18 @@ def get_top_opportunities(
         return []
 
     # Get regime once — reused for all signals
-    regime_result = MarketRegimeEngine().get_or_compute(db)
-    regime = regime_result.regime
+    try:
+        regime_result = MarketRegimeEngine().get_or_compute(db)
+        regime = regime_result.regime
+    except Exception:
+        logger.exception("[top-opportunities] failed to compute market regime")
+        raise HTTPException(status_code=503, detail="Market regime unavailable")
 
     # Bulk-fetch historical win rates
     symbols = list({r[1] for r in rows})
     strategy_ids = list({r[2] for r in rows})
     hist_wr_map: dict[tuple, Optional[float]] = {}
     if symbols and strategy_ids:
-        from sqlalchemy import bindparam
         hist_rows = db.execute(
             text("""
                 SELECT symbol, strategy_id, win_rate FROM scan_result_cache
@@ -195,14 +200,25 @@ def get_top_opportunities(
     false_rates = FalseSignalDetector().get_false_signal_rates(db)
 
     # Pre-compute per-symbol data once to avoid redundant DB calls
-    unique_symbols = list({r[1] for r in rows})
     mtf_cache: dict[str, object] = {}
     vol_cache: dict[str, object] = {}
     sr_cache:  dict[str, object] = {}
-    for sym in unique_symbols:
-        mtf_cache[sym] = MultiTimeframeEngine().compute(db, sym)
-        vol_cache[sym] = _compute_volume_score(db, sym)
-        sr_cache[sym]  = SupportResistanceEngine().compute(db, sym)
+    for sym in symbols:
+        try:
+            mtf_cache[sym] = MultiTimeframeEngine().compute(db, sym)
+        except Exception:
+            logger.warning("[top-opportunities] MTF compute failed for %s", sym)
+            mtf_cache[sym] = None
+        try:
+            vol_cache[sym] = _compute_volume_score(db, sym)
+        except Exception:
+            logger.warning("[top-opportunities] volume compute failed for %s", sym)
+            vol_cache[sym] = None
+        try:
+            sr_cache[sym] = SupportResistanceEngine().compute(db, sym)
+        except Exception:
+            logger.warning("[top-opportunities] S/R compute failed for %s", sym)
+            sr_cache[sym] = None
     ml_scorer  = MLSignalScorer()
     opp_scorer = OpportunityScorer()
 
@@ -218,25 +234,28 @@ def get_top_opportunities(
             continue
         seen.add(pair)
 
-        sl_pct = stop_loss_pct or 7.0
-        tgt_pct = target_pct or 15.0
-        stop_loss_price = round(price_at_signal * (1 - sl_pct / 100), 2)
-        target_price    = round(price_at_signal * (1 + tgt_pct / 100), 2)
-        rr = round(
-            (target_price - price_at_signal) / (price_at_signal - stop_loss_price), 2
-        ) if price_at_signal > stop_loss_price else None
+        if price_at_signal is None:
+            stop_loss_price = target_price = rr = None
+        else:
+            sl_pct  = stop_loss_pct or 7.0
+            tgt_pct = target_pct   or 15.0
+            stop_loss_price = round(price_at_signal * (1 - sl_pct / 100), 2)
+            target_price    = round(price_at_signal * (1 + tgt_pct / 100), 2)
+            rr = round(
+                (target_price - price_at_signal) / (price_at_signal - stop_loss_price), 2
+            ) if price_at_signal > stop_loss_price else None
 
         hist_wr    = hist_wr_map.get((symbol, strategy_id))
         regime_wr  = regime_perf[strategy_id].win_rate if strategy_id in regime_perf else None
         false_rate = false_rates.get(strategy_id)
 
         mtf_result = mtf_cache[symbol]
-        mtf_score  = mtf_result.alignment_score if mtf_result.daily else None
+        mtf_score  = mtf_result.alignment_score if mtf_result and mtf_result.daily else None
 
         vol_score = vol_cache[symbol]
 
         sr_result = sr_cache[symbol]
-        sr_score  = _compute_sr_score(sr_result)
+        sr_score  = _compute_sr_score(sr_result) if sr_result is not None else None
 
         ml_prob = ml_scorer.predict({
             "confidence_score": confidence_score or 0.5,
