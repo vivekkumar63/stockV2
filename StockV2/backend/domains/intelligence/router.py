@@ -136,6 +136,140 @@ def get_opportunity_score(
     }
 
 
+# ── Top opportunities (bulk scored today's BUY signals) ──────────────────────
+
+@router.get("/intelligence/top-opportunities")
+def get_top_opportunities(
+    limit: int = Query(20, ge=1, le=100),
+    db: Session = Depends(get_db),
+):
+    from ist import ist_today
+    today = ist_today()
+
+    rows = db.execute(
+        text("""
+            SELECT ss.id, ss.symbol, ss.strategy_id, s.name AS strategy_name,
+                   ss.signal_date, ss.confidence_score, ss.price_at_signal,
+                   ss.stop_loss_pct, ss.target_pct, ss.holding_days,
+                   ss.reasoning_json
+            FROM strategy_signals ss
+            JOIN strategies s ON s.id = ss.strategy_id
+            WHERE ss.signal_date = :today AND ss.signal_type = 'BUY'
+            ORDER BY ss.confidence_score DESC
+        """),
+        {"today": str(today)},
+    ).fetchall()
+
+    if not rows:
+        return []
+
+    # Get regime once — reused for all signals
+    regime_result = MarketRegimeEngine().get_or_compute(db)
+    regime = regime_result.regime
+
+    # Bulk-fetch historical win rates
+    symbols = list({r[1] for r in rows})
+    strategy_ids = list({r[2] for r in rows})
+    hist_wr_map: dict[tuple, Optional[float]] = {}
+    if symbols and strategy_ids:
+        from sqlalchemy import bindparam
+        hist_rows = db.execute(
+            text("""
+                SELECT symbol, strategy_id, win_rate FROM scan_result_cache
+                WHERE symbol IN :syms AND strategy_id IN :sids
+                  AND stop_loss_pct = 5.0 AND target_pct = 10.0
+                  AND from_date = '2015-01-01'
+            """).bindparams(
+                bindparam("syms", expanding=True),
+                bindparam("sids", expanding=True),
+            ),
+            {"syms": symbols, "sids": strategy_ids},
+        ).fetchall()
+        for hr in hist_rows:
+            hist_wr_map[(hr[0], hr[1])] = float(hr[2]) if hr[2] is not None else None
+
+    # Regime-strategy performance
+    regime_perf = RegimePerformanceEngine().get_for_regime(db, regime)
+
+    # False signal rates — bulk dict {strategy_id: rate}
+    false_rates = FalseSignalDetector().get_false_signal_rates(db)
+
+    results = []
+    for r in rows:
+        (signal_id, symbol, strategy_id, strategy_name,
+         signal_date, confidence_score, price_at_signal,
+         stop_loss_pct, target_pct, holding_days, reasoning_json) = r
+
+        sl_pct = stop_loss_pct or 7.0
+        tgt_pct = target_pct or 15.0
+        stop_loss_price = round(price_at_signal * (1 - sl_pct / 100), 2)
+        target_price    = round(price_at_signal * (1 + tgt_pct / 100), 2)
+        rr = round(
+            (target_price - price_at_signal) / (price_at_signal - stop_loss_price), 2
+        ) if price_at_signal > stop_loss_price else None
+
+        hist_wr    = hist_wr_map.get((symbol, strategy_id))
+        regime_wr  = regime_perf[strategy_id].win_rate if strategy_id in regime_perf else None
+        false_rate = false_rates.get(strategy_id)
+
+        mtf_result = MultiTimeframeEngine().compute(db, symbol)
+        mtf_score  = mtf_result.alignment_score if mtf_result.daily else None
+
+        vol_score = _compute_volume_score(db, symbol)
+
+        sr_result = SupportResistanceEngine().compute(db, symbol)
+        sr_score  = _compute_sr_score(sr_result)
+
+        ml_prob = MLSignalScorer().predict({
+            "confidence_score": confidence_score or 0.5,
+            "regime_code":      regime_to_code(regime),
+            "strategy_id":      strategy_id,
+            "month":            today.month,
+            "day_of_week":      today.weekday(),
+        })
+
+        opp = OpportunityScorer().full_score(
+            symbol=symbol,
+            strategy_id=strategy_id,
+            confidence=confidence_score or 0.5,
+            historical_win_rate=hist_wr,
+            regime=regime,
+            regime_strategy_win_rate=regime_wr,
+            mtf_alignment=mtf_score,
+            volume_score=vol_score,
+            sr_score=sr_score,
+            false_signal_rate=false_rate,
+            ml_probability=ml_prob,
+        )
+
+        results.append({
+            "signal_id":        signal_id,
+            "symbol":           symbol,
+            "strategy_id":      strategy_id,
+            "strategy_name":    strategy_name,
+            "signal_date":      str(signal_date)[:10],
+            "confidence_score": confidence_score,
+            "price_at_signal":  price_at_signal,
+            "stop_loss_price":  stop_loss_price,
+            "target_price":     target_price,
+            "stop_loss_pct":    stop_loss_pct,
+            "target_pct":       target_pct,
+            "holding_days":     holding_days,
+            "rr":               rr,
+            "reasoning_json":   reasoning_json,
+            "score":            opp.score,
+            "grade":            opp.grade,
+            "regime":           regime,
+            "mtf_alignment":    mtf_score,
+            "ml_probability":   ml_prob,
+            "false_signal_rate": false_rate,
+            "breakdown":        opp.breakdown,
+        })
+
+    results.sort(key=lambda x: x["score"], reverse=True)
+    return results[:limit]
+
+
 # ── Regime backfill trigger ───────────────────────────────────────────────────
 
 @router.post("/intelligence/regime-backfill")
