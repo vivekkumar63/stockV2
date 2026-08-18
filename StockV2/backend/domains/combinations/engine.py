@@ -4,7 +4,6 @@ import logging
 import statistics
 from dataclasses import dataclass, asdict, field
 from datetime import date
-from itertools import combinations as iter_combinations
 from typing import Optional
 
 import pandas as pd
@@ -44,6 +43,7 @@ class CombinationEngine:
         self.scorer = ReliabilityScorer()
         self.sensitivity_analyzer = SensitivityAnalyzer()
         self.explainer = ExplanationGenerator()
+        self.simulator = BacktestSimulator()
 
     def run_full_analysis(self) -> int:
         """Run the complete pipeline. Returns run_id."""
@@ -79,7 +79,7 @@ class CombinationEngine:
             for idx, combo in enumerate(combos):
                 if idx % max(1, len(combos) // 10) == 0:
                     logger.info("[engine] Progress: %d/%d combinations", idx, len(combos))
-                result = self._evaluate_combo(combo, symbols_data, run_id)
+                result = self._evaluate_combo(combo, symbols_data)
                 if result:
                     combo_results.append(result)
 
@@ -140,13 +140,11 @@ class CombinationEngine:
 
         return run_id
 
-    def _evaluate_combo(self, combination: list, symbols_data: dict, run_id: int) -> Optional[dict]:
-        """Run backtests for train/val/oos periods and walk-forward for a single combination."""
+    def _evaluate_combo(self, combination: list, symbols_data: dict) -> Optional[dict]:
+        """Run backtests for train/val/oos periods for a single combination."""
         all_train, all_val, all_oos = [], [], []
         train_from_date = val_from_date = oos_from_date = None
         train_to_date = val_to_date = oos_to_date = None
-
-        simulator = BacktestSimulator()
 
         for symbol, prices_df in symbols_data.items():
             if len(prices_df) < 50:
@@ -170,19 +168,19 @@ class CombinationEngine:
 
             try:
                 df_ind = IndicatorEngine.compute(prices_df)
-                train_trades = simulator.run(
+                train_trades = self.simulator.run(
                     symbol, prices_df, t_from, t_to, combination,
                     initial_capital=self.config.initial_capital,
                     round_trip_cost_pct=self.config.round_trip_cost_pct,
                     _df_ind_precomputed=df_ind,
                 )
-                val_trades = simulator.run(
+                val_trades = self.simulator.run(
                     symbol, prices_df, v_from, v_to, combination,
                     initial_capital=self.config.initial_capital,
                     round_trip_cost_pct=self.config.round_trip_cost_pct,
                     _df_ind_precomputed=df_ind,
                 )
-                oos_trades = simulator.run(
+                oos_trades = self.simulator.run(
                     symbol, prices_df, o_from, o_to, combination,
                     initial_capital=self.config.initial_capital,
                     round_trip_cost_pct=self.config.round_trip_cost_pct,
@@ -196,13 +194,11 @@ class CombinationEngine:
             all_val.extend(val_trades)
             all_oos.extend(oos_trades)
 
-        if not all_oos:
+        if not all_oos or oos_from_date is None:
             return None
 
         benchmarks = self._compute_benchmarks(symbols_data, oos_from_date, oos_to_date)
-        wf_consistency = self._compute_wf_consistency(
-            combination, symbols_data, oos_from_date, oos_to_date
-        )
+        wf_consistency = self._compute_wf_consistency(combination)
 
         train_metrics = compute_extended_metrics(
             all_train, self.config.initial_capital, train_from_date, train_to_date, self.db, {}
@@ -229,14 +225,15 @@ class CombinationEngine:
             "wf_consistency": wf_consistency,
             "oos_from": oos_from_date,
             "oos_to": oos_to_date,
-            "sensitivity_score": 50.0,  # default; overwritten in step 9 for top-N
+            "sensitivity_score": None,  # populated in step 9 for top-N only
             "reliability_result": None,
             "explanation": None,
         }
 
     def _load_symbols_data(self) -> dict[str, pd.DataFrame]:
-        """Load price data for up to symbols_limit symbols."""
-        rows = self.db.execute(text("""
+        """Load price data for up to symbols_limit symbols in a single bulk query."""
+        # Get top symbols by row count
+        sym_rows = self.db.execute(text("""
             SELECT symbol FROM stock_prices_daily
             GROUP BY symbol
             HAVING COUNT(*) >= 200
@@ -244,34 +241,32 @@ class CombinationEngine:
             LIMIT :limit
         """), {"limit": self.config.symbols_limit}).fetchall()
 
-        symbols = [r[0] for r in rows]
+        if not sym_rows:
+            return {}
+
+        symbols = [r[0] for r in sym_rows]
+        placeholders = ",".join(f":s{i}" for i in range(len(symbols)))
+        params = {f"s{i}": s for i, s in enumerate(symbols)}
+
+        price_rows = self.db.execute(text(f"""
+            SELECT symbol, date, open, high, low, close, volume
+            FROM stock_prices_daily
+            WHERE symbol IN ({placeholders})
+            ORDER BY symbol, date ASC
+        """), params).fetchall()
+
         result: dict[str, pd.DataFrame] = {}
-
-        for symbol in symbols:
-            price_rows = self.db.execute(text("""
-                SELECT date, open, high, low, close, volume
-                FROM stock_prices_daily
-                WHERE symbol = :sym
-                ORDER BY date ASC
-            """), {"sym": symbol}).fetchall()
-
-            if not price_rows:
-                continue
-            df = pd.DataFrame([dict(r._mapping) for r in price_rows])
-            df["date"] = pd.to_datetime(df["date"]).dt.date
-            result[symbol] = df
+        if price_rows:
+            df_all = pd.DataFrame([dict(r._mapping) for r in price_rows])
+            df_all["date"] = pd.to_datetime(df_all["date"]).dt.date
+            for symbol, group in df_all.groupby("symbol"):
+                result[symbol] = group.drop(columns=["symbol"]).reset_index(drop=True)
 
         logger.info("[engine] loaded %d symbols", len(result))
         return result
 
-    def _compute_wf_consistency(
-        self, combination: list, symbols_data: dict, oos_from: date, oos_to: date
-    ) -> float:
-        """Compute walk-forward consistency using existing WalkForwardRunner logic.
-
-        Simplified: use average consistency_score from walk_forward_results for the
-        strategies in this combination (as a proxy for the combination's consistency).
-        """
+    def _compute_wf_consistency(self, combination: list) -> float:
+        """Approximate walk-forward consistency by averaging per-strategy scores from DB."""
         strategy_names = [s.name for s in combination]
         rows = self.db.execute(text("""
             SELECT AVG(wfr.consistency_score)
@@ -304,7 +299,6 @@ class CombinationEngine:
 
         buy_and_hold = statistics.mean(bah_cagrs) if bah_cagrs else 0.0
 
-        # Best single strategy from strategy_performance (approximation)
         best_single_row = self.db.execute(text(
             "SELECT MAX(cagr) FROM strategy_performance"
         )).fetchone()
@@ -313,7 +307,7 @@ class CombinationEngine:
         return {
             "buy_and_hold": round(buy_and_hold, 4),
             "best_single": round(best_single, 4),
-            "sma_crossover": 0.0,  # simplified — SMA crossover benchmark deferred
+            "sma_crossover": 0.0,
         }
 
     def _load_correlation_matrix(self) -> dict:
@@ -330,7 +324,6 @@ class CombinationEngine:
         """Persist all combination results to DB. Returns first (best) combination_id."""
         first_id = None
         for cr in scored:
-            # Upsert into strategy_combinations
             rel = cr["reliability_result"]
             oos = cr["oos_metrics"]
             train = cr["train_metrics"]
@@ -358,8 +351,7 @@ class CombinationEngine:
 
                 exp_json = None
                 if cr["explanation"]:
-                    from dataclasses import asdict as dc_asdict
-                    exp_json = json.dumps(dc_asdict(cr["explanation"]))
+                    exp_json = json.dumps(asdict(cr["explanation"]))
 
                 self.db.execute(text("""
                     INSERT INTO combination_results (
@@ -444,7 +436,7 @@ class CombinationEngine:
         self.db.commit()
 
     def get_top_combinations(self, n: int = 50) -> list[dict]:
-        """Return top combinations from most recent completed run."""
+        """Return top combinations from the most recent completed run."""
         rows = self.db.execute(text("""
             SELECT sc.name, sc.strategy_names, sc.size,
                    cr.oos_cagr, cr.oos_max_drawdown, cr.oos_sharpe, cr.oos_win_rate,
@@ -454,7 +446,7 @@ class CombinationEngine:
             FROM combination_results cr
             JOIN strategy_combinations sc ON sc.id = cr.combination_id
             JOIN combination_run_log rl ON rl.id = cr.run_id
-            WHERE rl.status = 'complete'
+            WHERE rl.id = (SELECT MAX(id) FROM combination_run_log WHERE status = 'complete')
             ORDER BY cr.reliability_score DESC
             LIMIT :n
         """), {"n": n}).fetchall()
