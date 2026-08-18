@@ -90,3 +90,26 @@ export const getFalseSignalStats = () =>
 
 export const getStrategyCorrelations = () =>
   apiFetch<CorrelationPair[]>('/intelligence/strategy-correlations')
+
+// ── AI Signal Explanation ────────────────────────────────────────────────────
+
+export interface SignalExplanation {
+  // BUY signal fields
+  summary?: string
+  bull_case?: string[]
+  bear_case?: string[]
+  confidence_reasoning?: string
+  suggested_entry?: number | null
+  stop_loss?: number | null
+  target_1?: number | null
+  target_2?: number | null
+  holding_period?: string | null
+  risk_rating?: string | null
+  // SELL signal fields
+  exit_reasons?: string[]
+  risk_if_held?: string[]
+  action?: string | null
+}
+
+export const getSignalExplanation = (signalId: number) =>
+  apiFetch<SignalExplanation>(`/signals/${signalId}/explanation`)
