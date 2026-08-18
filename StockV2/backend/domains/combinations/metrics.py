@@ -62,19 +62,18 @@ def compute_extended_metrics(
     if trades:
         median_return_pct = round(statistics.median([t.pnl_pct for t in trades]), 4)
 
-    # Regime win rates from market_regime table
+    # Regime win rates — group trades dynamically by whatever regime appears
     regime_win_rates: dict[str, Optional[float]] = {}
     if trades:
-        for regime_label in ["BULL", "SIDEWAYS", "BEAR", "STRONG_BULL", "STRONG_BEAR"]:
-            regime_trades = [
-                t for t in trades
-                if _get_regime_for_date(db, t.exit_date) == regime_label
-            ]
-            if regime_trades:
-                wins = sum(1 for t in regime_trades if t.pnl > 0)
-                regime_win_rates[regime_label] = round(wins / len(regime_trades), 4)
-            else:
-                regime_win_rates[regime_label] = None
+        from collections import defaultdict
+        regime_buckets: dict[str, list] = defaultdict(list)
+        for t in trades:
+            regime = _get_regime_for_date(db, t.exit_date)
+            if regime:
+                regime_buckets[regime].append(t)
+        for regime_label, bucket in regime_buckets.items():
+            wins = sum(1 for t in bucket if t.pnl > 0)
+            regime_win_rates[regime_label] = round(wins / len(bucket), 4)
 
     # Benchmark deltas
     oos_cagr = base["cagr"] or 0.0
