@@ -93,3 +93,29 @@ def test_canslim_buy_confidence_is_five_sixths_when_5_of_6_met():
     signal = CANSLIMStrategy().generate_signal(df, f)
     assert signal.signal_type == "BUY"
     assert abs(signal.confidence - round(5 / 6, 4)) < 1e-4
+
+
+# ── Magic Formula ─────────────────────────────────────────────────────────────
+
+def test_magic_formula_buy_when_all_criteria_met():
+    from domains.strategies.strategies.magic_formula import MagicFormulaStrategy
+    df = _make_df(close=500.0)  # EPS=50, price=500 → earnings yield=10% > 6%
+    f = {**_good_fundamentals(), "pe_ratio": 15.0}
+    signal = MagicFormulaStrategy().generate_signal(df, f)
+    assert signal.signal_type == "BUY"
+    assert signal.confidence == pytest.approx(0.75)
+
+
+def test_magic_formula_none_when_fundamentals_empty():
+    from domains.strategies.strategies.magic_formula import MagicFormulaStrategy
+    signal = MagicFormulaStrategy().generate_signal(_make_df(), {})
+    assert signal.signal_type == "NONE"
+
+
+def test_magic_formula_none_when_earnings_yield_too_low():
+    from domains.strategies.strategies.magic_formula import MagicFormulaStrategy
+    # EPS=50, close=2000 → earnings yield = 50/2000 = 2.5% < 6%
+    df = _make_df(close=2000.0)
+    f = {**_good_fundamentals(), "pe_ratio": 15.0}
+    signal = MagicFormulaStrategy().generate_signal(df, f)
+    assert signal.signal_type == "NONE"
