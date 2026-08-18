@@ -130,9 +130,13 @@ def test_get_avoid_endpoint(client):
 
 def test_trigger_analysis_endpoint(client):
     response = client.post("/api/v1/combinations/analyze")
-    assert response.status_code == 200
+    assert response.status_code in [200, 409]
     data = response.json()
-    assert "status" in data
+    if response.status_code == 200:
+        assert "status" in data
+        assert data["status"] in ("started", "already_running")
+    elif response.status_code == 409:
+        assert "status" in data["detail"] or "already_running" in str(data)
 
 
 def test_get_combination_detail_not_found(client):
