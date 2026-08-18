@@ -1,9 +1,10 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   getBacktestTrades, listBacktestResults, runBacktest,
   getPrecomputedScan, getScanStatus,
-  type BacktestResult, type BacktestTrade, type ScanResult,
+  runWalkForward, getWalkForwardResult,
+  type BacktestResult, type BacktestTrade, type ScanResult, type WalkForwardResult,
 } from '../api/backtest'
 import { getStrategies, getStockList } from '../api/strategies'
 import { inr } from '../utils/format'
@@ -81,6 +82,7 @@ export function BacktestPage() {
   const [scanSort, setScanSort] = useState<keyof ScanResult>('cagr')
   const [scanDir, setScanDir] = useState<'asc' | 'desc'>('desc')
   const [scanLoading, setScanLoading] = useState(false)
+  const [wfRunning, setWfRunning] = useState(false)
 
   const { data: scanStatus } = useQuery({
     queryKey: ['backtest', 'scan', 'status'],
@@ -90,6 +92,32 @@ export function BacktestPage() {
       return data && !data.ready ? 5000 : false
     },
   })
+
+  const wfMut = useMutation({
+    mutationFn: () => runWalkForward(form.symbol, Number(form.strategy_id)),
+    onSuccess: () => {
+      setWfRunning(true)
+      queryClient.invalidateQueries({ queryKey: ['walk-forward', form.symbol, form.strategy_id] })
+    },
+  })
+
+  const { data: wfResult } = useQuery({
+    queryKey: ['walk-forward', form.symbol, form.strategy_id],
+    queryFn: () => getWalkForwardResult(form.symbol, Number(form.strategy_id)),
+    enabled: wfRunning && !!form.symbol && !!form.strategy_id,
+    refetchInterval: (query) => {
+      const d = query.state.data
+      if (!d || d.status === 'pending') return 3000
+      return false
+    },
+    retry: false,
+  })
+
+  useEffect(() => {
+    if (wfResult?.status === 'ok' || wfResult?.status === 'failed') {
+      setWfRunning(false)
+    }
+  }, [wfResult?.status])
 
   const handleScan = async () => {
     setScanLoading(true)
@@ -430,6 +458,41 @@ export function BacktestPage() {
           )}
         </section>
       )}
+
+      {/* Walk-Forward Analysis */}
+      <section className="mt-8 border-t pt-6">
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="text-lg font-semibold text-gray-700">Walk-Forward Analysis</h2>
+          <div className="flex items-center gap-3">
+            {form.symbol && form.strategy_id ? (
+              <span className="text-xs text-gray-400">
+                {form.symbol} — {strategies?.find(s => s.id === Number(form.strategy_id))?.name ?? `Strategy ${form.strategy_id}`}
+              </span>
+            ) : (
+              <span className="text-xs text-gray-400">Select a symbol and strategy above</span>
+            )}
+            <button
+              onClick={() => wfMut.mutate()}
+              disabled={!form.symbol || !form.strategy_id || wfMut.isPending || wfRunning}
+              className="px-3 py-1.5 bg-indigo-600 text-white text-sm rounded hover:bg-indigo-700 disabled:opacity-50"
+            >
+              {wfRunning ? 'Computing…' : wfMut.isPending ? 'Starting…' : 'Run Walk-Forward'}
+            </button>
+          </div>
+        </div>
+
+        {wfRunning && !wfResult && (
+          <p className="text-sm text-gray-400">Running out-of-sample analysis… this takes 30–60 seconds.</p>
+        )}
+
+        {wfResult?.status === 'failed' && (
+          <p className="text-sm text-red-600">Walk-forward failed: {wfResult.error}</p>
+        )}
+
+        {wfResult?.status === 'ok' && (
+          <WalkForwardResults result={wfResult} />
+        )}
+      </section>
     </div>
   )
 }
@@ -560,5 +623,78 @@ function TradeRow({ trade: t }: { trade: BacktestTrade }) {
       <td className="px-4 py-2 text-gray-400">{t.holding_days}</td>
       <td className="px-4 py-2 text-gray-500">{t.exit_reason}</td>
     </tr>
+  )
+}
+
+function WalkForwardResults({ result }: { result: WalkForwardResult }) {
+  const [showWindows, setShowWindows] = useState(false)
+  const pct = (v: number | null) => v != null ? `${Math.round(v * 100)}%` : '—'
+  const num = (v: number | null, dp = 2) => v != null ? v.toFixed(dp) : '—'
+
+  return (
+    <div className="space-y-4">
+      {/* Summary metrics */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <MetricCard label="OOS Win Rate (mean)" value={pct(result.oos_win_rate_mean)} />
+        <MetricCard label="OOS Win Rate (std)" value={pct(result.oos_win_rate_std)} />
+        <MetricCard label="Consistency Score" value={pct(result.consistency_score)} />
+        <MetricCard label="In-Sample Win Rate" value={pct(result.in_sample_win_rate)} />
+      </div>
+      <p className="text-xs text-gray-400">{result.n_windows} windows · computed {result.computed_at?.slice(0, 10)}</p>
+
+      {/* Windows toggle */}
+      <button
+        onClick={() => setShowWindows(v => !v)}
+        className="text-xs text-indigo-600 hover:underline"
+      >
+        {showWindows ? '▼ Hide windows' : '▶ Show per-window results'}
+      </button>
+
+      {showWindows && (
+        <div className="overflow-x-auto rounded-lg border border-gray-200">
+          <table className="w-full text-xs">
+            <thead className="bg-gray-50 text-gray-500 text-left">
+              <tr>
+                <th className="px-3 py-2">#</th>
+                <th className="px-3 py-2">Train</th>
+                <th className="px-3 py-2">Test</th>
+                <th className="px-3 py-2 text-right">OOS Win%</th>
+                <th className="px-3 py-2 text-right">Trades</th>
+                <th className="px-3 py-2 text-right">Avg Return</th>
+                <th className="px-3 py-2 text-right">Max DD</th>
+              </tr>
+            </thead>
+            <tbody className="bg-white divide-y divide-gray-100">
+              {result.windows.map(w => (
+                <tr key={w.window_index} className="hover:bg-gray-50">
+                  <td className="px-3 py-1.5 text-gray-400">{w.window_index + 1}</td>
+                  <td className="px-3 py-1.5 text-gray-500">{w.train_from} → {w.train_to}</td>
+                  <td className="px-3 py-1.5 text-gray-500">{w.test_from} → {w.test_to}</td>
+                  <td className="px-3 py-1.5 text-right">
+                    {w.oos_metrics.win_rate != null ? (
+                      <span className={w.oos_metrics.win_rate >= 0.5 ? 'text-green-600 font-medium' : 'text-red-500'}>
+                        {Math.round(w.oos_metrics.win_rate * 100)}%
+                      </span>
+                    ) : '—'}
+                  </td>
+                  <td className="px-3 py-1.5 text-right text-gray-500">{w.oos_metrics.total_trades}</td>
+                  <td className="px-3 py-1.5 text-right text-gray-500">{num(w.oos_metrics.avg_return_pct)}%</td>
+                  <td className="px-3 py-1.5 text-right text-gray-500">{num(w.oos_metrics.max_drawdown_pct)}%</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function MetricCard({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="bg-gray-50 border border-gray-200 rounded-lg p-3">
+      <p className="text-xs text-gray-500 mb-0.5">{label}</p>
+      <p className="text-lg font-bold text-gray-800">{value}</p>
+    </div>
   )
 }
