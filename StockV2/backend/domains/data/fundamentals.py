@@ -51,8 +51,8 @@ class FundamentalsService:
             roe     = _safe_float(info.get("returnOnEquity"))
             div_yld = _safe_float(info.get("dividendYield"))
 
-            # yfinance debtToEquity: some sources return as % (43.5 = 0.435 ratio)
-            # Normalise: values > 2 are treated as percentage and divided by 100
+            # yfinance debtToEquity: returned as percentage (43.5 means 0.435 ratio)
+            # Normalise to decimal ratio; values <= 2 are already in ratio form
             raw_de = info.get("debtToEquity")
             de = None
             if raw_de is not None:
@@ -79,6 +79,7 @@ class FundamentalsService:
             self.db.commit()
             return True
         except Exception as e:
+            self.db.rollback()
             logger.warning("[FundamentalsService] refresh_one %s: %s", symbol, e)
             return False
 

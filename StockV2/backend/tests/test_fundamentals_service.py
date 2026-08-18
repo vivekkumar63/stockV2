@@ -83,3 +83,23 @@ def test_refresh_one_overwrites_existing_row(db):
     assert count == 1
     row = db.execute(text("SELECT eps FROM fundamentals WHERE symbol='INFY'")).fetchone()
     assert row[0] == pytest.approx(75.0)
+
+
+def test_refresh_one_normalises_large_de_ratio(db):
+    """debtToEquity > 2 from yfinance is a percentage — must divide by 100."""
+    with patch("yfinance.Ticker", return_value=_mock_ticker(de=43.5)):
+        FundamentalsService(db).refresh_one("WIPRO")
+    row = db.execute(
+        text("SELECT debt_equity FROM fundamentals WHERE symbol='WIPRO'")
+    ).fetchone()
+    assert row[0] == pytest.approx(0.435)
+
+
+def test_refresh_one_keeps_small_de_ratio_as_is(db):
+    """debtToEquity <= 2 from yfinance is already a decimal ratio."""
+    with patch("yfinance.Ticker", return_value=_mock_ticker(de=0.8)):
+        FundamentalsService(db).refresh_one("HCLTECH")
+    row = db.execute(
+        text("SELECT debt_equity FROM fundamentals WHERE symbol='HCLTECH'")
+    ).fetchone()
+    assert row[0] == pytest.approx(0.8)
