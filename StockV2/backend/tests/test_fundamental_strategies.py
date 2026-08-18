@@ -170,3 +170,41 @@ def test_graham_value_none_when_fundamentals_is_none():
     from domains.strategies.strategies.graham_value import GrahamValueStrategy
     signal = GrahamValueStrategy().generate_signal(_make_df(), None)
     assert signal.signal_type == "NONE"
+
+
+# ── Growth Investing ──────────────────────────────────────────────────────────
+
+def test_growth_buy_when_all_criteria_met():
+    from domains.strategies.strategies.growth_investing import GrowthInvestingStrategy
+    signal = GrowthInvestingStrategy().generate_signal(_make_df(), _good_fundamentals())
+    assert signal.signal_type == "BUY"
+    assert signal.confidence == pytest.approx(1.0)  # 5/5 met
+
+
+def test_growth_none_when_fundamentals_empty():
+    from domains.strategies.strategies.growth_investing import GrowthInvestingStrategy
+    signal = GrowthInvestingStrategy().generate_signal(_make_df(), {})
+    assert signal.signal_type == "NONE"
+
+
+def test_growth_none_when_fundamentals_is_none():
+    from domains.strategies.strategies.growth_investing import GrowthInvestingStrategy
+    signal = GrowthInvestingStrategy().generate_signal(_make_df(), None)
+    assert signal.signal_type == "NONE"
+
+
+def test_growth_none_when_3_criteria_fail():
+    from domains.strategies.strategies.growth_investing import GrowthInvestingStrategy
+    # roe=0.05 (<15%), eps=-10 (<0), net_profit=-1e9 (<0) — 3 fail, only 2 pass
+    f = {**_good_fundamentals(), "roe": 0.05, "eps": -10.0, "net_profit": -1e9}
+    signal = GrowthInvestingStrategy().generate_signal(_make_df(), f)
+    assert signal.signal_type == "NONE"
+
+
+def test_growth_buy_when_exactly_4_criteria_met():
+    from domains.strategies.strategies.growth_investing import GrowthInvestingStrategy
+    # Fail only ROE; 4 of 5 pass
+    f = {**_good_fundamentals(), "roe": 0.10}  # 10% < 15% fails ROE
+    signal = GrowthInvestingStrategy().generate_signal(_make_df(), f)
+    assert signal.signal_type == "BUY"
+    assert signal.confidence == pytest.approx(4 / 5)
