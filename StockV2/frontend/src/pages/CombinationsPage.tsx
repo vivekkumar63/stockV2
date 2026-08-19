@@ -1,11 +1,13 @@
 // frontend/src/pages/CombinationsPage.tsx
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
-  getRunStatus, getCombinationRankings, getBestCombinations,
+  getRunStatus, getCombinationRankings, getBestCombinations, triggerAnalysis,
   type CombinationSummary,
 } from '../api/combinations'
 
 export function CombinationsPage() {
+  const queryClient = useQueryClient()
+
   const { data: status } = useQuery({
     queryKey: ['combinations-status'],
     queryFn: getRunStatus,
@@ -24,11 +26,34 @@ export function CombinationsPage() {
     enabled: status?.status === 'complete',
   })
 
+  const trigger = useMutation({
+    mutationFn: triggerAnalysis,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['combinations-status'] }),
+  })
+
+  const isRunning = status?.status === 'running' || trigger.isPending
+
+  const runButton = (
+    <button
+      onClick={() => trigger.mutate()}
+      disabled={isRunning}
+      className="px-3 py-1.5 text-sm bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+    >
+      {trigger.isPending ? 'Starting…' : 'Run Analysis'}
+    </button>
+  )
+
   if (!status || status.status === 'never_run') {
     return (
       <div className="p-6">
-        <h1 className="text-2xl font-bold mb-4">Strategy Combinations</h1>
-        <p className="text-gray-500">No analysis has been run yet. Check back after Sunday 11 PM.</p>
+        <div className="flex justify-between items-center mb-4">
+          <h1 className="text-2xl font-bold">Strategy Combinations</h1>
+          {runButton}
+        </div>
+        <p className="text-gray-500">No analysis has been run yet.</p>
+        {trigger.isError && (
+          <p className="text-red-500 text-sm mt-2">{(trigger.error as Error).message}</p>
+        )}
       </div>
     )
   }
@@ -36,7 +61,10 @@ export function CombinationsPage() {
   if (status.status === 'running') {
     return (
       <div className="p-6">
-        <h1 className="text-2xl font-bold mb-4">Strategy Combinations</h1>
+        <div className="flex justify-between items-center mb-4">
+          <h1 className="text-2xl font-bold">Strategy Combinations</h1>
+          {runButton}
+        </div>
         <p className="text-gray-500">Analysis in progress…</p>
       </div>
     )
@@ -45,8 +73,14 @@ export function CombinationsPage() {
   if (status.status === 'failed') {
     return (
       <div className="p-6">
-        <h1 className="text-2xl font-bold mb-4">Strategy Combinations</h1>
+        <div className="flex justify-between items-center mb-4">
+          <h1 className="text-2xl font-bold">Strategy Combinations</h1>
+          {runButton}
+        </div>
         <p className="text-red-500">Last analysis failed. Check back after the next scheduled run.</p>
+        {trigger.isError && (
+          <p className="text-red-500 text-sm mt-2">{(trigger.error as Error).message}</p>
+        )}
       </div>
     )
   }
@@ -55,12 +89,18 @@ export function CombinationsPage() {
     <div className="p-6 max-w-7xl mx-auto">
       <div className="flex justify-between items-center mb-6">
         <h1 className="text-2xl font-bold">Strategy Combinations</h1>
-        <span className="text-sm text-gray-500">
-          Last run: {status.last_completed_at
-            ? new Date(status.last_completed_at).toLocaleString()
-            : 'N/A'}
-          {status.combinations_tested != null && ` · ${status.combinations_tested} combos tested`}
-        </span>
+        <div className="flex items-center gap-3">
+          {trigger.isError && (
+            <span className="text-red-500 text-sm">{(trigger.error as Error).message}</span>
+          )}
+          <span className="text-sm text-gray-500">
+            Last run: {status.last_completed_at
+              ? new Date(status.last_completed_at).toLocaleString()
+              : 'N/A'}
+            {status.combinations_tested != null && ` · ${status.combinations_tested} combos tested`}
+          </span>
+          {runButton}
+        </div>
       </div>
 
       {/* Best-of cards */}
