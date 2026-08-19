@@ -391,6 +391,77 @@ def trigger_leaderboard_compute(
     }
 
 
+# ── Strategy Performance Precompute ──────────────────────────────────────────
+
+_precompute_lock = threading.Lock()
+_precompute_state: dict = {"is_running": False, "done": 0, "total": 0, "error": None}
+
+
+def _run_precompute_bg(strategy_ids: list[int]) -> None:
+    global _precompute_state
+    _precompute_state.update({"is_running": True, "done": 0, "total": len(strategy_ids), "error": None})
+    for sid in strategy_ids:
+        db = SessionLocal()
+        try:
+            count = BacktestRunner(db).precompute_all_for_strategy(sid)
+            logger.info("[precompute] strategy id=%d: %d symbols done", sid, count)
+        except Exception as e:
+            logger.exception("[precompute] strategy id=%d failed", sid)
+            _precompute_state["error"] = str(e)
+        finally:
+            db.close()
+        _precompute_state["done"] += 1
+    _precompute_state["is_running"] = False
+
+
+@router.post("/backtest/precompute")
+def trigger_precompute(
+    force: bool = Query(False, description="Recompute even strategies that already have data"),
+    db: Session = Depends(get_db),
+):
+    """Trigger strategy_performance precompute for all strategies that are missing it.
+    Use force=true to recompute all strategies from scratch."""
+    if _precompute_state["is_running"]:
+        return {
+            "status": "already_running",
+            "done": _precompute_state["done"],
+            "total": _precompute_state["total"],
+        }
+
+    if force:
+        rows = db.execute(text("SELECT id FROM strategies WHERE is_active = 1")).fetchall()
+    else:
+        rows = db.execute(text("""
+            SELECT id FROM strategies WHERE is_active = 1
+            AND id NOT IN (SELECT DISTINCT strategy_id FROM strategy_performance)
+        """)).fetchall()
+
+    strategy_ids = [r[0] for r in rows]
+    if not strategy_ids:
+        return {"status": "nothing_to_do", "message": "All active strategies already have performance data"}
+
+    t = threading.Thread(target=_run_precompute_bg, args=(strategy_ids,), daemon=True)
+    t.start()
+    return {
+        "status": "started",
+        "strategies_queued": len(strategy_ids),
+        "message": f"Precomputing {len(strategy_ids)} strategies in background. Check /backtest/precompute/status.",
+    }
+
+
+@router.get("/backtest/precompute/status")
+def precompute_status():
+    """Check progress of the running precompute job."""
+    return {
+        "is_running": _precompute_state["is_running"],
+        "done": _precompute_state["done"],
+        "total": _precompute_state["total"],
+        "pct_done": round(_precompute_state["done"] / _precompute_state["total"] * 100, 1)
+                    if _precompute_state["total"] > 0 else 0,
+        "error": _precompute_state["error"],
+    }
+
+
 # ── Walk-Forward ──────────────────────────────────────────────────────────────
 
 @router.post("/backtests/walk-forward")

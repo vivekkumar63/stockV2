@@ -77,7 +77,12 @@ export function CombinationsPage() {
           <h1 className="text-2xl font-bold">Strategy Combinations</h1>
           {runButton}
         </div>
-        <p className="text-red-500">Last analysis failed. Check back after the next scheduled run.</p>
+        <p className="text-red-500 font-medium">Last analysis failed.</p>
+        {status.error_message && (
+          <p className="text-red-400 text-sm mt-1 font-mono bg-red-50 px-3 py-2 rounded border border-red-200">
+            {status.error_message}
+          </p>
+        )}
         {trigger.isError && (
           <p className="text-red-500 text-sm mt-2">{(trigger.error as Error).message}</p>
         )}

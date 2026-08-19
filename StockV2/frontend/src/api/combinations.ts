@@ -59,6 +59,7 @@ export interface RunStatus {
   last_run_id: number | null
   combinations_tested: number | null
   top_combination: { name: string; oos_cagr: number | null; reliability_label: string | null } | null
+  error_message: string | null
 }
 
 export interface RankingsParams {

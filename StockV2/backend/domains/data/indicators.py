@@ -87,6 +87,7 @@ class IndicatorEngine:
         out["ema_10"] = ta.trend.EMAIndicator(close, window=10).ema_indicator() if n >= 10 else pd.Series(float("nan"), index=close.index)
         out["ema_13"] = ta.trend.EMAIndicator(close, window=13).ema_indicator() if n >= 13 else pd.Series(float("nan"), index=close.index)
         out["ema_26"] = ta.trend.EMAIndicator(close, window=26).ema_indicator() if n >= 26 else pd.Series(float("nan"), index=close.index)
+        out["ema_50"] = ta.trend.EMAIndicator(close, window=50).ema_indicator() if n >= 50 else pd.Series(float("nan"), index=close.index)
 
         # ── On Balance Volume ────────────────────────────────────────
         obv = (volume * close.diff().apply(lambda x: 1 if x > 0 else (-1 if x < 0 else 0))).cumsum()

@@ -34,7 +34,7 @@ def _parse_strategy_names(raw) -> list:
 def get_run_status(db: Session = Depends(get_db)):
     """Return status of the most recent analysis run."""
     row = db.execute(text("""
-        SELECT id, status, completed_at, combinations_tested, top_combination_id
+        SELECT id, status, completed_at, combinations_tested, top_combination_id, error_message
         FROM combination_run_log
         ORDER BY started_at DESC
         LIMIT 1
@@ -47,9 +47,10 @@ def get_run_status(db: Session = Depends(get_db)):
             "last_run_id": None,
             "combinations_tested": None,
             "top_combination": None,
+            "error_message": None,
         }
 
-    run_id, status_val, completed_at, combinations_tested, top_combo_id = row
+    run_id, status_val, completed_at, combinations_tested, top_combo_id, error_message = row
 
     top_combination = None
     if top_combo_id is not None:
@@ -83,6 +84,7 @@ def get_run_status(db: Session = Depends(get_db)):
         "last_run_id": run_id,
         "combinations_tested": combinations_tested,
         "top_combination": top_combination,
+        "error_message": error_message,
     }
 
 
