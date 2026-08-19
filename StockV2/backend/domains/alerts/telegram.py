@@ -119,3 +119,48 @@ class AlertService:
                 f"   💡 <i>{why}</i>"
             )
         return self.send("\n".join(lines))
+
+    def send_entry_alert(
+        self,
+        signal: dict,
+        current_price: float,
+        fii_dii_row: Optional[dict] = None,
+    ) -> bool:
+        """Send an individual entry-window alert for a BUY signal."""
+        sym = signal.get("symbol", "")
+        strategy = signal.get("strategy_name", "")
+        entry_price = float(signal.get("price_at_signal") or current_price)
+        pct = (current_price - entry_price) / entry_price * 100
+
+        win_rate = signal.get("historical_win_rate")
+        win_str = f"{int(win_rate * 100)}%" if win_rate is not None else "N/A"
+
+        score = signal.get("opportunity_score")
+        grade = signal.get("opportunity_grade") or ""
+        score_str = f"{score}/100 [{grade}]" if score is not None else "—"
+
+        stop_loss = signal.get("suggested_stop_loss")
+        target = signal.get("suggested_target")
+        sl_str = f"₹{stop_loss:,.1f} ({(stop_loss - current_price)/current_price*100:.1f}%)" if stop_loss else "—"
+        tgt_str = f"₹{target:,.1f} ({(target - current_price)/current_price*100:+.1f}%)" if target else "—"
+
+        fii_dii_line = ""
+        if fii_dii_row:
+            fii_net = fii_dii_row.get("fii_net_equity") or 0
+            dii_net = fii_dii_row.get("dii_net_equity") or 0
+            flow_emoji = "🟢" if fii_net > 0 else "🔴"
+            fii_dii_line = (
+                f"\n<b>FII/DII:</b>   FII {fii_net:+,.0f} Cr | DII {dii_net:+,.0f} Cr {flow_emoji}"
+            )
+
+        text = (
+            f"🚨 <b>Entry Window — {sym}</b>\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"\n<b>Signal:</b>     {strategy} ({win_str} win rate)"
+            f"\n<b>Entry:</b>      ₹{current_price:,.1f}  (signal ₹{entry_price:,.1f}, {pct:+.1f}%)"
+            f"\n<b>Target:</b>     {tgt_str}"
+            f"\n<b>Stop Loss:</b>  {sl_str}"
+            f"\n<b>Score:</b>      {score_str}"
+            f"{fii_dii_line}"
+        )
+        return self.send(text)
