@@ -153,6 +153,37 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning("index table migration skipped: %s", e)
 
+    # Intraday alert dedup + FII/DII tables
+    try:
+        with engine.connect() as _conn:
+            _conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS intraday_alerts_sent (
+                    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                    symbol      TEXT NOT NULL,
+                    strategy_id INTEGER NOT NULL,
+                    signal_date DATE NOT NULL,
+                    alerted_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(symbol, strategy_id, signal_date)
+                )
+            """))
+            _conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS fii_dii_daily (
+                    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                    date            DATE NOT NULL UNIQUE,
+                    fii_net_equity  REAL,
+                    dii_net_equity  REAL,
+                    fii_buy         REAL,
+                    fii_sell        REAL,
+                    dii_buy         REAL,
+                    dii_sell        REAL,
+                    fetched_at      DATETIME DEFAULT CURRENT_TIMESTAMP
+                )
+            """))
+            _conn.commit()
+        logger.info("Intraday alert + FII/DII tables verified")
+    except Exception as e:
+        logger.warning("intraday/fii_dii table migration skipped: %s", e)
+
     from domains.strategies.seed import seed_strategies
     db = SessionLocal()
     try:
