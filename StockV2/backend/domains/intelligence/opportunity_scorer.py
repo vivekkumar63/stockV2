@@ -2,20 +2,21 @@
 Opportunity score (0–100) for a BUY signal.
 
 Component weights:
-  historical_win_rate   22  — backtest win rate for this (symbol, strategy) pair
-  strategy_confidence   18  — confidence score from signal generation (0–1)
-  regime_alignment      16  — how buy-friendly is the current market regime
-  mtf_alignment         14  — multi-timeframe trend alignment score (0–1)
-  volume                10  — volume confirmation (normalised 0–1)
-  sr_context             8  — proximity to support vs resistance (normalised 0–1)
+  historical_win_rate   20  — backtest win rate for this (symbol, strategy) pair
+  strategy_confidence   16  — confidence score from signal generation (0–1)
+  regime_alignment      14  — how buy-friendly is the current market regime
+  mtf_alignment         13  — multi-timeframe trend alignment score (0–1)
+  volume                 9  — volume confirmation (normalised 0–1)
+  sr_context             7  — proximity to support vs resistance (normalised 0–1)
   regime_strategy        4  — strategy's historical win rate in the current regime
-  ml_signal_probability  8  — ML model probability that signal will be profitable
+  ml_signal_probability  7  — ML model probability that signal will be profitable
+  index_alignment       10  — index (Nifty/Sensex) alignment score (0–100 raw)
   ── total ────────── 100
 
 Quick mode (scanner): only win_rate, confidence, regime_alignment, regime_strategy
-  (sum = 64; normalised to full scale when partial components are absent)
+  (sum = 54; normalised to full scale when partial components are absent)
 
-Full mode (on-demand endpoint): all 8 components.
+Full mode (on-demand endpoint): all 9 components.
 """
 
 from dataclasses import dataclass, field
@@ -32,14 +33,15 @@ _REGIME_BUY_SCORE: dict[str, float] = {
 }
 
 _WEIGHTS: dict[str, int] = {
-    "historical_win_rate":   22,   # was 25
-    "strategy_confidence":   18,   # was 20
-    "regime_alignment":      16,   # was 18
-    "mtf_alignment":         14,   # was 15
-    "volume":                10,
-    "sr_context":             8,
+    "historical_win_rate":   20,   # was 22
+    "strategy_confidence":   16,   # was 18
+    "regime_alignment":      14,   # was 16
+    "mtf_alignment":         13,   # was 14
+    "volume":                 9,   # was 10
+    "sr_context":             7,   # was 8
     "regime_strategy":        4,
-    "ml_signal_probability":  8,   # NEW
+    "ml_signal_probability":  7,   # was 8
+    "index_alignment":       10,   # NEW
     # false_signal_safety: inverted false-signal rate; included in full_score only
     # Weight not in this dict — applied as a flat multiplier after base score
 }
@@ -104,6 +106,7 @@ class OpportunityScorer:
         sr_score: Optional[float],
         false_signal_rate: Optional[float] = None,
         ml_probability: Optional[float] = None,
+        index_alignment_score: Optional[int] = None,   # 0–100 raw; None = unmapped (treated as 50)
     ) -> OpportunityScore:
         parts: dict[str, Optional[float]] = {
             "historical_win_rate": historical_win_rate,
@@ -114,6 +117,7 @@ class OpportunityScorer:
             "volume":              volume_score,
             "sr_context":          sr_score,
             "ml_signal_probability": ml_probability,
+            "index_alignment": (index_alignment_score / 100.0) if index_alignment_score is not None else 0.5,
         }
         opp = self._compute(symbol, strategy_id, parts)
 
