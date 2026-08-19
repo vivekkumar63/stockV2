@@ -21,6 +21,7 @@ export interface OpportunityBreakdown {
   sr_context: number | null
   ml_signal_probability: number | null
   false_signal_rate: number | null
+  index_alignment: number | null
 }
 
 export interface TopOpportunity {
@@ -44,6 +45,8 @@ export interface TopOpportunity {
   mtf_alignment: number | null
   ml_probability: number | null
   false_signal_rate: number | null
+  index_name: string | null
+  index_trend: 'STRONG_BULL' | 'BULL' | 'NEUTRAL' | 'BEAR' | null
   breakdown: OpportunityBreakdown
 }
 
