@@ -10,6 +10,7 @@ logger = logging.getLogger(__name__)
 class JobIds:
     DAILY_EOD_UPDATE = "daily_eod_update"
     DAILY_DATA_REFRESH = "daily_data_refresh"
+    DAILY_INDEX_UPDATE = "daily_index_update"
     INTRADAY_SCAN = "intraday_scan"
     WEEKLY_FUNDAMENTALS = "weekly_fundamentals"
     MONTHLY_ML_RETRAIN = "monthly_ml_retrain"
@@ -349,6 +350,21 @@ def _combination_analysis():
         db.close()
 
 
+def _daily_index_update():
+    """Fetch latest index OHLCV and recompute trend labels. Runs at 4:20 PM IST on weekdays."""
+    from database import SessionLocal
+    from domains.data.index_fetcher import fetch_and_store_index_prices, compute_index_trends
+    db = SessionLocal()
+    try:
+        fetch_and_store_index_prices(db, days=5)
+        compute_index_trends(db)
+        logger.info("[daily_index_update] complete")
+    except Exception:
+        logger.exception("[daily_index_update] failed")
+    finally:
+        db.close()
+
+
 def register_jobs():
     # 3:45pm — fetch today's closing data before EOD scan runs at 4pm
     scheduler.add_job(
@@ -392,6 +408,13 @@ def register_jobs():
         _market_regime_compute,
         CronTrigger(hour=16, minute=15, day_of_week="mon-fri"),
         id="market_regime_compute",
+        replace_existing=True,
+    )
+    # 4:20pm — fetch index prices and compute trends
+    scheduler.add_job(
+        _daily_index_update,
+        CronTrigger(hour=16, minute=20, day_of_week="mon-fri"),
+        id=JobIds.DAILY_INDEX_UPDATE,
         replace_existing=True,
     )
     # 4:30pm — refresh leaderboard after EOD data lands (3:45 data fetch + 4:00 EOD scan)
