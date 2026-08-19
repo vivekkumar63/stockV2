@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   getBacktestTrades, listBacktestResults, runBacktest,
-  getPrecomputedScan, getScanStatus,
+  getPrecomputedScan, getScanStatus, triggerPrecompute, getPrecomputeStatus,
   runWalkForward, getWalkForwardResult,
   type BacktestResult, type BacktestTrade, type ScanResult, type WalkForwardResult,
 } from '../api/backtest'
@@ -90,6 +90,20 @@ export function BacktestPage() {
     refetchInterval: (query) => {
       const data = query.state.data
       return data && !data.ready ? 5000 : false
+    },
+  })
+
+  const { data: precomputeStatus } = useQuery({
+    queryKey: ['backtest', 'precompute', 'status'],
+    queryFn: getPrecomputeStatus,
+    refetchInterval: (query) => query.state.data?.is_running ? 3000 : false,
+  })
+
+  const precomputeMut = useMutation({
+    mutationFn: (force: boolean) => triggerPrecompute(force),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['backtest', 'scan', 'status'] })
+      queryClient.invalidateQueries({ queryKey: ['backtest', 'precompute', 'status'] })
     },
   })
 
@@ -336,11 +350,28 @@ export function BacktestPage() {
             Done — {runMut.data.total_trades} trades · CAGR {runMut.data.cagr?.toFixed(2)}% · Sharpe {runMut.data.sharpe_ratio?.toFixed(2) ?? '—'}
           </p>
         )}
-        {scanStatus && !scanStatus.ready && (
-          <p className="text-amber-600 text-sm animate-pulse">
-            Precomputing backtests in background — {scanStatus.computed}/{scanStatus.total} strategies done.
-            Results available now for completed strategies; check back in a few minutes for full results.
-          </p>
+        {/* Precompute status banner */}
+        {precomputeStatus?.is_running && (
+          <div className="flex items-center gap-3 bg-amber-50 border border-amber-200 rounded px-3 py-2">
+            <span className="text-amber-600 text-sm animate-pulse">
+              Precomputing strategy data: {precomputeStatus.done}/{precomputeStatus.total} strategies
+              ({precomputeStatus.pct_done.toFixed(0)}%)
+            </span>
+          </div>
+        )}
+        {!precomputeStatus?.is_running && scanStatus && !scanStatus.ready && (
+          <div className="flex items-center gap-3 bg-amber-50 border border-amber-200 rounded px-3 py-2">
+            <span className="text-amber-600 text-sm">
+              {scanStatus.pending} strategies need performance data — "Scan All Stocks" shows partial results.
+            </span>
+            <button
+              onClick={() => precomputeMut.mutate(false)}
+              disabled={precomputeMut.isPending}
+              className="px-2 py-1 text-xs bg-amber-600 text-white rounded hover:bg-amber-700 disabled:opacity-50 whitespace-nowrap"
+            >
+              {precomputeMut.isPending ? 'Starting…' : 'Precompute Now'}
+            </button>
+          </div>
         )}
         {scanStatus?.ready && (
           <p className="text-emerald-600 text-sm">

@@ -124,6 +124,31 @@ async def lifespan(app: FastAPI):
     finally:
         db.close()
 
+    # Auto-precompute: populate strategy_performance for any strategies missing it.
+    # Runs in background so startup is not blocked. Unblocks combination analysis
+    # and "Scan All Stocks" without requiring manual intervention after adding strategies.
+    db_pc = SessionLocal()
+    try:
+        missing_ids = [
+            r[0] for r in db_pc.execute(text("""
+                SELECT id FROM strategies WHERE is_active = 1
+                AND id NOT IN (SELECT DISTINCT strategy_id FROM strategy_performance)
+            """)).fetchall()
+        ]
+    finally:
+        db_pc.close()
+
+    if missing_ids:
+        logger.info(
+            "[startup] %d strategies missing performance data — auto-precompute starting in background",
+            len(missing_ids)
+        )
+        from domains.backtest.router import _run_precompute_bg
+        threading.Thread(
+            target=_run_precompute_bg, args=(missing_ids,),
+            daemon=True, name="auto-precompute"
+        ).start()
+
     # Auto-bootstrap: if no price data exists, download 15 years in the background
     db3 = SessionLocal()
     try:

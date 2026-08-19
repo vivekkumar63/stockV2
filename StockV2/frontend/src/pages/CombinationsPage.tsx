@@ -4,6 +4,7 @@ import {
   getRunStatus, getCombinationRankings, getBestCombinations, triggerAnalysis,
   type CombinationSummary,
 } from '../api/combinations'
+import { getScanStatus, triggerPrecompute, getPrecomputeStatus } from '../api/backtest'
 
 export function CombinationsPage() {
   const queryClient = useQueryClient()
@@ -12,6 +13,25 @@ export function CombinationsPage() {
     queryKey: ['combinations-status'],
     queryFn: getRunStatus,
     refetchInterval: (query) => query.state.data?.status === 'running' ? 10_000 : false,
+  })
+
+  const { data: scanStatus } = useQuery({
+    queryKey: ['backtest', 'scan', 'status'],
+    queryFn: getScanStatus,
+  })
+
+  const { data: precomputeStatus } = useQuery({
+    queryKey: ['backtest', 'precompute', 'status'],
+    queryFn: getPrecomputeStatus,
+    refetchInterval: (query) => query.state.data?.is_running ? 3000 : 10_000,
+  })
+
+  const precomputeMut = useMutation({
+    mutationFn: () => triggerPrecompute(false),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['backtest', 'scan', 'status'] })
+      queryClient.invalidateQueries({ queryKey: ['backtest', 'precompute', 'status'] })
+    },
   })
 
   const { data: best } = useQuery({
@@ -33,6 +53,28 @@ export function CombinationsPage() {
 
   const isRunning = status?.status === 'running' || trigger.isPending
 
+  const precomputeBanner = precomputeStatus?.is_running ? (
+    <div className="mb-4 flex items-center gap-3 bg-amber-50 border border-amber-200 rounded px-3 py-2 text-sm text-amber-700">
+      <span className="animate-pulse">
+        Computing strategy performance data: {precomputeStatus.done}/{precomputeStatus.total} strategies
+        ({precomputeStatus.pct_done.toFixed(0)}%) — Run Analysis will work once complete.
+      </span>
+    </div>
+  ) : scanStatus && !scanStatus.ready ? (
+    <div className="mb-4 flex items-center gap-3 bg-amber-50 border border-amber-200 rounded px-3 py-2 text-sm">
+      <span className="text-amber-700">
+        {scanStatus.pending} strategies missing performance data. Run Analysis may fail until precompute completes.
+      </span>
+      <button
+        onClick={() => precomputeMut.mutate()}
+        disabled={precomputeMut.isPending}
+        className="px-2 py-1 text-xs bg-amber-600 text-white rounded hover:bg-amber-700 disabled:opacity-50 whitespace-nowrap"
+      >
+        {precomputeMut.isPending ? 'Starting…' : 'Precompute Now'}
+      </button>
+    </div>
+  ) : null
+
   const runButton = (
     <button
       onClick={() => trigger.mutate()}
@@ -50,6 +92,7 @@ export function CombinationsPage() {
           <h1 className="text-2xl font-bold">Strategy Combinations</h1>
           {runButton}
         </div>
+        {precomputeBanner}
         <p className="text-gray-500">No analysis has been run yet.</p>
         {trigger.isError && (
           <p className="text-red-500 text-sm mt-2">{(trigger.error as Error).message}</p>
@@ -65,6 +108,7 @@ export function CombinationsPage() {
           <h1 className="text-2xl font-bold">Strategy Combinations</h1>
           {runButton}
         </div>
+        {precomputeBanner}
         <p className="text-gray-500">Analysis in progress…</p>
       </div>
     )
@@ -77,6 +121,7 @@ export function CombinationsPage() {
           <h1 className="text-2xl font-bold">Strategy Combinations</h1>
           {runButton}
         </div>
+        {precomputeBanner}
         <p className="text-red-500 font-medium">Last analysis failed.</p>
         {status.error_message && (
           <p className="text-red-400 text-sm mt-1 font-mono bg-red-50 px-3 py-2 rounded border border-red-200">
@@ -92,7 +137,7 @@ export function CombinationsPage() {
 
   return (
     <div className="p-6 max-w-7xl mx-auto">
-      <div className="flex justify-between items-center mb-6">
+      <div className="flex justify-between items-center mb-4">
         <h1 className="text-2xl font-bold">Strategy Combinations</h1>
         <div className="flex items-center gap-3">
           {trigger.isError && (
@@ -107,6 +152,8 @@ export function CombinationsPage() {
           {runButton}
         </div>
       </div>
+
+      {precomputeBanner}
 
       {/* Best-of cards */}
       {best && (

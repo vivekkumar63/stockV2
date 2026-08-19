@@ -98,6 +98,23 @@ export interface ScanStatus {
 
 export const getScanStatus = () => apiFetch<ScanStatus>('/backtest/scan/status')
 
+export interface PrecomputeStatus {
+  is_running: boolean
+  done: number
+  total: number
+  pct_done: number
+  error: string | null
+}
+
+export const triggerPrecompute = (force = false) =>
+  apiFetch<{ status: string; strategies_queued?: number; message?: string }>(
+    `/backtest/precompute${force ? '?force=true' : ''}`,
+    { method: 'POST' },
+  )
+
+export const getPrecomputeStatus = () =>
+  apiFetch<PrecomputeStatus>('/backtest/precompute/status')
+
 export const getPrecomputedScan = (strategyId?: number, minTrades = 0) => {
   const q = new URLSearchParams({ min_trades: String(minTrades) })
   if (strategyId != null) q.set('strategy_id', String(strategyId))
