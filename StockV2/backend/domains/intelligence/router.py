@@ -114,6 +114,14 @@ def get_opportunity_score(
             "day_of_week": date.today().weekday(),
         })
 
+    # Index alignment — same lookup as top-opportunities
+    _idx_rows = db.execute(
+        text("SELECT index_name, above_sma20, above_sma50 FROM index_trend WHERE date = (SELECT MAX(date) FROM index_trend)")
+    ).mappings().fetchall()
+    _itm = {r["index_name"]: dict(r) for r in _idx_rows}
+    _parent_index = STOCK_INDEX_MAP.get(sym)
+    idx_alignment_raw = compute_index_alignment_score(_itm.get(_parent_index) if _parent_index else None)
+
     opp = OpportunityScorer().full_score(
         symbol=sym,
         strategy_id=strategy_id,
@@ -126,6 +134,7 @@ def get_opportunity_score(
         sr_score=sr_score,
         false_signal_rate=false_rate,
         ml_probability=ml_prob,
+        index_alignment_score=idx_alignment_raw,
     )
 
     return {
