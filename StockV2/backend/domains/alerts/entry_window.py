@@ -1,7 +1,6 @@
 """Entry-window filtering and dedup for intraday BUY signal alerts."""
 import logging
 from datetime import date
-from typing import Optional
 
 from sqlalchemy import text
 from sqlalchemy.orm import Session
@@ -41,7 +40,7 @@ def get_signals_in_entry_window(
         strategy_id = signal.get("strategy_id")
         signal_date = str(signal.get("signal_date", today))
 
-        if not sym or not entry_price or sym not in live_prices:
+        if not sym or not entry_price or not strategy_id or sym not in live_prices:
             continue
 
         current_price = live_prices[sym]
