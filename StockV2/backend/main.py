@@ -117,6 +117,42 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning("combination tables migration skipped: %s", e)
 
+    # Index pipeline tables
+    try:
+        with engine.connect() as _conn:
+            _conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS index_prices_daily (
+                    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                    index_name TEXT NOT NULL,
+                    date       DATE NOT NULL,
+                    open       REAL,
+                    high       REAL,
+                    low        REAL,
+                    close      REAL NOT NULL,
+                    volume     REAL,
+                    UNIQUE(index_name, date)
+                )
+            """))
+            _conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS index_trend (
+                    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                    index_name  TEXT NOT NULL,
+                    date        DATE NOT NULL,
+                    close       REAL NOT NULL,
+                    sma20       REAL,
+                    sma50       REAL,
+                    above_sma20 INTEGER NOT NULL DEFAULT 0,
+                    above_sma50 INTEGER NOT NULL DEFAULT 0,
+                    trend_label TEXT NOT NULL,
+                    computed_at DATETIME DEFAULT (datetime('now')),
+                    UNIQUE(index_name, date)
+                )
+            """))
+            _conn.commit()
+        logger.info("Index pipeline tables verified")
+    except Exception as e:
+        logger.warning("index table migration skipped: %s", e)
+
     from domains.strategies.seed import seed_strategies
     db = SessionLocal()
     try:
