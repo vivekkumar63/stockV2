@@ -311,7 +311,8 @@ class TestOpportunityScorerFalseSignalPenalty:
 
     def test_no_penalty_when_false_rate_low(self):
         base = self._scorer().full_score(
-            "X", 1, 1.0, 1.0, "STRONG_BULL", 1.0, 1.0, 1.0, 1.0, false_signal_rate=0.30
+            "X", 1, 1.0, 1.0, "STRONG_BULL", 1.0, 1.0, 1.0, 1.0,
+            false_signal_rate=0.30, index_alignment_score=100,
         )
         assert base.score == 100   # no penalty
 

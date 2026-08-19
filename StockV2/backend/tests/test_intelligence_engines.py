@@ -35,6 +35,7 @@ class TestOpportunityScorer:
             mtf_alignment=1.0,
             volume_score=1.0,
             sr_score=1.0,
+            index_alignment_score=100,
         )
         assert opp.score == 100
         assert opp.grade == "A+"
@@ -50,6 +51,7 @@ class TestOpportunityScorer:
             mtf_alignment=0.0,
             volume_score=0.0,
             sr_score=0.0,
+            index_alignment_score=0,
         )
         assert opp.score == 0
         assert opp.grade == "D"

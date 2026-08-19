@@ -23,6 +23,24 @@ def _make_engine():
         poolclass=StaticPool,
     )
     Base.metadata.create_all(engine)
+    # index_trend is created via raw DDL in main.py lifespan, not via ORM
+    with engine.connect() as conn:
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS index_trend (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                index_name  TEXT NOT NULL,
+                date        DATE NOT NULL,
+                close       REAL NOT NULL,
+                sma20       REAL,
+                sma50       REAL,
+                above_sma20 INTEGER NOT NULL DEFAULT 0,
+                above_sma50 INTEGER NOT NULL DEFAULT 0,
+                trend_label TEXT NOT NULL,
+                computed_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(index_name, date)
+            )
+        """))
+        conn.commit()
     return engine
 
 
