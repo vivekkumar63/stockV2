@@ -18,6 +18,8 @@ from domains.intelligence.opportunity_scorer import OpportunityScorer
 from domains.intelligence.regime_performance import RegimePerformanceEngine
 from domains.intelligence.strategy_correlation import StrategyCorrelationEngine
 from domains.intelligence.strategy_selector import StrategySelectionEngine
+from domains.data.index_fetcher import compute_index_alignment_score
+from domains.data.index_universe import STOCK_INDEX_MAP
 from domains.market.multi_timeframe import MultiTimeframeEngine
 from domains.market.regime import MarketRegimeEngine
 from domains.market.support_resistance import SupportResistanceEngine
@@ -199,6 +201,18 @@ def get_top_opportunities(
     # False signal rates — bulk dict {strategy_id: rate}
     false_rates = FalseSignalDetector().get_false_signal_rates(db)
 
+    # Pre-load latest index trends — one query for all 7 indices
+    index_trend_rows = db.execute(
+        text("""
+            SELECT index_name, above_sma20, above_sma50, trend_label
+            FROM index_trend
+            WHERE date = (SELECT MAX(date) FROM index_trend)
+        """)
+    ).mappings().fetchall()
+    index_trend_map: dict[str, dict] = {
+        r["index_name"]: dict(r) for r in index_trend_rows
+    }
+
     # Pre-compute per-symbol data once to avoid redundant DB calls
     mtf_cache: dict[str, object] = {}
     vol_cache: dict[str, object] = {}
@@ -257,6 +271,11 @@ def get_top_opportunities(
         sr_result = sr_cache[symbol]
         sr_score  = _compute_sr_score(sr_result) if sr_result is not None else None
 
+        # Index alignment
+        parent_index = STOCK_INDEX_MAP.get(symbol)
+        index_trend_row = index_trend_map.get(parent_index) if parent_index else None
+        idx_alignment_raw = compute_index_alignment_score(index_trend_row)
+
         ml_prob = ml_scorer.predict({
             "confidence_score": confidence_score or 0.5,
             "regime_code":      regime_to_code(regime),
@@ -277,6 +296,7 @@ def get_top_opportunities(
             sr_score=sr_score,
             false_signal_rate=false_rate,
             ml_probability=ml_prob,
+            index_alignment_score=idx_alignment_raw,
         )
 
         results.append({
@@ -301,6 +321,8 @@ def get_top_opportunities(
             "ml_probability":   ml_prob,
             "false_signal_rate": false_rate,
             "breakdown":        opp.breakdown,
+            "index_name":       parent_index,
+            "index_trend":      index_trend_row["trend_label"] if index_trend_row else None,
         })
 
     results.sort(key=lambda x: x["score"], reverse=True)
