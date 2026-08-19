@@ -25,7 +25,8 @@ class JobIds:
     FII_DII_FETCH = "fii_dii_fetch"
 
 
-scheduler = BackgroundScheduler(timezone="Asia/Kolkata")
+_IST = "Asia/Kolkata"
+scheduler = BackgroundScheduler(timezone=_IST)
 
 
 def _send_sell_alerts_for_holdings(db) -> None:
@@ -424,79 +425,79 @@ def register_jobs():
     # 3:45pm — fetch today's closing data before EOD scan runs at 4pm
     scheduler.add_job(
         _daily_data_refresh,
-        CronTrigger(hour=15, minute=45, day_of_week="mon-fri"),
+        CronTrigger(hour=15, minute=45, day_of_week="mon-fri", timezone=_IST),
         id=JobIds.DAILY_DATA_REFRESH,
         replace_existing=True,
     )
     scheduler.add_job(
         _daily_eod_update,
-        CronTrigger(hour=16, minute=0, day_of_week="mon-fri"),
+        CronTrigger(hour=16, minute=0, day_of_week="mon-fri", timezone=_IST),
         id=JobIds.DAILY_EOD_UPDATE,
         replace_existing=True,
     )
     scheduler.add_job(
         _intraday_scan,
-        CronTrigger(minute="*/15", hour="9-15", day_of_week="mon-fri"),
+        CronTrigger(minute="*/15", hour="9-15", day_of_week="mon-fri", timezone=_IST),
         id=JobIds.INTRADAY_SCAN,
         replace_existing=True,
     )
     scheduler.add_job(
         _weekly_fundamentals,
-        CronTrigger(day_of_week="sun", hour=20, minute=0),
+        CronTrigger(day_of_week="sun", hour=20, minute=0, timezone=_IST),
         id=JobIds.WEEKLY_FUNDAMENTALS,
         replace_existing=True,
     )
     scheduler.add_job(
         _weekly_precompute,
-        CronTrigger(day_of_week="sun", hour=22, minute=0),
+        CronTrigger(day_of_week="sun", hour=22, minute=0, timezone=_IST),
         id=JobIds.WEEKLY_PRECOMPUTE,
         replace_existing=True,
     )
     scheduler.add_job(
         _monthly_ml_retrain,
-        CronTrigger(day_of_week="sun", hour=22, minute=30, day="1-7"),
+        CronTrigger(day_of_week="sun", hour=22, minute=30, day="1-7", timezone=_IST),
         id=JobIds.MONTHLY_ML_RETRAIN,
         replace_existing=True,
     )
     # 4:15pm — compute market regime after EOD data (3:45 fetch + 4:00 scan)
     scheduler.add_job(
         _market_regime_compute,
-        CronTrigger(hour=16, minute=15, day_of_week="mon-fri"),
+        CronTrigger(hour=16, minute=15, day_of_week="mon-fri", timezone=_IST),
         id="market_regime_compute",
         replace_existing=True,
     )
     # 4:20pm — fetch index prices and compute trends
     scheduler.add_job(
         _daily_index_update,
-        CronTrigger(hour=16, minute=20, day_of_week="mon-fri"),
+        CronTrigger(hour=16, minute=20, day_of_week="mon-fri", timezone=_IST),
         id=JobIds.DAILY_INDEX_UPDATE,
         replace_existing=True,
     )
     # 4:35pm — fetch FII/DII participant flow data from NSE after market close
     scheduler.add_job(
         _fii_dii_fetch,
-        CronTrigger(hour=16, minute=35, day_of_week="mon-fri"),
+        CronTrigger(hour=16, minute=35, day_of_week="mon-fri", timezone=_IST),
         id=JobIds.FII_DII_FETCH,
         replace_existing=True,
     )
     # 4:30pm — refresh leaderboard after EOD data lands (3:45 data fetch + 4:00 EOD scan)
     scheduler.add_job(
         _leaderboard_refresh,
-        CronTrigger(hour=16, minute=30, day_of_week="mon-fri"),
+        CronTrigger(hour=16, minute=30, day_of_week="mon-fri", timezone=_IST),
         id=JobIds.LEADERBOARD_REFRESH,
         replace_existing=True,
     )
     # 4:45pm — evaluate signal outcomes for signals old enough (holding period elapsed)
     scheduler.add_job(
         _signal_outcome_compute,
-        CronTrigger(hour=16, minute=45, day_of_week="mon-fri"),
+        CronTrigger(hour=16, minute=45, day_of_week="mon-fri", timezone=_IST),
         id="signal_outcome_compute",
         replace_existing=True,
     )
     # Sunday 21:00 — recompute strategy correlation matrix weekly
     scheduler.add_job(
         _strategy_correlation_compute,
-        CronTrigger(day_of_week="sun", hour=21, minute=0),
+        CronTrigger(day_of_week="sun", hour=21, minute=0, timezone=_IST),
         id="strategy_correlation_compute",
         replace_existing=True,
     )
@@ -509,14 +510,14 @@ def register_jobs():
     ]:
         scheduler.add_job(
             _intraday_digest,
-            CronTrigger(hour=hour, minute=minute, day_of_week="mon-fri"),
+            CronTrigger(hour=hour, minute=minute, day_of_week="mon-fri", timezone=_IST),
             id=job_id,
             replace_existing=True,
         )
     # Sunday 23:00 — weekly combination analysis (after 22:00 precompute)
     scheduler.add_job(
         _combination_analysis,
-        CronTrigger(day_of_week="sun", hour=23, minute=0),
+        CronTrigger(day_of_week="sun", hour=23, minute=0, timezone=_IST),
         id=JobIds.COMBINATION_ANALYSIS,
         replace_existing=True,
     )
