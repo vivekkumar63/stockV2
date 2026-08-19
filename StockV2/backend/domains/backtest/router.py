@@ -1,3 +1,4 @@
+import concurrent.futures
 import logging
 import threading
 from datetime import date, timedelta
@@ -397,14 +398,24 @@ _precompute_lock = threading.Lock()
 _precompute_state: dict = {"is_running": False, "done": 0, "total": 0, "error": None}
 
 
+_PRECOMPUTE_STRATEGY_TIMEOUT_S = 900  # 15 min per strategy; prevents one bad strategy from freezing all
+
+
 def _run_precompute_bg(strategy_ids: list[int]) -> None:
     global _precompute_state
     _precompute_state.update({"is_running": True, "done": 0, "total": len(strategy_ids), "error": None})
     for sid in strategy_ids:
         db = SessionLocal()
         try:
-            count = BacktestRunner(db).precompute_all_for_strategy(sid)
-            logger.info("[precompute] strategy id=%d: %d symbols done", sid, count)
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as _exe:
+                future = _exe.submit(BacktestRunner(db).precompute_all_for_strategy, sid)
+                try:
+                    count = future.result(timeout=_PRECOMPUTE_STRATEGY_TIMEOUT_S)
+                    logger.info("[precompute] strategy id=%d: %d symbols done", sid, count)
+                except concurrent.futures.TimeoutError:
+                    logger.warning("[precompute] strategy id=%d timed out after %ds — skipping",
+                                   sid, _PRECOMPUTE_STRATEGY_TIMEOUT_S)
+                    _precompute_state["error"] = f"strategy {sid} timed out"
         except Exception as e:
             logger.exception("[precompute] strategy id=%d failed", sid)
             _precompute_state["error"] = str(e)

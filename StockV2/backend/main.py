@@ -62,7 +62,7 @@ async def lifespan(app: FastAPI):
                     strategy_names TEXT NOT NULL,
                     size INTEGER NOT NULL,
                     search_method TEXT NOT NULL,
-                    created_at DATETIME DEFAULT (datetime('now'))
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
                 )
             """))
             _conn.execute(text("""
@@ -100,7 +100,7 @@ async def lifespan(app: FastAPI):
                     vs_buy_and_hold_cagr REAL, vs_best_single_cagr REAL, vs_sma_crossover_cagr REAL,
                     reliability_score REAL, reliability_label TEXT, sensitivity_score REAL,
                     explanation_json TEXT,
-                    computed_at DATETIME DEFAULT (datetime('now'))
+                    computed_at DATETIME DEFAULT CURRENT_TIMESTAMP
                 )
             """))
             _conn.execute(text("""
@@ -144,7 +144,7 @@ async def lifespan(app: FastAPI):
                     above_sma20 INTEGER NOT NULL DEFAULT 0,
                     above_sma50 INTEGER NOT NULL DEFAULT 0,
                     trend_label TEXT NOT NULL,
-                    computed_at DATETIME DEFAULT (datetime('now')),
+                    computed_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                     UNIQUE(index_name, date)
                 )
             """))
@@ -216,14 +216,22 @@ async def lifespan(app: FastAPI):
             daemon=True, name="auto-precompute"
         ).start()
 
-    # Auto-bootstrap: if no price data exists, download 15 years in the background
+    # Auto-bootstrap: download any NSE symbols not yet in stock_prices_daily (handles
+    # both first-run and partial-bootstrap cases — BootstrapRunner skips existing symbols).
+    from domains.data.nse_universe import NSE_SYMBOLS as _NSE_SYMS
     db3 = SessionLocal()
     try:
-        has_prices = db3.execute(text("SELECT 1 FROM stock_prices_daily LIMIT 1")).scalar()
+        existing_syms = {
+            r[0] for r in db3.execute(text("SELECT DISTINCT symbol FROM stock_prices_daily")).fetchall()
+        }
     finally:
         db3.close()
-    if not has_prices:
-        logger.info("[startup] No price data found — auto-bootstrap starting in background (~20-60 min)")
+    missing_syms = [s for s in _NSE_SYMS if s not in existing_syms]
+    if missing_syms:
+        logger.info(
+            "[startup] %d/%d symbols missing price data — auto-bootstrap starting in background",
+            len(missing_syms), len(_NSE_SYMS),
+        )
         threading.Thread(target=_run_bootstrap, daemon=True, name="auto-bootstrap").start()
 
     # Auto-bootstrap index prices: if index_prices_daily is empty, download 1 year
