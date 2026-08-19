@@ -19,16 +19,38 @@ const REGIME_SHORT: Record<string, string> = {
   BEAR: 'Bear', STRONG_BEAR: 'S.Bear', HIGH_VOLATILITY: 'Hi.Vol',
 }
 
+const INDEX_TREND_STYLE: Record<string, { bg: string; text: string; arrow: string }> = {
+  STRONG_BULL: { bg: 'bg-emerald-100', text: 'text-emerald-700', arrow: '↑↑' },
+  BULL:        { bg: 'bg-green-50',    text: 'text-green-700',   arrow: '↑'  },
+  NEUTRAL:     { bg: 'bg-gray-100',    text: 'text-gray-500',    arrow: '→'  },
+  BEAR:        { bg: 'bg-red-50',      text: 'text-red-600',     arrow: '↓'  },
+}
+
+function IndexTrendBadge({ indexName, trend }: { indexName: string | null; trend: string | null }) {
+  if (!indexName || !trend) return null
+  const style = INDEX_TREND_STYLE[trend] ?? INDEX_TREND_STYLE.NEUTRAL
+  const shortName = indexName.replace('NIFTY ', '')
+  return (
+    <span
+      className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-xs font-medium ${style.bg} ${style.text}`}
+      title={`${indexName}: ${trend}`}
+    >
+      {shortName} {style.arrow}
+    </span>
+  )
+}
+
 type ComponentKey = keyof OpportunityBreakdown
 
 const SCORE_COMPONENTS: { key: ComponentKey; label: string; weight: number }[] = [
-  { key: 'historical_win_rate',   label: 'Historical Win Rate',   weight: 22 },
-  { key: 'strategy_confidence',   label: 'Strategy Confidence',   weight: 18 },
-  { key: 'regime_alignment',      label: 'Regime Alignment',      weight: 16 },
-  { key: 'mtf_alignment',         label: 'MTF Alignment',         weight: 14 },
-  { key: 'volume',                label: 'Volume',                weight: 10 },
-  { key: 'sr_context',            label: 'S/R Context',           weight:  8 },
-  { key: 'ml_signal_probability', label: 'ML Probability',        weight:  8 },
+  { key: 'historical_win_rate',   label: 'Historical Win Rate',   weight: 20 },
+  { key: 'strategy_confidence',   label: 'Strategy Confidence',   weight: 16 },
+  { key: 'regime_alignment',      label: 'Regime Alignment',      weight: 14 },
+  { key: 'mtf_alignment',         label: 'MTF Alignment',         weight: 13 },
+  { key: 'index_alignment',       label: 'Index Alignment',       weight: 10 },
+  { key: 'volume',                label: 'Volume',                weight:  9 },
+  { key: 'sr_context',            label: 'S/R Context',           weight:  7 },
+  { key: 'ml_signal_probability', label: 'ML Probability',        weight:  7 },
   { key: 'regime_strategy',       label: 'Regime-Strategy',       weight:  4 },
 ]
 
@@ -119,7 +141,12 @@ function OpportunityRow({
             {expanded ? '−' : '+'}
           </button>
         </td>
-        <td className="px-4 py-2 font-semibold">{opp.symbol}</td>
+        <td className="px-4 py-2">
+          <div className="flex items-center gap-1.5">
+            <span className="font-semibold">{opp.symbol}</span>
+            <IndexTrendBadge indexName={opp.index_name} trend={opp.index_trend} />
+          </div>
+        </td>
         <td className="px-4 py-2"><GradeBadge score={opp.score} grade={opp.grade} /></td>
         <td className="px-4 py-2">
           <span className={`px-2 py-0.5 rounded text-xs font-medium ${regClass}`}>{regShort}</span>
