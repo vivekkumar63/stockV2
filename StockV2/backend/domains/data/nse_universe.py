@@ -85,8 +85,6 @@ NSE_SYMBOLS: list[str] = [
     "JBMA", "TATACOMM", "NMDC", "SAIL", "DEEPAKNITR",
     "HFCL", "LLOYDSME", "RITES", "DREDGE", "PTCIL",
     "NAVINFLUOR", "FINEORG", "AARTI", "VINATI", "DEEPAKFERT",
-    "MANAPPURAM", "MUTHOOTFIN", "CHOLAFIN", "SHRIRAMFIN",
-    "L&TFH", "M&MFIN", "UJJIVANSF", "EQUITAS", "SBFC", "AAVAS",
 ]
 
 # Deduplicate while preserving order
