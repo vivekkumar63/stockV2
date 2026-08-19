@@ -22,6 +22,7 @@ class JobIds:
     WEEKLY_PRECOMPUTE = "weekly_precompute"
     LEADERBOARD_REFRESH = "leaderboard_refresh"
     COMBINATION_ANALYSIS = "combination_analysis"
+    FII_DII_FETCH = "fii_dii_fetch"
 
 
 scheduler = BackgroundScheduler(timezone="Asia/Kolkata")
@@ -78,18 +79,24 @@ def _daily_eod_update():
 def _intraday_scan():
     from database import SessionLocal
     from domains.strategies.engine import StrategyEngine
+    from domains.strategies.service import StrategyService
     from domains.data.nse_universe import NSE_SYMBOLS
+    from domains.data.live_price_fetcher import fetch_live_prices
+    from domains.data.fii_dii_fetcher import get_latest_fii_dii
+    from domains.alerts.entry_window import get_signals_in_entry_window
+    from domains.alerts.telegram import AlertService
     from sqlalchemy import text
+
     if not _is_market_hours():
         return
     db = SessionLocal()
     try:
-        # Strategy scan
+        # Phase 1: run all strategies (stores signals to DB)
         engine = StrategyEngine(db)
         results = engine.scan_all(NSE_SYMBOLS, ist_today())
         logger.info("[scheduler] intraday_scan: %d signals", len(results))
 
-        # Exit monitor: get open positions and their last known close prices
+        # Phase 2: exit monitor for open positions
         open_rows = db.execute(
             text("SELECT ph.symbol FROM portfolio_holdings ph WHERE ph.is_active=1")
         ).fetchall()
@@ -112,6 +119,41 @@ def _intraday_scan():
                 exits = ExitMonitor(db).scan_exits(current_prices)
                 if exits:
                     logger.info("[scheduler] intraday_scan: %d positions exited", len(exits))
+
+        # Phase 3: entry-window alerts for pre-qualified BUY signals
+        today_str = ist_today().strftime("%Y-%m-%d")
+        signals = StrategyService(db).get_today_signals(signal_date=today_str)
+        buy_signals = [s for s in signals if s.get("signal_type") == "BUY"]
+
+        if buy_signals:
+            symbols_with_signals = list({s["symbol"] for s in buy_signals})
+            live_prices = fetch_live_prices(symbols_with_signals)
+
+            if live_prices:
+                fii_dii_row = get_latest_fii_dii(db)
+                in_window = get_signals_in_entry_window(db, buy_signals, live_prices)
+                alert_svc = AlertService()
+                for signal in in_window:
+                    sym = signal["symbol"]
+                    alert_svc.send_entry_alert(signal, live_prices[sym], fii_dii_row)
+                    db.execute(
+                        text("""
+                            INSERT OR IGNORE INTO intraday_alerts_sent
+                                (symbol, strategy_id, signal_date)
+                            VALUES (:sym, :sid, :date)
+                        """),
+                        {
+                            "sym":  sym,
+                            "sid":  signal["strategy_id"],
+                            "date": str(signal.get("signal_date", today_str)),
+                        },
+                    )
+                db.commit()
+                if in_window:
+                    logger.info("[scheduler] intraday_scan: %d entry-window alerts sent", len(in_window))
+            else:
+                logger.warning("[scheduler] intraday_scan: live price fetch returned no data")
+
     except Exception:
         logger.exception("[scheduler] intraday_scan failed")
     finally:
@@ -365,6 +407,19 @@ def _daily_index_update():
         db.close()
 
 
+def _fii_dii_fetch():
+    """Fetch NSE FII/DII participant data after market close and store for alert enrichment."""
+    from database import SessionLocal
+    from domains.data.fii_dii_fetcher import fetch_and_store_fii_dii
+    db = SessionLocal()
+    try:
+        fetch_and_store_fii_dii(db)
+    except Exception:
+        logger.exception("[fii_dii_fetch] failed")
+    finally:
+        db.close()
+
+
 def register_jobs():
     # 3:45pm — fetch today's closing data before EOD scan runs at 4pm
     scheduler.add_job(
@@ -415,6 +470,13 @@ def register_jobs():
         _daily_index_update,
         CronTrigger(hour=16, minute=20, day_of_week="mon-fri"),
         id=JobIds.DAILY_INDEX_UPDATE,
+        replace_existing=True,
+    )
+    # 4:35pm — fetch FII/DII participant flow data from NSE after market close
+    scheduler.add_job(
+        _fii_dii_fetch,
+        CronTrigger(hour=16, minute=35, day_of_week="mon-fri"),
+        id=JobIds.FII_DII_FETCH,
         replace_existing=True,
     )
     # 4:30pm — refresh leaderboard after EOD data lands (3:45 data fetch + 4:00 EOD scan)
