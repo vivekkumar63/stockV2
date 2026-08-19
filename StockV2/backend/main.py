@@ -195,6 +195,30 @@ async def lifespan(app: FastAPI):
         logger.info("[startup] No price data found — auto-bootstrap starting in background (~20-60 min)")
         threading.Thread(target=_run_bootstrap, daemon=True, name="auto-bootstrap").start()
 
+    # Auto-bootstrap index prices: if index_prices_daily is empty, download 1 year
+    db_idx = SessionLocal()
+    try:
+        has_index_prices = db_idx.execute(
+            text("SELECT 1 FROM index_prices_daily LIMIT 1")
+        ).scalar()
+    finally:
+        db_idx.close()
+
+    if not has_index_prices:
+        logger.info("[startup] No index price data found — downloading 1 year of index history")
+        def _bootstrap_indexes():
+            from domains.data.index_fetcher import fetch_and_store_index_prices, compute_index_trends
+            db_bg = SessionLocal()
+            try:
+                fetch_and_store_index_prices(db_bg, days=365)
+                compute_index_trends(db_bg)
+                logger.info("[startup] Index bootstrap complete")
+            except Exception:
+                logger.exception("[startup] Index bootstrap failed")
+            finally:
+                db_bg.close()
+        threading.Thread(target=_bootstrap_indexes, daemon=True, name="index-bootstrap").start()
+
     from scheduler import scheduler, register_jobs
     register_jobs()
     scheduler.start()
