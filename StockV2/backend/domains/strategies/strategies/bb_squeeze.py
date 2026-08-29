@@ -5,7 +5,7 @@ _MIN_VOLUME_RATIO = 1.5
 
 
 class BBSqueezeStrategy(BaseStrategy):
-    name = "Bollinger Band Squeeze Breakout"
+    name = "Bollinger Band Squeeze"
     description = "Buy when price breaks above upper BB with volume confirmation"
     strategy_type = StrategyType.TECHNICAL
     timeframe = Timeframe.DAILY

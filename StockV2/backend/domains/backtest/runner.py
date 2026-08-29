@@ -260,7 +260,12 @@ class BacktestRunner:
 
     def precompute_all_for_strategy(self, strategy_id: int) -> int:
         """Run backtest for every stock using its full price history and persist
-        results to strategy_performance. Called once per strategy at startup."""
+        results to strategy_performance.
+
+        Skips any (strategy, symbol) pair whose stored to_date already matches
+        the symbol's latest price date — so re-runs within the same trading day
+        are instant no-ops, and only genuinely new data triggers recomputation.
+        """
         row = self.db.execute(
             text("SELECT name FROM strategies WHERE id = :id"), {"id": strategy_id}
         ).fetchone()
@@ -271,6 +276,21 @@ class BacktestRunner:
             logger.warning("[precompute] strategy '%s' not in ALL_STRATEGIES", row[0])
             return 0
 
+        # Bulk-load what's already stored for this strategy (symbol → to_date)
+        existing = {
+            r[0]: r[1] for r in self.db.execute(
+                text("SELECT symbol, to_date FROM strategy_performance WHERE strategy_id = :sid"),
+                {"sid": strategy_id},
+            ).fetchall()
+        }
+
+        # Bulk-load last available price date per symbol
+        last_price_date = {
+            r[0]: r[1] for r in self.db.execute(
+                text("SELECT symbol, MAX(date) FROM stock_prices_daily GROUP BY symbol")
+            ).fetchall()
+        }
+
         symbols = [
             r[0] for r in self.db.execute(
                 text("SELECT DISTINCT symbol FROM stock_prices_daily ORDER BY symbol")
@@ -278,7 +298,13 @@ class BacktestRunner:
         ]
 
         count = 0
+        skipped = 0
         for symbol in symbols:
+            last_date = last_price_date.get(symbol)
+            if last_date and existing.get(symbol) == str(last_date):
+                skipped += 1
+                continue  # already computed through today's price data
+
             rows = self.db.execute(
                 text("""
                     SELECT date, open, high, low, close, volume
@@ -307,8 +333,10 @@ class BacktestRunner:
                     text("""
                         INSERT OR REPLACE INTO strategy_performance
                             (strategy_id, symbol, total_trades, win_rate, cagr,
-                             sharpe_ratio, max_drawdown, profit_factor, total_pnl, computed_at)
-                        VALUES (:sid, :sym, :tt, :wr, :cagr, :sharpe, :dd, :pf, :tpnl, datetime('now'))
+                             sharpe_ratio, max_drawdown, profit_factor, total_pnl,
+                             computed_at, to_date)
+                        VALUES (:sid, :sym, :tt, :wr, :cagr, :sharpe, :dd, :pf, :tpnl,
+                                datetime('now'), :to_date)
                     """),
                     {
                         "sid": strategy_id, "sym": symbol,
@@ -316,17 +344,22 @@ class BacktestRunner:
                         "cagr": m["cagr"], "sharpe": m["sharpe_ratio"],
                         "dd": m["max_drawdown"], "pf": m["profit_factor"],
                         "tpnl": m["total_pnl"],
+                        "to_date": str(to_date),
                     },
                 )
                 count += 1
-                if count % 50 == 0:
+                if count % 10 == 0:
                     self.db.commit()
                     logger.info("[precompute] %s: %d/%d symbols done", row[0], count, len(symbols))
             except Exception as e:
                 logger.warning("[precompute] %s/%s: %s", row[0], symbol, e)
 
         self.db.commit()
-        logger.info("[precompute] %s complete: %d symbols", row[0], count)
+        if skipped:
+            logger.info("[precompute] %s: %d symbols skipped (already current), %d updated",
+                        row[0], skipped, count)
+        else:
+            logger.info("[precompute] %s complete: %d symbols", row[0], count)
         return count
 
     def _save_result(

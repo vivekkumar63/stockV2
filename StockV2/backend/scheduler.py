@@ -308,39 +308,66 @@ def _monthly_ml_retrain():
         db.close()
 
 
-def _weekly_precompute():
-    """Compute strategy_performance rows for any strategy that has none yet.
-    Runs Sunday night so new strategies added during the week get their backtest data.
+def _eod_precompute():
+    """Daily EOD: update strategy_performance for any (strategy, symbol) pair
+    whose to_date is behind today's latest price date.
+
+    Within precompute_all_for_strategy(), symbols already current are skipped
+    with a single DB lookup — so the first run of the day does real work while
+    every subsequent restart the same day is an instant no-op.
     """
+    import concurrent.futures
     from database import SessionLocal
     from sqlalchemy import text
     from domains.backtest.runner import BacktestRunner
+
+    _TIMEOUT = 900  # 15 min per strategy
+
     db = SessionLocal()
     try:
-        rows = db.execute(text("""
-            SELECT id FROM strategies
-            WHERE is_active = 1
-            AND id NOT IN (SELECT DISTINCT strategy_id FROM strategy_performance)
-        """)).fetchall()
-        uncomputed_ids = [r[0] for r in rows]
+        last_price_date = db.execute(
+            text("SELECT MAX(date) FROM stock_prices_daily")
+        ).scalar()
+        if not last_price_date:
+            return
+
+        # Strategies that have at least one symbol not yet computed through
+        # last_price_date — includes brand-new strategies (no rows at all).
+        stale_ids = [
+            r[0] for r in db.execute(text("""
+                SELECT id FROM strategies WHERE is_active = 1
+                AND (
+                    id NOT IN (SELECT DISTINCT strategy_id FROM strategy_performance)
+                    OR id IN (
+                        SELECT DISTINCT strategy_id FROM strategy_performance
+                        WHERE to_date IS NULL OR to_date < :lpd
+                    )
+                )
+            """), {"lpd": str(last_price_date)}).fetchall()
+        ]
     finally:
         db.close()
 
-    if not uncomputed_ids:
-        logger.info("[precompute] all strategies already computed — nothing to do")
+    if not stale_ids:
+        logger.info("[eod_precompute] all strategies current through %s — nothing to do", last_price_date)
         return
 
-    logger.info("[precompute] starting for %d strategies", len(uncomputed_ids))
-    for sid in uncomputed_ids:
+    logger.info("[eod_precompute] %d strategies need updating through %s", len(stale_ids), last_price_date)
+    for sid in stale_ids:
         db = SessionLocal()
         try:
-            count = BacktestRunner(db).precompute_all_for_strategy(sid)
-            logger.info("[precompute] strategy id=%d: %d symbols done", sid, count)
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as exe:
+                future = exe.submit(BacktestRunner(db).precompute_all_for_strategy, sid)
+                try:
+                    count = future.result(timeout=_TIMEOUT)
+                    logger.info("[eod_precompute] strategy id=%d: %d symbols updated", sid, count)
+                except concurrent.futures.TimeoutError:
+                    logger.warning("[eod_precompute] strategy id=%d timed out — skipping", sid)
         except Exception:
-            logger.exception("[precompute] strategy id=%d failed", sid)
+            logger.exception("[eod_precompute] strategy id=%d failed", sid)
         finally:
             db.close()
-    logger.info("[precompute] done")
+    logger.info("[eod_precompute] done")
 
 
 def _intraday_digest():
@@ -447,9 +474,10 @@ def register_jobs():
         id=JobIds.WEEKLY_FUNDAMENTALS,
         replace_existing=True,
     )
+    # 4:50pm — update strategy_performance for new price data (skips symbols already current)
     scheduler.add_job(
-        _weekly_precompute,
-        CronTrigger(day_of_week="sun", hour=22, minute=0, timezone=_IST),
+        _eod_precompute,
+        CronTrigger(hour=16, minute=50, day_of_week="mon-fri", timezone=_IST),
         id=JobIds.WEEKLY_PRECOMPUTE,
         replace_existing=True,
     )

@@ -51,6 +51,14 @@ async def lifespan(app: FastAPI):
         except Exception:
             pass  # column already exists
 
+    # Phase G: add to_date to strategy_performance for incremental skip logic
+    with engine.connect() as _conn:
+        try:
+            _conn.execute(text("ALTER TABLE strategy_performance ADD COLUMN to_date DATE"))
+            _conn.commit()
+        except Exception:
+            pass  # column already exists
+
     # Strategy Combination Engine tables
     try:
         with engine.connect() as _conn:
