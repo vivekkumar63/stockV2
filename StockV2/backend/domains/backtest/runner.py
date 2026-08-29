@@ -1,5 +1,8 @@
 import json
 import logging
+import os
+import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date
 from typing import Optional
 
@@ -9,6 +12,7 @@ from sqlalchemy.orm import Session
 
 from domains.backtest.metrics import compute_metrics
 from domains.backtest.simulator import BacktestSimulator, SimTrade
+from domains.data.indicator_cache import IndicatorCache
 from domains.data.indicators import IndicatorEngine
 from domains.strategies.engine import ALL_STRATEGIES
 
@@ -257,6 +261,179 @@ class BacktestRunner:
                 })
 
         return results
+
+    def precompute_all_strategies(
+        self,
+        strategy_ids: Optional[list[int]] = None,
+    ) -> int:
+        """Compute strategy_performance for every active (strategy, symbol) pair.
+
+        Optimisations vs the old per-strategy loop:
+          1. IndicatorCache — indicators computed once per symbol, stored in DB,
+             reused for all strategies (eliminates 115× redundant recomputation).
+          2. Symbol-first loop — all strategies run on the same indicator DataFrame.
+          3. ThreadPoolExecutor — symbols processed in parallel; threads share
+             pre-loaded DataFrames (read-only) so there is no SQLite contention.
+          4. Incremental skip — symbols already current (to_date == last_price_date)
+             are skipped with a single metadata check.
+        """
+        t_total = time.time()
+
+        # ── 1. Metadata ──────────────────────────────────────────────────────
+        if strategy_ids:
+            placeholders = ",".join(str(int(i)) for i in strategy_ids)
+            strats_rows = self.db.execute(
+                text(f"SELECT id, name FROM strategies WHERE id IN ({placeholders}) AND is_active = 1")
+            ).fetchall()
+        else:
+            strats_rows = self.db.execute(
+                text("SELECT id, name FROM strategies WHERE is_active = 1")
+            ).fetchall()
+
+        strats_to_run: list[tuple[int, str, object]] = [
+            (sid, sname, strat)
+            for sid, sname in strats_rows
+            for strat in [next((s for s in ALL_STRATEGIES if s.name == sname), None)]
+            if strat is not None
+        ]
+        if not strats_to_run:
+            return 0
+
+        existing: dict[tuple[str, int], str] = {
+            (r[0], r[1]): str(r[2])
+            for r in self.db.execute(
+                text("SELECT symbol, strategy_id, to_date FROM strategy_performance WHERE to_date IS NOT NULL")
+            ).fetchall()
+        }
+        last_price_date: dict[str, str] = {
+            r[0]: str(r[1])
+            for r in self.db.execute(
+                text("SELECT symbol, MAX(date) FROM stock_prices_daily GROUP BY symbol")
+            ).fetchall()
+        }
+        symbols = [
+            r[0] for r in self.db.execute(
+                text("SELECT DISTINCT symbol FROM stock_prices_daily ORDER BY symbol")
+            ).fetchall()
+        ]
+
+        # ── 2. Build indicator cache (sequential — safe for SQLite writes) ───
+        cache = IndicatorCache(self.db)
+        all_indicators: dict[str, pd.DataFrame] = {}
+        t_cache = time.time()
+
+        for symbol in symbols:
+            lpd = last_price_date.get(symbol)
+            if not lpd:
+                continue
+            # Skip if every strategy is already current for this symbol
+            if all(existing.get((symbol, sid)) == lpd for sid, _, _ in strats_to_run):
+                continue
+
+            rows = self.db.execute(
+                text("SELECT date, open, high, low, close, volume FROM stock_prices_daily "
+                     "WHERE symbol = :s ORDER BY date ASC"),
+                {"s": symbol},
+            ).fetchall()
+            if len(rows) < 50:
+                continue
+
+            df = pd.DataFrame([dict(r._mapping) for r in rows])
+            df["date"] = pd.to_datetime(df["date"]).dt.date
+            try:
+                all_indicators[symbol] = cache.get(symbol, df)
+            except Exception as e:
+                logger.warning("[precompute_all] %s: indicator error: %s", symbol, e)
+
+        logger.info("[precompute_all] %d symbols to update — indicator cache ready in %.1fs",
+                    len(all_indicators), time.time() - t_cache)
+
+        if not all_indicators:
+            logger.info("[precompute_all] all strategies current — nothing to do")
+            return 0
+
+        # ── 3. Parallel strategy computation ─────────────────────────────────
+        # Threads share pre-loaded DataFrames (read-only) — no SQLite inside workers.
+        n_workers = min(8, os.cpu_count() or 4)
+        results: list[tuple[str, int, dict, str]] = []
+
+        def _process_symbol(symbol: str, df_ind: pd.DataFrame) -> list:
+            lpd = last_price_date.get(symbol)
+            sym_results = []
+            from_date = df_ind["date"].min()
+            to_date_val = df_ind["date"].max()
+            sim = BacktestSimulator()
+
+            for sid, sname, strat in strats_to_run:
+                if lpd and existing.get((symbol, sid)) == lpd:
+                    continue
+                try:
+                    trades = sim.run(
+                        symbol=symbol,
+                        prices_df=df_ind,
+                        from_date=from_date,
+                        to_date=to_date_val,
+                        strategies=[strat],
+                        use_aggregator=False,
+                        initial_capital=500_000.0,
+                        _df_ind_precomputed=df_ind,
+                        round_trip_cost_pct=0.30,
+                    )
+                    m = compute_metrics(trades, 500_000.0, from_date, to_date_val)
+                    sym_results.append((symbol, sid, m, str(to_date_val)))
+                except Exception as e:
+                    logger.warning("[precompute_all] %s/%s: %s", symbol, sname, e)
+            return sym_results
+
+        t_compute = time.time()
+        with ThreadPoolExecutor(max_workers=n_workers) as executor:
+            futures = {
+                executor.submit(_process_symbol, sym, df): sym
+                for sym, df in all_indicators.items()
+            }
+            done = 0
+            for future in as_completed(futures):
+                sym = futures[future]
+                try:
+                    results.extend(future.result())
+                except Exception as e:
+                    logger.warning("[precompute_all] %s: worker error: %s", sym, e)
+                done += 1
+                if done % 20 == 0:
+                    logger.info("[precompute_all] %d/%d symbols computed",
+                                done, len(all_indicators))
+
+        logger.info("[precompute_all] %d pairs computed in %.1fs — writing to DB",
+                    len(results), time.time() - t_compute)
+
+        # ── 4. Write all results (single-threaded, no lock contention) ───────
+        count = 0
+        for symbol, sid, m, to_date_str in results:
+            self.db.execute(
+                text("""
+                    INSERT OR REPLACE INTO strategy_performance
+                        (strategy_id, symbol, total_trades, win_rate, cagr,
+                         sharpe_ratio, max_drawdown, profit_factor, total_pnl,
+                         computed_at, to_date)
+                    VALUES (:sid, :sym, :tt, :wr, :cagr, :sharpe, :dd, :pf, :tpnl,
+                            datetime('now'), :to_date)
+                """),
+                {
+                    "sid": sid, "sym": symbol,
+                    "tt": m["total_trades"], "wr": m["win_rate"],
+                    "cagr": m["cagr"], "sharpe": m["sharpe_ratio"],
+                    "dd": m["max_drawdown"], "pf": m["profit_factor"],
+                    "tpnl": m["total_pnl"], "to_date": to_date_str,
+                },
+            )
+            count += 1
+            if count % 200 == 0:
+                self.db.commit()
+
+        self.db.commit()
+        logger.info("[precompute_all] done — %d pairs written in %.1fs total",
+                    count, time.time() - t_total)
+        return count
 
     def precompute_all_for_strategy(self, strategy_id: int) -> int:
         """Run backtest for every stock using its full price history and persist

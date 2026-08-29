@@ -192,6 +192,29 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning("intraday/fii_dii table migration skipped: %s", e)
 
+    # Indicator cache table — wide table storing IndicatorEngine output per (symbol, date)
+    try:
+        from domains.data.indicator_cache import IND_COLS as _IND_COLS
+        _ind_col_defs = "\n    ".join(f"{c} REAL," for c in _IND_COLS)
+        with engine.connect() as _conn:
+            _conn.execute(text(f"""
+                CREATE TABLE IF NOT EXISTS stock_indicators_daily (
+                    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                    symbol      TEXT NOT NULL,
+                    date        DATE NOT NULL,
+                    {_ind_col_defs}
+                    computed_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(symbol, date)
+                )
+            """))
+            _conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS idx_sid_symbol_date ON stock_indicators_daily(symbol, date)"
+            ))
+            _conn.commit()
+        logger.info("stock_indicators_daily table verified")
+    except Exception as e:
+        logger.warning("stock_indicators_daily migration skipped: %s", e)
+
     from domains.strategies.seed import seed_strategies
     db = SessionLocal()
     try:
@@ -199,30 +222,22 @@ async def lifespan(app: FastAPI):
     finally:
         db.close()
 
-    # Auto-precompute: populate strategy_performance for any strategies missing it.
-    # Runs in background so startup is not blocked. Unblocks combination analysis
-    # and "Scan All Stocks" without requiring manual intervention after adding strategies.
-    db_pc = SessionLocal()
-    try:
-        missing_ids = [
-            r[0] for r in db_pc.execute(text("""
-                SELECT id FROM strategies WHERE is_active = 1
-                AND id NOT IN (SELECT DISTINCT strategy_id FROM strategy_performance)
-            """)).fetchall()
-        ]
-    finally:
-        db_pc.close()
+    # Auto-precompute: runs precompute_all_strategies() in background.
+    # Incremental skip logic inside the method means this is a no-op if
+    # everything is already current — safe to trigger on every startup.
+    def _startup_precompute():
+        from database import SessionLocal as _SL
+        from domains.backtest.runner import BacktestRunner
+        _db = _SL()
+        try:
+            BacktestRunner(_db).precompute_all_strategies()
+        except Exception:
+            logger.exception("[startup] precompute failed")
+        finally:
+            _db.close()
 
-    if missing_ids:
-        logger.info(
-            "[startup] %d strategies missing performance data — auto-precompute starting in background",
-            len(missing_ids)
-        )
-        from domains.backtest.router import _run_precompute_bg
-        threading.Thread(
-            target=_run_precompute_bg, args=(missing_ids,),
-            daemon=True, name="auto-precompute"
-        ).start()
+    threading.Thread(target=_startup_precompute, daemon=True, name="auto-precompute").start()
+    logger.info("[startup] auto-precompute thread started")
 
     # Auto-bootstrap: download any NSE symbols not yet in stock_prices_daily (handles
     # both first-run and partial-bootstrap cases — BootstrapRunner skips existing symbols).

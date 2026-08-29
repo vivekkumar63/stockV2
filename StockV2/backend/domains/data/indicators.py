@@ -32,6 +32,7 @@ class IndicatorEngine:
 
         # ── RSI ──────────────────────────────────────────────────────
         out["rsi_14"] = ta.momentum.RSIIndicator(close, window=14).rsi() if n >= 15 else pd.Series(float("nan"), index=close.index)
+        out["rsi_9"]  = ta.momentum.RSIIndicator(close, window=9).rsi()  if n >= 10 else pd.Series(float("nan"), index=close.index)
         out["rsi_5"]  = ta.momentum.RSIIndicator(close, window=5).rsi()  if n >= 6  else pd.Series(float("nan"), index=close.index)
 
         # ── MACD (12, 26, 9) ────────────────────────────────────────

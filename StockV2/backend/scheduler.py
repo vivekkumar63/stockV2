@@ -309,65 +309,24 @@ def _monthly_ml_retrain():
 
 
 def _eod_precompute():
-    """Daily EOD: update strategy_performance for any (strategy, symbol) pair
-    whose to_date is behind today's latest price date.
+    """Daily EOD: recompute strategy_performance for all stale (strategy, symbol) pairs.
 
-    Within precompute_all_for_strategy(), symbols already current are skipped
-    with a single DB lookup — so the first run of the day does real work while
-    every subsequent restart the same day is an instant no-op.
+    Uses precompute_all_strategies() which:
+      - Shares indicator computation across all strategies per symbol (1× not 115×)
+      - Processes symbols in parallel via ThreadPoolExecutor
+      - Skips pairs already current (to_date == last_price_date)
     """
-    import concurrent.futures
     from database import SessionLocal
-    from sqlalchemy import text
     from domains.backtest.runner import BacktestRunner
-
-    _TIMEOUT = 900  # 15 min per strategy
 
     db = SessionLocal()
     try:
-        last_price_date = db.execute(
-            text("SELECT MAX(date) FROM stock_prices_daily")
-        ).scalar()
-        if not last_price_date:
-            return
-
-        # Strategies that have at least one symbol not yet computed through
-        # last_price_date — includes brand-new strategies (no rows at all).
-        stale_ids = [
-            r[0] for r in db.execute(text("""
-                SELECT id FROM strategies WHERE is_active = 1
-                AND (
-                    id NOT IN (SELECT DISTINCT strategy_id FROM strategy_performance)
-                    OR id IN (
-                        SELECT DISTINCT strategy_id FROM strategy_performance
-                        WHERE to_date IS NULL OR to_date < :lpd
-                    )
-                )
-            """), {"lpd": str(last_price_date)}).fetchall()
-        ]
+        count = BacktestRunner(db).precompute_all_strategies()
+        logger.info("[eod_precompute] done — %d pairs updated", count)
+    except Exception:
+        logger.exception("[eod_precompute] failed")
     finally:
         db.close()
-
-    if not stale_ids:
-        logger.info("[eod_precompute] all strategies current through %s — nothing to do", last_price_date)
-        return
-
-    logger.info("[eod_precompute] %d strategies need updating through %s", len(stale_ids), last_price_date)
-    for sid in stale_ids:
-        db = SessionLocal()
-        try:
-            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as exe:
-                future = exe.submit(BacktestRunner(db).precompute_all_for_strategy, sid)
-                try:
-                    count = future.result(timeout=_TIMEOUT)
-                    logger.info("[eod_precompute] strategy id=%d: %d symbols updated", sid, count)
-                except concurrent.futures.TimeoutError:
-                    logger.warning("[eod_precompute] strategy id=%d timed out — skipping", sid)
-        except Exception:
-            logger.exception("[eod_precompute] strategy id=%d failed", sid)
-        finally:
-            db.close()
-    logger.info("[eod_precompute] done")
 
 
 def _intraday_digest():
