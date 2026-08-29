@@ -197,7 +197,11 @@ class BacktestSimulator:
                 continue
 
             current_price = float(df_ind["close"].iat[idx])
-            df_slice = df_ind.iloc[:idx + 1]  # view — built once per date, shared across all strategies
+            # Cap lookback to 500 bars — prevents O(n²) work for strategies that recompute
+            # indicators from scratch (lorentzian, qqe_mod, ut_bot, etc.). All strategies
+            # need at most ~80 bars of history; 500 gives a comfortable warm-up margin.
+            _start = max(0, idx - 499)
+            df_slice = df_ind.iloc[_start:idx + 1]
 
             for sid, strat in strategies_with_ids:
                 pos = open_positions[sid]

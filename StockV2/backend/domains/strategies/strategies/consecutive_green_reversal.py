@@ -17,9 +17,8 @@ class ConsecutiveGreenReversalStrategy(BaseStrategy):
             return Signal("NONE")
 
         green_count = 0
-        for i in range(-1, -len(df) - 1, -1):
-            row = df.iloc[i]
-            if row["close"] > row["open"]:
+        for i in range(-1, -min(21, len(df)) - 1, -1):
+            if float(df["close"].iloc[i]) > float(df["open"].iloc[i]):
                 green_count += 1
             else:
                 break
