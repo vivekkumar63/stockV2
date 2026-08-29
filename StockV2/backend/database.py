@@ -2,6 +2,7 @@ from pathlib import Path
 
 from sqlalchemy import create_engine, event, text
 from sqlalchemy.orm import sessionmaker, DeclarativeBase
+from sqlalchemy.pool import NullPool
 
 from settings import settings
 
@@ -13,7 +14,7 @@ DATABASE_URL = f"sqlite:///{settings.db_path}"
 engine = create_engine(
     DATABASE_URL,
     connect_args={"check_same_thread": False},
-    pool_pre_ping=True,
+    poolclass=NullPool,  # SQLite: connections are cheap file handles; no benefit to pooling
 )
 
 
