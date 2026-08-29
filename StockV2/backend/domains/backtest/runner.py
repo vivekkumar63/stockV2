@@ -265,6 +265,7 @@ class BacktestRunner:
     def precompute_all_strategies(
         self,
         strategy_ids: Optional[list[int]] = None,
+        _state: Optional[dict] = None,
     ) -> int:
         """Compute strategy_performance for every active (strategy, symbol) pair.
 
@@ -278,6 +279,12 @@ class BacktestRunner:
              are skipped with a single metadata check.
         """
         t_total = time.time()
+
+        def _upd(done: int, total: int, phase: str, message: str = "") -> None:
+            if _state is not None:
+                _state.update({"done": done, "total": max(total, 1), "phase": phase, "message": message})
+
+        _upd(0, 1, "starting", "Loading strategy metadata…")
 
         # ── 1. Metadata ──────────────────────────────────────────────────────
         if strategy_ids:
@@ -325,7 +332,9 @@ class BacktestRunner:
         cache = IndicatorCache(self.db)
         all_indicators: dict[str, pd.DataFrame] = {}
         t_cache = time.time()
-        logger.info("[precompute_all] phase 2 — building indicator cache for up to %d symbols", len(symbols))
+        n_syms = len(symbols)
+        logger.info("[precompute_all] phase 2 — building indicator cache for up to %d symbols", n_syms)
+        _upd(0, n_syms, "cache", f"Building indicator cache (0/{n_syms} symbols)…")
 
         for i, symbol in enumerate(symbols, 1):
             lpd = last_price_date.get(symbol)
@@ -350,9 +359,10 @@ class BacktestRunner:
             except Exception as e:
                 logger.warning("[precompute_all] %s: indicator error: %s", symbol, e)
 
-            if i % 50 == 0 or i == len(symbols):
+            if i % 50 == 0 or i == n_syms:
                 logger.info("[precompute_all] cache build: %d/%d symbols (%.0f%%)",
-                            i, len(symbols), i / len(symbols) * 100)
+                            i, n_syms, i / n_syms * 100)
+                _upd(i, n_syms, "cache", f"Building indicator cache ({i}/{n_syms} symbols)…")
 
         logger.info("[precompute_all] %d symbols to update — indicator cache ready in %.1fs",
                     len(all_indicators), time.time() - t_cache)
@@ -401,6 +411,7 @@ class BacktestRunner:
         n_symbols = len(all_indicators)
         logger.info("[precompute_all] phase 3 — parallel computation: %d symbols × %d strategies (%d workers)",
                     n_symbols, len(strats_to_run), n_workers)
+        _upd(0, n_symbols, "compute", f"Computing strategies (0/{n_symbols} symbols)…")
         with ThreadPoolExecutor(max_workers=n_workers) as executor:
             futures = {
                 executor.submit(_process_symbol, sym, df): sym
@@ -414,9 +425,11 @@ class BacktestRunner:
                 except Exception as e:
                     logger.warning("[precompute_all] %s: worker error: %s", sym, e)
                 done += 1
-                if done % 25 == 0 or done == n_symbols:
+                if done % 10 == 0 or done == n_symbols:
                     logger.info("[precompute_all] compute: %d/%d symbols (%.0f%%) — %d pairs so far",
                                 done, n_symbols, done / n_symbols * 100, len(results))
+                    _upd(done, n_symbols, "compute",
+                         f"Computing strategies ({done}/{n_symbols} symbols, {len(results)} pairs)…")
 
         logger.info("[precompute_all] phase 3 done — %d pairs computed in %.1fs",
                     len(results), time.time() - t_compute)

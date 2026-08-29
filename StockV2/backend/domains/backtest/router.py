@@ -400,11 +400,15 @@ _precompute_state: dict = {"is_running": False, "done": 0, "total": 0, "error": 
 
 def _run_precompute_bg(strategy_ids: list[int]) -> None:
     global _precompute_state
-    _precompute_state.update({"is_running": True, "done": 0, "total": 1, "error": None})
+    _precompute_state.update({
+        "is_running": True, "done": 0, "total": 1,
+        "phase": "starting", "message": "Initializing…", "error": None,
+    })
     db = SessionLocal()
     try:
         count = BacktestRunner(db).precompute_all_strategies(
-            strategy_ids=strategy_ids if strategy_ids else None
+            strategy_ids=strategy_ids if strategy_ids else None,
+            _state=_precompute_state,
         )
         logger.info("[precompute] done — %d pairs updated", count)
     except Exception as e:
@@ -412,7 +416,7 @@ def _run_precompute_bg(strategy_ids: list[int]) -> None:
         _precompute_state["error"] = str(e)
     finally:
         db.close()
-        _precompute_state.update({"is_running": False, "done": 1})
+        _precompute_state.update({"is_running": False, "done": _precompute_state["total"], "phase": "done", "message": ""})
 
 
 @router.post("/backtest/precompute")
@@ -474,12 +478,14 @@ def precompute_status(db: Session = Depends(get_db)):
     ).scalar()
     last_updated = str(last_updated_row)[:19] if last_updated_row else None
 
+    total = _precompute_state["total"] or 1
     return {
         "is_running": _precompute_state["is_running"],
         "done": _precompute_state["done"],
-        "total": _precompute_state["total"],
-        "pct_done": round(_precompute_state["done"] / _precompute_state["total"] * 100, 1)
-                    if _precompute_state["total"] > 0 else 0,
+        "total": total,
+        "pct_done": round(_precompute_state["done"] / total * 100, 1),
+        "phase": _precompute_state.get("phase", ""),
+        "message": _precompute_state.get("message", ""),
         "error": _precompute_state["error"],
         "symbol_strategy_pairs": symbol_strategy_pairs,
         "symbols_computed": symbols_computed,

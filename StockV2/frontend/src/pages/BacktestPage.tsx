@@ -366,9 +366,17 @@ export function BacktestPage() {
         )}
         {precomputeStatus?.is_running && (
           <div className="flex items-center gap-3 bg-amber-50 border border-amber-200 rounded px-3 py-2">
-            <span className="text-amber-600 text-sm animate-pulse">
-              Precomputing strategy data… ({precomputeStatus.pct_done.toFixed(0)}%)
-            </span>
+            <div className="flex-1">
+              <span className="text-amber-600 text-sm animate-pulse">
+                {precomputeStatus.message || 'Precomputing…'}&nbsp;({precomputeStatus.pct_done.toFixed(0)}%)
+              </span>
+              <div className="mt-1 h-1.5 bg-amber-100 rounded-full overflow-hidden w-full">
+                <div
+                  className="h-full bg-amber-400 rounded-full transition-all duration-500"
+                  style={{ width: `${precomputeStatus.pct_done}%` }}
+                />
+              </div>
+            </div>
           </div>
         )}
       </form>
@@ -525,9 +533,21 @@ export function BacktestPage() {
         </div>
         <div className="px-4 py-3">
           {precomputeStatus?.is_running ? (
-            <p className="text-sm text-amber-600 animate-pulse">
-              Precomputing… ({precomputeStatus.pct_done.toFixed(0)}%)
-            </p>
+            <div className="space-y-1.5">
+              <p className="text-sm text-amber-600 animate-pulse">
+                {precomputeStatus.message || 'Precomputing…'}&nbsp;
+                <span className="font-semibold">{precomputeStatus.pct_done.toFixed(0)}%</span>
+                <span className="text-xs text-amber-400 ml-2">
+                  ({precomputeStatus.done}/{precomputeStatus.total})
+                </span>
+              </p>
+              <div className="h-2 bg-amber-100 rounded-full overflow-hidden">
+                <div
+                  className="h-full bg-amber-400 rounded-full transition-all duration-500"
+                  style={{ width: `${precomputeStatus.pct_done}%` }}
+                />
+              </div>
+            </div>
           ) : precomputeStatus ? (
             <div className="flex flex-wrap gap-6 text-sm">
               <div>

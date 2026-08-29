@@ -103,6 +103,8 @@ export interface PrecomputeStatus {
   done: number
   total: number
   pct_done: number
+  phase: string
+  message: string
   error: string | null
   symbol_strategy_pairs: number
   symbols_computed: number
