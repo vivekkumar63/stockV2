@@ -328,43 +328,94 @@ class BacktestRunner:
             ).fetchall()
         ]
 
-        # ── 2. Build indicator cache (sequential — safe for SQLite writes) ───
-        cache = IndicatorCache(self.db)
-        all_indicators: dict[str, pd.DataFrame] = {}
+        # ── 2. Build indicator cache ──────────────────────────────────────────
+        # Strategy: split into parallel compute/load then sequential DB write.
+        #   • Each worker thread opens its own Session (WAL mode allows concurrent reads).
+        #   • Symbols already cached → worker just _load()s from stock_indicators_daily.
+        #   • Symbols needing recompute → worker loads prices + runs IndicatorEngine.
+        #   • Main thread writes newly computed rows to DB (no lock contention).
         t_cache = time.time()
-        n_syms = len(symbols)
-        logger.info("[precompute_all] phase 2 — building indicator cache for up to %d symbols", n_syms)
+        n_workers = min(max(os.cpu_count() or 4, 4), 16)
+
+        symbols_to_process = [
+            s for s in symbols
+            if last_price_date.get(s) and not all(
+                existing.get((s, sid)) == last_price_date[s]
+                for sid, _, _ in strats_to_run
+            )
+        ]
+        n_syms = len(symbols_to_process)
+        logger.info("[precompute_all] phase 2 — %d symbols to process (%d workers)", n_syms, n_workers)
         _upd(0, n_syms, "cache", f"Building indicator cache (0/{n_syms} symbols)…")
 
-        for i, symbol in enumerate(symbols, 1):
-            lpd = last_price_date.get(symbol)
-            if not lpd:
-                continue
-            # Skip if every strategy is already current for this symbol
-            if all(existing.get((symbol, sid)) == lpd for sid, _, _ in strats_to_run):
-                continue
-
-            rows = self.db.execute(
-                text("SELECT date, open, high, low, close, volume FROM stock_prices_daily "
-                     "WHERE symbol = :s ORDER BY date ASC"),
-                {"s": symbol},
-            ).fetchall()
-            if len(rows) < 50:
-                continue
-
-            df = pd.DataFrame([dict(r._mapping) for r in rows])
-            df["date"] = pd.to_datetime(df["date"]).dt.date
+        def _prepare_symbol(symbol: str) -> tuple[str, Optional[pd.DataFrame], bool]:
+            """Returns (symbol, df_ind, needs_write). Each call uses its own Session."""
+            from database import SessionLocal as _SL  # noqa: PLC0415
+            _db = _SL()
             try:
-                all_indicators[symbol] = cache.get(symbol, df)
+                lpd = last_price_date[symbol]
+                cached_max = _db.execute(
+                    text("SELECT MAX(date) FROM stock_indicators_daily WHERE symbol = :s"),
+                    {"s": symbol},
+                ).scalar()
+
+                if cached_max is not None and str(cached_max) >= lpd:
+                    # Already current — load from cache (read-only, thread-safe)
+                    df_ind = IndicatorCache(_db)._load(symbol)
+                    return symbol, df_ind, False
+
+                # Needs fresh computation
+                rows = _db.execute(
+                    text("SELECT date, open, high, low, close, volume FROM stock_prices_daily "
+                         "WHERE symbol = :s ORDER BY date ASC"),
+                    {"s": symbol},
+                ).fetchall()
+                if len(rows) < 50:
+                    return symbol, None, False
+                df = pd.DataFrame([dict(r._mapping) for r in rows])
+                df["date"] = pd.to_datetime(df["date"]).dt.date
+                return symbol, IndicatorEngine.compute(df), True
             except Exception as e:
-                logger.warning("[precompute_all] %s: indicator error: %s", symbol, e)
+                logger.warning("[precompute_all] %s: prepare failed: %s", symbol, e)
+                return symbol, None, False
+            finally:
+                _db.close()
 
-            if i % 50 == 0 or i == n_syms:
-                logger.info("[precompute_all] cache build: %d/%d symbols (%.0f%%)",
-                            i, n_syms, i / n_syms * 100)
-                _upd(i, n_syms, "cache", f"Building indicator cache ({i}/{n_syms} symbols)…")
+        # Parallel phase: load or compute
+        prepared: list[tuple[str, pd.DataFrame, bool]] = []
+        with ThreadPoolExecutor(max_workers=n_workers) as executor:
+            futures = {executor.submit(_prepare_symbol, sym): sym for sym in symbols_to_process}
+            done_count = 0
+            for future in as_completed(futures):
+                sym, df_ind, needs_write = future.result()
+                done_count += 1
+                if df_ind is not None:
+                    prepared.append((sym, df_ind, needs_write))
+                if done_count % 25 == 0 or done_count == n_syms:
+                    logger.info("[precompute_all] cache build: %d/%d (%.0f%%)",
+                                done_count, n_syms, done_count / n_syms * 100)
+                    _upd(done_count, n_syms, "cache",
+                         f"Building indicator cache ({done_count}/{n_syms} symbols)…")
 
-        logger.info("[precompute_all] %d symbols to update — indicator cache ready in %.1fs",
+        # Sequential phase: write newly computed rows to DB
+        write_count = sum(1 for _, _, nw in prepared if nw)
+        if write_count:
+            logger.info("[precompute_all] writing %d new indicator datasets to DB…", write_count)
+            _cache = IndicatorCache(self.db)
+            for sym, df_ind, needs_write in prepared:
+                if needs_write:
+                    try:
+                        cached_max = self.db.execute(
+                            text("SELECT MAX(date) FROM stock_indicators_daily WHERE symbol = :s"),
+                            {"s": sym},
+                        ).scalar()
+                        _cache._store(sym, df_ind, cached_max)
+                    except Exception as e:
+                        logger.warning("[precompute_all] %s: cache write failed: %s", sym, e)
+
+        all_indicators: dict[str, pd.DataFrame] = {sym: df for sym, df, _ in prepared}
+
+        logger.info("[precompute_all] %d symbols ready — indicator cache built in %.1fs",
                     len(all_indicators), time.time() - t_cache)
 
         if not all_indicators:
@@ -373,7 +424,7 @@ class BacktestRunner:
 
         # ── 3. Parallel strategy computation ─────────────────────────────────
         # Threads share pre-loaded DataFrames (read-only) — no SQLite inside workers.
-        n_workers = min(8, os.cpu_count() or 4)
+        # n_workers already set above (Phase 2 used same pool size)
         results: list[tuple[str, int, dict, str]] = []
 
         def _process_symbol(symbol: str, df_ind: pd.DataFrame) -> list:
