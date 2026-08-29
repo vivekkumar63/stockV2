@@ -21,7 +21,6 @@ Additional filters to reduce false breakouts (whipsaws):
   3. ADX > 20 — trending market, not choppy (breakouts fail in ranging markets)
   4. ATR-based: the breakout candle body > 0.3% (real breakout, not just a wick)
 """
-import numpy as np
 import pandas as pd
 from domains.strategies.base import BaseStrategy, Signal, StrategyType, Timeframe
 
@@ -41,21 +40,21 @@ class DonchianBreakoutStrategy(BaseStrategy):
     weight           = 0.20
 
     def generate_signal(self, df: pd.DataFrame, fundamentals: dict | None = None) -> Signal:
-        required = ["close", "high", "low", "sma_50", "adx_14", "volume_ratio"]
+        required = ["close", "sma_50", "adx_14", "volume_ratio", "donchian_high_20", "donchian_low_20"]
         if len(df) < _DC_PERIOD + 5 or not all(c in df.columns for c in required):
             return Signal(signal_type="NONE", conditions_failed=["Insufficient data"])
 
         close        = df["close"]
-        high         = df["high"]
         sma_50       = float(df["sma_50"].iloc[-1])
         adx          = float(df["adx_14"].iloc[-1])
         volume_ratio = float(df["volume_ratio"].iloc[-1])
 
         # Donchian Upper = highest HIGH over the PRIOR 20 bars (not including current)
-        # This is the "prior channel" — the level that must be exceeded
-        dc_upper_prior = high.iloc[:-1].rolling(_DC_PERIOD).max().iloc[-1]
-        dc_lower = df["low"].rolling(_DC_PERIOD).min().iloc[-1]
-        dc_mid   = (float(dc_upper_prior) + float(dc_lower)) / 2
+        # donchian_high_20.iloc[-2] = rolling max of high[-21:-1] = prior 20-bar high ✓
+        dc_upper_prior  = float(df["donchian_high_20"].iloc[-2])
+        dc_upper_prior_2 = float(df["donchian_high_20"].iloc[-3])
+        dc_lower = float(df["donchian_low_20"].iloc[-1])
+        dc_mid   = (dc_upper_prior + dc_lower) / 2
 
         c_now  = float(close.iloc[-1])
         c_prev = float(close.iloc[-2])
@@ -64,13 +63,12 @@ class DonchianBreakoutStrategy(BaseStrategy):
             return Signal(signal_type="NONE", conditions_failed=["Indicators not ready"])
 
         # The Turtle breakout: close exceeds the prior 20-day high
-        breakout = c_prev <= float(dc_upper_prior) and c_now > float(dc_upper_prior)
+        breakout = c_prev <= dc_upper_prior and c_now > dc_upper_prior
 
         # Also accept a fresh breakout from 2 bars ago (slightly relaxed)
-        dc_upper_prior_2 = high.iloc[:-2].rolling(_DC_PERIOD).max().iloc[-1]
         breakout_2bars   = (not breakout and
-                            float(close.iloc[-2]) > float(dc_upper_prior_2) and
-                            c_now > float(dc_upper_prior))
+                            float(close.iloc[-2]) > dc_upper_prior_2 and
+                            c_now > dc_upper_prior)
 
         # Filters
         above_sma50  = c_now > sma_50
@@ -82,16 +80,16 @@ class DonchianBreakoutStrategy(BaseStrategy):
 
         if breakout:
             conditions_met.append(
-                f"Donchian breakout: close {c_now:.2f} > 20-day high {float(dc_upper_prior):.2f}"
+                f"Donchian breakout: close {c_now:.2f} > 20-day high {dc_upper_prior:.2f}"
             )
         elif breakout_2bars:
             conditions_met.append(
-                f"Breakout confirmed (2-bar): above 20-day channel {float(dc_upper_prior):.2f}"
+                f"Breakout confirmed (2-bar): above 20-day channel {dc_upper_prior:.2f}"
             )
         else:
-            gap = ((c_now - float(dc_upper_prior)) / float(dc_upper_prior)) * 100
+            gap = ((c_now - dc_upper_prior) / dc_upper_prior) * 100
             conditions_failed.append(
-                f"No breakout: price {gap:+.1f}% vs 20-day high {float(dc_upper_prior):.2f}"
+                f"No breakout: price {gap:+.1f}% vs 20-day high {dc_upper_prior:.2f}"
             )
 
         if above_sma50:
@@ -124,7 +122,7 @@ class DonchianBreakoutStrategy(BaseStrategy):
                 target_pct=11.0,
                 holding_days=12,
                 conditions_met=conditions_met + [
-                    f"Channel: upper={float(dc_upper_prior):.2f} | mid={dc_mid:.2f} | lower={float(dc_lower):.2f}"
+                    f"Channel: upper={dc_upper_prior:.2f} | mid={dc_mid:.2f} | lower={dc_lower:.2f}"
                 ],
             )
 
@@ -135,4 +133,4 @@ class DonchianBreakoutStrategy(BaseStrategy):
         )
 
     def get_required_indicators(self) -> list[str]:
-        return ["close", "high", "low", "sma_50", "adx_14", "volume_ratio"]
+        return ["close", "sma_50", "adx_14", "volume_ratio", "donchian_high_20", "donchian_low_20"]

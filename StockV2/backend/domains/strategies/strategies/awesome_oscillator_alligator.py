@@ -23,14 +23,8 @@ BUY signals from Williams' theory:
   2. AO histogram crossed zero upward (fresh bullish momentum)
   3. Price above ALL three Alligator lines (price is "above the mouth")
 """
-import numpy as np
 import pandas as pd
 from domains.strategies.base import BaseStrategy, Signal, StrategyType, Timeframe
-
-
-def _smma(series: pd.Series, period: int) -> pd.Series:
-    """Smoothed Moving Average (Wilder's) = EWM with com=period-1."""
-    return series.ewm(com=period - 1, adjust=False).mean()
 
 
 class AwesomeOscillatorAlligatorStrategy(BaseStrategy):
@@ -46,30 +40,19 @@ class AwesomeOscillatorAlligatorStrategy(BaseStrategy):
     weight           = 0.20
 
     def generate_signal(self, df: pd.DataFrame, fundamentals: dict | None = None) -> Signal:
-        required = ["close", "high", "low"]
+        required = ["close", "ao", "alligator_jaw", "alligator_teeth", "alligator_lips"]
         if len(df) < 40 or not all(c in df.columns for c in required):
             return Signal(signal_type="NONE", conditions_failed=["Insufficient data"])
 
         close = df["close"]
-        high  = df["high"]
-        low   = df["low"]
-        mid   = (high + low) / 2   # HL/2 midpoint
-
-        # ── Alligator lines (unshifted for price comparison) ───────────────────
-        jaw    = _smma(mid, 13)
-        teeth  = _smma(mid, 8)
-        lips   = _smma(mid, 5)
-
-        # ── Awesome Oscillator ─────────────────────────────────────────────────
-        ao = mid.rolling(5).mean() - mid.rolling(34).mean()
 
         # Current values
-        c_now    = float(close.iloc[-1])
-        jaw_now  = float(jaw.iloc[-1])
-        teeth_now = float(teeth.iloc[-1])
-        lips_now  = float(lips.iloc[-1])
-        ao_now   = float(ao.iloc[-1])
-        ao_prev  = float(ao.iloc[-2])
+        c_now     = float(close.iloc[-1])
+        jaw_now   = float(df["alligator_jaw"].iloc[-1])
+        teeth_now = float(df["alligator_teeth"].iloc[-1])
+        lips_now  = float(df["alligator_lips"].iloc[-1])
+        ao_now    = float(df["ao"].iloc[-1])
+        ao_prev   = float(df["ao"].iloc[-2])
 
         if any(pd.isna(x) for x in [jaw_now, teeth_now, lips_now, ao_now]):
             return Signal(signal_type="NONE", conditions_failed=["Alligator not ready"])
@@ -134,4 +117,4 @@ class AwesomeOscillatorAlligatorStrategy(BaseStrategy):
         )
 
     def get_required_indicators(self) -> list[str]:
-        return ["close", "high", "low"]
+        return ["close", "ao", "alligator_jaw", "alligator_teeth", "alligator_lips"]

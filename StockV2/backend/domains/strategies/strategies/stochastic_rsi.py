@@ -24,18 +24,7 @@ BUY = %K crosses above %D from the oversold zone (< 20)
 import pandas as pd
 from domains.strategies.base import BaseStrategy, Signal, StrategyType, Timeframe
 
-_RSI_PERIOD   = 14
-_STOCH_PERIOD = 14
-_SMOOTH_K     = 3
-_SMOOTH_D     = 3
-_OVERSOLD     = 20.0
-
-
-def _rsi_series(close: pd.Series, period: int) -> pd.Series:
-    delta = close.diff()
-    gain  = delta.clip(lower=0).ewm(com=period - 1, adjust=False).mean()
-    loss  = (-delta.clip(upper=0)).ewm(com=period - 1, adjust=False).mean().clip(lower=1e-10)
-    return (100 - 100 / (1 + gain / loss)).fillna(50)
+_OVERSOLD = 20.0
 
 
 class StochasticRSIStrategy(BaseStrategy):
@@ -51,27 +40,18 @@ class StochasticRSIStrategy(BaseStrategy):
     weight           = 0.20
 
     def generate_signal(self, df: pd.DataFrame, fundamentals: dict | None = None) -> Signal:
-        required = ["close", "sma_50", "rsi_14"]
-        if len(df) < _RSI_PERIOD + _STOCH_PERIOD + 10 or not all(c in df.columns for c in required):
+        required = ["close", "sma_50", "rsi_14", "stoch_rsi_k", "stoch_rsi_d"]
+        if len(df) < 40 or not all(c in df.columns for c in required):
             return Signal(signal_type="NONE", conditions_failed=["Insufficient data"])
 
         close  = df["close"]
         sma_50 = float(df["sma_50"].iloc[-1])
         rsi    = df["rsi_14"]
 
-        # StochRSI
-        rsi_min = rsi.rolling(_STOCH_PERIOD).min()
-        rsi_max = rsi.rolling(_STOCH_PERIOD).max()
-        rsi_range = (rsi_max - rsi_min).clip(lower=1e-10)
-        stoch_rsi  = (rsi - rsi_min) / rsi_range
-
-        k = stoch_rsi.rolling(_SMOOTH_K).mean() * 100
-        d = k.rolling(_SMOOTH_D).mean()
-
-        k_now  = float(k.iloc[-1])
-        k_prev = float(k.iloc[-2])
-        d_now  = float(d.iloc[-1])
-        d_prev = float(d.iloc[-2])
+        k_now  = float(df["stoch_rsi_k"].iloc[-1])
+        k_prev = float(df["stoch_rsi_k"].iloc[-2])
+        d_now  = float(df["stoch_rsi_d"].iloc[-1])
+        d_prev = float(df["stoch_rsi_d"].iloc[-2])
         rsi_now = float(rsi.iloc[-1])
         c_now   = float(close.iloc[-1])
 
@@ -143,4 +123,4 @@ class StochasticRSIStrategy(BaseStrategy):
         )
 
     def get_required_indicators(self) -> list[str]:
-        return ["close", "sma_50", "rsi_14"]
+        return ["close", "sma_50", "rsi_14", "stoch_rsi_k", "stoch_rsi_d"]

@@ -21,14 +21,8 @@ Classic "3-way buy" signal (strong buy in Ichimoku theory):
 
 The cloud visible at bar t was computed at bar t−26 (since it's displaced forward).
 """
-import numpy as np
 import pandas as pd
 from domains.strategies.base import BaseStrategy, Signal, StrategyType, Timeframe
-
-_TENKAN  = 9
-_KIJUN   = 26
-_SENKOU_B = 52
-_DISP    = 26
 
 
 class IchimokuCloudStrategy(BaseStrategy):
@@ -44,27 +38,23 @@ class IchimokuCloudStrategy(BaseStrategy):
     weight           = 0.20
 
     def generate_signal(self, df: pd.DataFrame, fundamentals: dict | None = None) -> Signal:
-        if len(df) < _SENKOU_B + _DISP + 10 or "close" not in df.columns:
-            return Signal(signal_type="NONE", conditions_failed=["Insufficient data (need 90+ bars)"])
+        required = ["ichimoku_tenkan", "ichimoku_kijun", "ichimoku_cloud_a",
+                    "ichimoku_cloud_b", "ichimoku_span_a", "ichimoku_span_b"]
+        if len(df) < 80 or not all(c in df.columns for c in required):
+            return Signal(signal_type="NONE", conditions_failed=["Insufficient data (need 80+ bars)"])
 
-        high  = df["high"]
-        low   = df["low"]
         close = df["close"]
 
-        # Core lines
-        tenkan = (high.rolling(_TENKAN).max() + low.rolling(_TENKAN).min()) / 2
-        kijun  = (high.rolling(_KIJUN).max()  + low.rolling(_KIJUN).min())  / 2
-        span_a = (tenkan + kijun) / 2
-        span_b = (high.rolling(_SENKOU_B).max() + low.rolling(_SENKOU_B).min()) / 2
-
-        # Cloud visible at current bar = Span A/B computed 26 bars ago
-        cloud_a = float(span_a.iloc[-_DISP - 1])
-        cloud_b = float(span_b.iloc[-_DISP - 1])
-
-        t_now  = float(tenkan.iloc[-1])
-        t_prev = float(tenkan.iloc[-2])
-        k_now  = float(kijun.iloc[-1])
-        k_prev = float(kijun.iloc[-2])
+        t_now  = float(df["ichimoku_tenkan"].iloc[-1])
+        t_prev = float(df["ichimoku_tenkan"].iloc[-2])
+        k_now  = float(df["ichimoku_kijun"].iloc[-1])
+        k_prev = float(df["ichimoku_kijun"].iloc[-2])
+        # Cloud at current bar = ichimoku_cloud_a/b (span shifted 26 forward → .iloc[-1] = span[-27])
+        cloud_a = float(df["ichimoku_cloud_a"].iloc[-1])
+        cloud_b = float(df["ichimoku_cloud_b"].iloc[-1])
+        # Future cloud = current unshifted span values
+        future_a = float(df["ichimoku_span_a"].iloc[-1])
+        future_b = float(df["ichimoku_span_b"].iloc[-1])
         c_now  = float(close.iloc[-1])
 
         if any(pd.isna(x) for x in [t_now, k_now, cloud_a, cloud_b]):
@@ -72,10 +62,6 @@ class IchimokuCloudStrategy(BaseStrategy):
 
         cloud_top = max(cloud_a, cloud_b)
         cloud_bot = min(cloud_a, cloud_b)
-
-        # Future cloud (what cloud looks like 26 bars from now)
-        future_a = float(span_a.iloc[-1])
-        future_b = float(span_b.iloc[-1])
 
         # ── Signal conditions ────────────────────────────────────────────────────
         # 1. TK Cross (Tenkan crosses above Kijun) — allow within last 2 bars
@@ -154,4 +140,5 @@ class IchimokuCloudStrategy(BaseStrategy):
         )
 
     def get_required_indicators(self) -> list[str]:
-        return ["close", "high", "low"]
+        return ["ichimoku_tenkan", "ichimoku_kijun", "ichimoku_cloud_a",
+                "ichimoku_cloud_b", "ichimoku_span_a", "ichimoku_span_b"]

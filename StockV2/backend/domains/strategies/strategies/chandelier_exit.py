@@ -21,24 +21,10 @@ BUY signal:
   2. Price is above EMA(22) — trend confirmation
   3. Close > Chandelier Long (currently in "long" mode, not stopped out)
 """
-import numpy as np
 import pandas as pd
 from domains.strategies.base import BaseStrategy, Signal, StrategyType, Timeframe
 
-_PERIOD    = 22
-_MULT      = 3.0
-
-
-def _wilder_atr(high: np.ndarray, low: np.ndarray, close: np.ndarray,
-                period: int) -> np.ndarray:
-    n  = len(high)
-    tr = np.zeros(n)
-    tr[0] = high[0] - low[0]
-    for i in range(1, n):
-        tr[i] = max(high[i] - low[i],
-                    abs(high[i] - close[i - 1]),
-                    abs(low[i]  - close[i - 1]))
-    return pd.Series(tr).ewm(com=period - 1, adjust=False).mean().values
+_PERIOD = 22
 
 
 class ChandelierExitStrategy(BaseStrategy):
@@ -54,37 +40,28 @@ class ChandelierExitStrategy(BaseStrategy):
     weight           = 0.20
 
     def generate_signal(self, df: pd.DataFrame, fundamentals: dict | None = None) -> Signal:
-        required = ["close", "high", "low"]
+        required = ["close", "chandelier_long", "ema_22"]
         if len(df) < _PERIOD + 10 or not all(c in df.columns for c in required):
             return Signal(signal_type="NONE", conditions_failed=["Insufficient data"])
 
         close = df["close"]
-        high  = df["high"].values
-        low   = df["low"].values
-        cl    = close.values
+        ch    = df["chandelier_long"]
 
-        atr = _wilder_atr(high, low, cl, _PERIOD)
+        ch_now   = float(ch.iloc[-1])
+        ch_prev  = float(ch.iloc[-2])
+        ch_prev2 = float(ch.iloc[-3])
+        c_now    = float(close.iloc[-1])
+        c_prev   = float(close.iloc[-2])
+        c_prev2  = float(close.iloc[-3])
+        ema_now  = float(df["ema_22"].iloc[-1])
 
-        # Chandelier Long: hangs from highest close
-        highest_close = close.rolling(_PERIOD).max().values
-        chandelier    = highest_close - _MULT * atr
-
-        # EMA(22) for trend filter
-        ema_22 = close.ewm(span=_PERIOD, adjust=False).mean()
-
-        ch_now  = float(chandelier[-1])
-        ch_prev = float(chandelier[-2])
-        c_now   = float(cl[-1])
-        c_prev  = float(cl[-2])
-        ema_now = float(ema_22.iloc[-1])
-
-        if any(np.isnan(x) for x in [ch_now, ch_prev, ema_now]):
+        if any(pd.isna(x) for x in [ch_now, ch_prev, ema_now]):
             return Signal(signal_type="NONE", conditions_failed=["Chandelier not ready"])
 
         # Price just crossed above the Chandelier Long line (within 2 bars)
         fresh_cross = (
             (c_prev <= ch_prev and c_now > ch_now) or     # current bar cross
-            (float(cl[-3]) <= float(chandelier[-3]) and c_prev > ch_prev)  # prev bar cross
+            (c_prev2 <= ch_prev2 and c_prev > ch_prev)    # prev bar cross
         )
 
         # Currently above Chandelier (in long mode)
@@ -129,7 +106,7 @@ class ChandelierExitStrategy(BaseStrategy):
                 target_pct=10.0,
                 holding_days=12,
                 conditions_met=conditions_met + [
-                    f"ATR({_PERIOD})={float(atr[-1]):.2f} | Chandelier={ch_now:.2f}"
+                    f"Chandelier={ch_now:.2f} | EMA({_PERIOD})={ema_now:.2f}"
                 ],
             )
 
@@ -140,4 +117,4 @@ class ChandelierExitStrategy(BaseStrategy):
         )
 
     def get_required_indicators(self) -> list[str]:
-        return ["close", "high", "low"]
+        return ["close", "chandelier_long", "ema_22"]

@@ -36,7 +36,7 @@ class CANSLIMStrategy(BaseStrategy):
         last  = df.iloc[-1]
         close = float(last["close"])
 
-        high_200 = df["high"].rolling(_HIGH_LOOKBACK, min_periods=_HIGH_MIN_PRDS).max().iloc[-1]
+        high_200 = float(df["rolling_high_200"].iloc[-1]) if "rolling_high_200" in df.columns else df["high"].rolling(_HIGH_LOOKBACK, min_periods=_HIGH_MIN_PRDS).max().iloc[-1]
         sma_50   = float(last.get("sma_50", float("nan")))
         vol      = float(last["volume"])
         vol_sma  = float(last.get("volume_sma_20", float("nan")))
@@ -96,4 +96,4 @@ class CANSLIMStrategy(BaseStrategy):
         return Signal("NONE", conditions_met=met, conditions_failed=missed)
 
     def get_required_indicators(self) -> list[str]:
-        return ["sma_50", "volume_sma_20"]
+        return ["sma_50", "volume_sma_20", "rolling_high_200"]

@@ -41,131 +41,6 @@ _BUY_NORMAL = 5.8    # blue arrow
 _SELL       = 4.0    # red arrow
 
 
-# ── Indicator helpers ──────────────────────────────────────────────────────────
-
-def _wilder_smooth(arr: np.ndarray, period: int) -> np.ndarray:
-    out = np.zeros(len(arr))
-    if len(arr) <= period:
-        return out
-    out[period] = arr[1:period + 1].sum()
-    for i in range(period + 1, len(arr)):
-        out[i] = out[i - 1] - out[i - 1] / period + arr[i]
-    return out
-
-
-def _compute_psar(high: np.ndarray, low: np.ndarray,
-                  af_start=0.02, af_step=0.02, af_max=0.2):
-    """Parabolic SAR. Returns (psar_value, trend) for last bar."""
-    n = len(high)
-    psar = np.full(n, np.nan)
-    ep   = np.zeros(n)
-    af   = np.zeros(n)
-    bull = np.ones(n, dtype=bool)
-
-    psar[0] = low[0]
-    ep[0]   = high[0]
-    af[0]   = af_start
-
-    for i in range(1, n):
-        if bull[i - 1]:
-            psar[i] = psar[i - 1] + af[i - 1] * (ep[i - 1] - psar[i - 1])
-            psar[i] = min(psar[i], low[i - 1], low[max(0, i - 2)])
-            if low[i] < psar[i]:           # reversal → bearish
-                bull[i] = False
-                psar[i] = ep[i - 1]
-                ep[i]   = low[i]
-                af[i]   = af_start
-            else:
-                bull[i] = True
-                ep[i]   = max(ep[i - 1], high[i])
-                af[i]   = min(af[i - 1] + af_step, af_max) if high[i] > ep[i - 1] else af[i - 1]
-        else:
-            psar[i] = psar[i - 1] + af[i - 1] * (ep[i - 1] - psar[i - 1])
-            psar[i] = max(psar[i], high[i - 1], high[max(0, i - 2)])
-            if high[i] > psar[i]:          # reversal → bullish
-                bull[i] = True
-                psar[i] = ep[i - 1]
-                ep[i]   = high[i]
-                af[i]   = af_start
-            else:
-                bull[i] = False
-                ep[i]   = min(ep[i - 1], low[i])
-                af[i]   = min(af[i - 1] + af_step, af_max) if low[i] < ep[i - 1] else af[i - 1]
-
-    return psar[-1], bull[-1]
-
-
-def _compute_vortex(high: np.ndarray, low: np.ndarray,
-                    close: np.ndarray, period=14):
-    """Returns (VI+, VI-)."""
-    n = len(high)
-    if n < period + 1:
-        return 1.0, 1.0
-    tr      = np.zeros(n)
-    vmp     = np.zeros(n)
-    vmm     = np.zeros(n)
-    for i in range(1, n):
-        tr[i]  = max(high[i] - low[i],
-                     abs(high[i] - close[i - 1]),
-                     abs(low[i]  - close[i - 1]))
-        vmp[i] = abs(high[i] - low[i - 1])
-        vmm[i] = abs(low[i]  - high[i - 1])
-    s_tr  = tr[-period:].sum()
-    s_vmp = vmp[-period:].sum()
-    s_vmm = vmm[-period:].sum()
-    if s_tr == 0:
-        return 1.0, 1.0
-    return s_vmp / s_tr, s_vmm / s_tr
-
-
-def _compute_dmi(high: np.ndarray, low: np.ndarray,
-                 close: np.ndarray, period=14):
-    """Returns (+DI, -DI) using Wilder smoothing."""
-    n = len(high)
-    pdm = np.zeros(n)
-    mdm = np.zeros(n)
-    tr  = np.zeros(n)
-    for i in range(1, n):
-        up   = high[i]  - high[i - 1]
-        down = low[i - 1] - low[i]
-        tr[i] = max(high[i] - low[i],
-                    abs(high[i] - close[i - 1]),
-                    abs(low[i]  - close[i - 1]))
-        if up > down and up > 0:
-            pdm[i] = up
-        if down > up and down > 0:
-            mdm[i] = down
-    s_pdm = _wilder_smooth(pdm, period)
-    s_mdm = _wilder_smooth(mdm, period)
-    s_tr  = _wilder_smooth(tr,  period)
-    if s_tr[-1] == 0:
-        return 25.0, 25.0
-    return 100 * s_pdm[-1] / s_tr[-1], 100 * s_mdm[-1] / s_tr[-1]
-
-
-def _compute_fisher(high: np.ndarray, low: np.ndarray, period=9):
-    """Fisher Transform."""
-    if len(high) < period:
-        return 0.0
-    highest = high[-period:].max()
-    lowest  = low[-period:].min()
-    if highest == lowest:
-        return 0.0
-    hl2   = (high[-1] + low[-1]) / 2
-    value = np.clip(2 * (hl2 - lowest) / (highest - lowest) - 1, -0.999, 0.999)
-    return float(0.5 * np.log((1 + value) / (1 - value)))
-
-
-def _zlema(close: pd.Series, period=14) -> float:
-    """Zero-Lag EMA = 2·EMA(n) − EMA(n//2)."""
-    if len(close) < period:
-        return float(close.iloc[-1])
-    return float(
-        2 * close.ewm(span=period, adjust=False).mean().iloc[-1]
-        - close.ewm(span=max(period // 2, 1), adjust=False).mean().iloc[-1]
-    )
-
-
 # ── Scoring functions (0–10 scale, 5 = neutral) ────────────────────────────────
 
 def _s_rsi(rsi: float) -> float:
@@ -252,40 +127,43 @@ class SuperAIMagicTrendStrategy(BaseStrategy):
 
     def generate_signal(self, df: pd.DataFrame, fundamentals: dict | None = None) -> Signal:
         required = [
-            "close", "high", "low",
-            "macd_hist", "rsi_14", "stoch_k", "stoch_d",
+            "close", "macd_hist", "rsi_14", "stoch_k", "stoch_d",
             "mfi_14", "adx_14", "supertrend", "supertrend_direction",
+            "psar", "psar_bull", "vortex_pos", "vortex_neg",
+            "dmi_plus_14", "dmi_minus_14", "fisher_9", "zlema_14",
         ]
         if len(df) < 50 or not all(c in df.columns for c in required):
             return Signal(signal_type="NONE", conditions_failed=["Insufficient data"])
 
-        curr  = df.iloc[-1]
-        high  = df["high"].values
-        low   = df["low"].values
-        close = df["close"].values
+        curr = df.iloc[-1]
 
-        _core_cols = ["close", "rsi_14", "stoch_k", "stoch_d", "mfi_14",
-                      "adx_14", "supertrend", "supertrend_direction", "macd_hist"]
+        _core_cols = [
+            "close", "rsi_14", "stoch_k", "stoch_d", "mfi_14",
+            "adx_14", "supertrend", "supertrend_direction", "macd_hist",
+            "psar", "psar_bull", "vortex_pos", "vortex_neg",
+            "dmi_plus_14", "dmi_minus_14", "fisher_9", "zlema_14",
+        ]
         if any(pd.isna(curr[col]) for col in _core_cols):
             return Signal(signal_type="NONE", conditions_failed=["NaN in core values"])
 
-        c       = float(curr["close"])
-        rsi     = float(curr["rsi_14"])
-        stoch_k = float(curr["stoch_k"])
-        stoch_d = float(curr["stoch_d"])
-        mfi     = float(curr["mfi_14"])
-        adx     = float(curr["adx_14"])
-        st      = float(curr["supertrend"])
-        st_dir  = int(curr["supertrend_direction"])
-        hist    = float(curr["macd_hist"])
-
-        # ── Compute indicators not in precomputed set ──────────────────────────
-        psar_val, psar_bull  = _compute_psar(high, low)
-        vi_plus,  vi_minus   = _compute_vortex(high, low, close)
-        plus_di,  minus_di   = _compute_dmi(high, low, close)
-        fisher               = _compute_fisher(high, low)
-        zl                   = _zlema(df["close"])
-        mom_close            = float(df["close"].iloc[-11]) if len(df) > 11 else c  # 10-bar momentum
+        c        = float(curr["close"])
+        rsi      = float(curr["rsi_14"])
+        stoch_k  = float(curr["stoch_k"])
+        stoch_d  = float(curr["stoch_d"])
+        mfi      = float(curr["mfi_14"])
+        adx      = float(curr["adx_14"])
+        st       = float(curr["supertrend"])
+        st_dir   = int(curr["supertrend_direction"])
+        hist     = float(curr["macd_hist"])
+        psar_val  = float(curr["psar"])
+        psar_bull = bool(curr["psar_bull"] == 1.0)
+        vi_plus   = float(curr["vortex_pos"])
+        vi_minus  = float(curr["vortex_neg"])
+        plus_di   = float(curr["dmi_plus_14"])
+        minus_di  = float(curr["dmi_minus_14"])
+        fisher    = float(curr["fisher_9"])
+        zl        = float(curr["zlema_14"])
+        mom_close = float(df["close"].iloc[-11]) if len(df) > 11 else c  # 10-bar momentum
 
         # ── Score each indicator (0–10) ────────────────────────────────────────
         scores = {
@@ -349,7 +227,8 @@ class SuperAIMagicTrendStrategy(BaseStrategy):
 
     def get_required_indicators(self) -> list[str]:
         return [
-            "close", "high", "low",
-            "macd_hist", "rsi_14", "stoch_k", "stoch_d",
+            "close", "macd_hist", "rsi_14", "stoch_k", "stoch_d",
             "mfi_14", "adx_14", "supertrend", "supertrend_direction",
+            "psar", "psar_bull", "vortex_pos", "vortex_neg",
+            "dmi_plus_14", "dmi_minus_14", "fisher_9", "zlema_14",
         ]

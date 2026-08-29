@@ -22,7 +22,6 @@ BUY = CMF crosses above 0 (confirmed buying pressure)
       AND Price above SMA(50) (uptrend context)
       AND RSI(14) > 40 (momentum not dead)
 """
-import numpy as np
 import pandas as pd
 from domains.strategies.base import BaseStrategy, Signal, StrategyType, Timeframe
 
@@ -42,25 +41,14 @@ class ChaikinMoneyFlowStrategy(BaseStrategy):
     weight           = 0.20
 
     def generate_signal(self, df: pd.DataFrame, fundamentals: dict | None = None) -> Signal:
-        required = ["close", "high", "low", "volume", "sma_50", "rsi_14"]
+        required = ["close", "sma_50", "rsi_14", "cmf_20"]
         if len(df) < _CMF_PERIOD + 5 or not all(c in df.columns for c in required):
             return Signal(signal_type="NONE", conditions_failed=["Insufficient data"])
 
         close  = df["close"]
-        high   = df["high"]
-        low    = df["low"]
-        volume = df["volume"]
 
-        # ── CMF ────────────────────────────────────────────────────────────────
-        hl_range = (high - low).clip(lower=1e-10)
-        mfm = (2 * close - high - low) / hl_range
-        mfv = mfm * volume
-
-        cmf = (mfv.rolling(_CMF_PERIOD).sum() /
-               volume.rolling(_CMF_PERIOD).sum().clip(lower=1e-10))
-
-        cmf_now  = float(cmf.iloc[-1])
-        cmf_prev = float(cmf.iloc[-2])
+        cmf_now  = float(df["cmf_20"].iloc[-1])
+        cmf_prev = float(df["cmf_20"].iloc[-2])
         sma_50   = float(df["sma_50"].iloc[-1])
         rsi      = float(df["rsi_14"].iloc[-1])
         c_now    = float(close.iloc[-1])
@@ -133,4 +121,4 @@ class ChaikinMoneyFlowStrategy(BaseStrategy):
         )
 
     def get_required_indicators(self) -> list[str]:
-        return ["close", "high", "low", "volume", "sma_50", "rsi_14"]
+        return ["close", "sma_50", "rsi_14", "cmf_20"]

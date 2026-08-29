@@ -1,3 +1,4 @@
+import numpy as np
 import pandas as pd
 import ta
 
@@ -119,6 +120,112 @@ class IndicatorEngine:
         # ── ATR & Volume 5-bar trend (positive = expanding/growing) ──
         out["atr_5bar_change"] = out["atr_14"] - out["atr_14"].shift(5)
         out["volume_sma_5bar_change"] = out["volume_sma_20"] - out["volume_sma_20"].shift(5)
+
+        # ── Additional EMAs ───────────────────────────────────────────────────
+        out["ema_7"]  = ta.trend.EMAIndicator(close, window=7).ema_indicator()  if n >= 7  else pd.Series(float("nan"), index=close.index)
+        out["ema_14"] = ta.trend.EMAIndicator(close, window=14).ema_indicator() if n >= 14 else pd.Series(float("nan"), index=close.index)
+        out["ema_22"] = ta.trend.EMAIndicator(close, window=22).ema_indicator() if n >= 22 else pd.Series(float("nan"), index=close.index)
+
+        # ── Zero-Lag EMA(14): 2·EMA(14) − EMA(7) ─────────────────────────────
+        if n >= 14:
+            out["zlema_14"] = 2 * out["ema_14"] - out["ema_7"]
+        else:
+            out["zlema_14"] = pd.Series(float("nan"), index=close.index)
+
+        # ── PSAR (step=0.02, max=0.2) ─────────────────────────────────────────
+        if n >= 5:
+            _psar_ind = ta.trend.PSARIndicator(high, low, close, step=0.02, max_step=0.2)
+            out["psar"]      = _psar_ind.psar()
+            out["psar_bull"] = (~_psar_ind.psar_up().isna()).astype(float)
+        else:
+            out["psar"] = out["psar_bull"] = pd.Series(float("nan"), index=close.index)
+
+        # ── DMI +/− (14) — ADXIndicator also provides these alongside adx_14 ──
+        if n >= 28:
+            _adx_ind2        = ta.trend.ADXIndicator(high, low, close, window=14)
+            out["dmi_plus_14"]  = _adx_ind2.adx_pos()
+            out["dmi_minus_14"] = _adx_ind2.adx_neg()
+        else:
+            out["dmi_plus_14"] = out["dmi_minus_14"] = pd.Series(float("nan"), index=close.index)
+
+        # ── Vortex (14) ───────────────────────────────────────────────────────
+        if n >= 15:
+            _vortex           = ta.trend.VortexIndicator(high, low, close, window=14)
+            out["vortex_pos"] = _vortex.vortex_indicator_pos()
+            out["vortex_neg"] = _vortex.vortex_indicator_neg()
+        else:
+            out["vortex_pos"] = out["vortex_neg"] = pd.Series(float("nan"), index=close.index)
+
+        # ── Fisher Transform (9) ──────────────────────────────────────────────
+        if n >= 9:
+            _highest  = high.rolling(9).max()
+            _lowest   = low.rolling(9).min()
+            _hl_rng   = (_highest - _lowest).clip(lower=1e-10)
+            _hl2      = (high + low) / 2
+            _fval     = ((2 * (_hl2 - _lowest) / _hl_rng) - 1).clip(-0.999, 0.999)
+            out["fisher_9"] = 0.5 * np.log((1 + _fval) / (1 - _fval))
+        else:
+            out["fisher_9"] = pd.Series(float("nan"), index=close.index)
+
+        # ── Donchian Channels (20) ────────────────────────────────────────────
+        if n >= 20:
+            _dc                    = ta.volatility.DonchianChannel(high, low, close, window=20)
+            out["donchian_high_20"] = _dc.donchian_channel_hband()
+            out["donchian_low_20"]  = _dc.donchian_channel_lband()
+            out["donchian_mid_20"]  = _dc.donchian_channel_mband()
+        else:
+            out["donchian_high_20"] = out["donchian_low_20"] = out["donchian_mid_20"] = pd.Series(float("nan"), index=close.index)
+
+        # ── Stochastic RSI (14, 14, 3, 3) — result on 0–100 scale ────────────
+        if n >= 34:
+            _srsi              = ta.momentum.StochRSIIndicator(close, window=14, smooth1=3, smooth2=3)
+            out["stoch_rsi_k"] = _srsi.stochrsi_k()
+            out["stoch_rsi_d"] = _srsi.stochrsi_d()
+        else:
+            out["stoch_rsi_k"] = out["stoch_rsi_d"] = pd.Series(float("nan"), index=close.index)
+
+        # ── Chaikin Money Flow (20) ───────────────────────────────────────────
+        if n >= 20:
+            out["cmf_20"] = ta.volume.ChaikinMoneyFlowIndicator(high, low, close, volume, window=20).chaikin_money_flow()
+        else:
+            out["cmf_20"] = pd.Series(float("nan"), index=close.index)
+
+        # ── Ichimoku Cloud ────────────────────────────────────────────────────
+        if n >= 52:
+            _tenkan = (high.rolling(9).max() + low.rolling(9).min()) / 2
+            _kijun  = (high.rolling(26).max() + low.rolling(26).min()) / 2
+            _span_a = (_tenkan + _kijun) / 2
+            _span_b = (high.rolling(52).max() + low.rolling(52).min()) / 2
+            out["ichimoku_tenkan"]  = _tenkan
+            out["ichimoku_kijun"]   = _kijun
+            out["ichimoku_span_a"]  = _span_a
+            out["ichimoku_span_b"]  = _span_b
+            out["ichimoku_cloud_a"] = _span_a.shift(26)
+            out["ichimoku_cloud_b"] = _span_b.shift(26)
+        else:
+            for _ic in ["ichimoku_tenkan", "ichimoku_kijun", "ichimoku_span_a",
+                        "ichimoku_span_b", "ichimoku_cloud_a", "ichimoku_cloud_b"]:
+                out[_ic] = pd.Series(float("nan"), index=close.index)
+
+        # ── Chandelier Exit (22, 3.0): highest_close(22) − 3 × ATR(22) ───────
+        if n >= 22:
+            out["chandelier_long"] = close.rolling(22).max() - 3.0 * IndicatorEngine._atr(high, low, close, window=22)
+        else:
+            out["chandelier_long"] = pd.Series(float("nan"), index=close.index)
+
+        # ── Awesome Oscillator + Williams Alligator ───────────────────────────
+        if n >= 13:
+            _mid = (high + low) / 2
+            out["alligator_jaw"]   = _mid.ewm(com=12, adjust=False).mean()  # SMMA(13)
+            out["alligator_teeth"] = _mid.ewm(com=7,  adjust=False).mean()  # SMMA(8)
+            out["alligator_lips"]  = _mid.ewm(com=4,  adjust=False).mean()  # SMMA(5)
+            out["ao"] = _mid.rolling(5).mean() - _mid.rolling(34).mean() if n >= 34 else pd.Series(float("nan"), index=close.index)
+        else:
+            for _ac in ["alligator_jaw", "alligator_teeth", "alligator_lips", "ao"]:
+                out[_ac] = pd.Series(float("nan"), index=close.index)
+
+        # ── Rolling 200-bar high (for CANSLIM 52-week high check) ─────────────
+        out["rolling_high_200"] = high.rolling(200, min_periods=100).max()
 
         return out
 

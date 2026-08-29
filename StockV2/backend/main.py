@@ -216,6 +216,46 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning("stock_indicators_daily migration skipped: %s", e)
 
+    # Schema upgrade: add new indicator columns to existing stock_indicators_daily tables
+    _new_indicator_cols = [
+        "ema_7", "ema_14", "ema_22", "zlema_14",
+        "psar", "psar_bull",
+        "dmi_plus_14", "dmi_minus_14",
+        "vortex_pos", "vortex_neg",
+        "fisher_9",
+        "donchian_high_20", "donchian_low_20", "donchian_mid_20",
+        "stoch_rsi_k", "stoch_rsi_d",
+        "cmf_20",
+        "ichimoku_tenkan", "ichimoku_kijun", "ichimoku_span_a", "ichimoku_span_b",
+        "ichimoku_cloud_a", "ichimoku_cloud_b",
+        "chandelier_long",
+        "ao", "alligator_jaw", "alligator_teeth", "alligator_lips",
+        "rolling_high_200",
+    ]
+    with engine.connect() as _conn:
+        for _col in _new_indicator_cols:
+            try:
+                _conn.execute(text(f"ALTER TABLE stock_indicators_daily ADD COLUMN {_col} REAL"))
+                _conn.commit()
+            except Exception:
+                pass  # column already exists
+
+    # Cache invalidation: if psar is NULL for all rows, the cache was built with the
+    # old schema — clear it so the startup precompute rebuilds with new columns.
+    try:
+        with engine.connect() as _conn:
+            _has_new = _conn.execute(
+                text("SELECT COUNT(*) FROM stock_indicators_daily WHERE psar IS NOT NULL")
+            ).scalar()
+            if _has_new == 0:
+                _total = _conn.execute(text("SELECT COUNT(*) FROM stock_indicators_daily")).scalar()
+                if _total > 0:
+                    _conn.execute(text("DELETE FROM stock_indicators_daily"))
+                    _conn.commit()
+                    logger.info("[migration] Cleared %d stale indicator cache rows (schema upgrade — new columns added)", _total)
+    except Exception as e:
+        logger.warning("[migration] Indicator cache invalidation check failed: %s", e)
+
     from domains.strategies.seed import seed_strategies
     db = SessionLocal()
     try:

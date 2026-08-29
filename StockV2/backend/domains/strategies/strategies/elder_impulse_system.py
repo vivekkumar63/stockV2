@@ -36,15 +36,14 @@ class ElderImpulseSystemStrategy(BaseStrategy):
     weight           = 0.20
 
     def generate_signal(self, df: pd.DataFrame, fundamentals: dict | None = None) -> Signal:
-        required = ["close", "macd_hist"]
+        required = ["close", "macd_hist", "ema_13"]
         if len(df) < 20 or not all(c in df.columns for c in required):
             return Signal(signal_type="NONE", conditions_failed=["Insufficient data"])
 
         close     = df["close"]
         macd_hist = df["macd_hist"]
 
-        # EMA(13) — the "trend spine" in Elder's system
-        ema13 = close.ewm(span=13, adjust=False).mean()
+        ema13 = df["ema_13"]
 
         ema_now  = float(ema13.iloc[-1])
         ema_prev = float(ema13.iloc[-2])
@@ -130,4 +129,4 @@ class ElderImpulseSystemStrategy(BaseStrategy):
         )
 
     def get_required_indicators(self) -> list[str]:
-        return ["close", "macd_hist"]
+        return ["close", "macd_hist", "ema_13"]
