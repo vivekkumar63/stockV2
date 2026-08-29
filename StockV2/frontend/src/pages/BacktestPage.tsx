@@ -84,7 +84,7 @@ export function BacktestPage() {
   const [scanLoading, setScanLoading] = useState(false)
   const [wfRunning, setWfRunning] = useState(false)
 
-  const { data: scanStatus } = useQuery({
+  useQuery({
     queryKey: ['backtest', 'scan', 'status'],
     queryFn: getScanStatus,
     refetchInterval: (query) => {
