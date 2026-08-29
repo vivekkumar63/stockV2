@@ -104,6 +104,10 @@ export interface PrecomputeStatus {
   total: number
   pct_done: number
   error: string | null
+  symbol_strategy_pairs: number
+  symbols_computed: number
+  total_active_strategies: number
+  last_updated: string | null
 }
 
 export const triggerPrecompute = (force = false) =>
@@ -161,3 +165,14 @@ export const getWalkForwardResult = (symbol: string, strategyId: number) =>
   apiFetch<WalkForwardResult>(
     `/backtests/walk-forward/${encodeURIComponent(symbol)}/${strategyId}`,
   )
+
+export interface ResetDbResult {
+  status: string
+  scope: string
+  tables_cleared: number
+  bootstrap_started: boolean
+  message: string
+}
+
+export const resetDb = (scope: 'computed' | 'full') =>
+  apiFetch<ResetDbResult>(`/admin/reset-db?scope=${scope}`, { method: 'POST' })

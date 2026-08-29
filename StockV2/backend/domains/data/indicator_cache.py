@@ -67,26 +67,30 @@ class IndicatorCache:
         rows = self.db.execute(text(_SEL), {"s": symbol}).fetchall()
         df = pd.DataFrame([dict(r._mapping) for r in rows])
         df["date"] = pd.to_datetime(df["date"]).dt.date
+        # SQLite NULLs arrive as Python None → object dtype columns.
+        # Convert every indicator column to float so strategies get NaN (not None),
+        # which their pd.isna() guards handle correctly.
+        for col in IND_COLS:
+            if col in df.columns:
+                df[col] = pd.to_numeric(df[col], errors="coerce")
         return df
 
     def _store(self, symbol: str, df_ind: pd.DataFrame, cached_max) -> None:
-        existing: set[str] = set()
+        # Only write rows newer than what's already cached
         if cached_max is not None:
-            existing = {
-                str(r[0]) for r in self.db.execute(
-                    text("SELECT date FROM stock_indicators_daily WHERE symbol = :s"),
-                    {"s": symbol},
-                ).fetchall()
-            }
+            df_new = df_ind[df_ind["date"].astype(str) > str(cached_max)]
+        else:
+            df_new = df_ind
+
+        if df_new.empty:
+            return
 
         # Build the column presence map once (some indicators may be absent on tiny history)
-        col_present = {col: col in df_ind.columns for col in IND_COLS}
+        col_present = {col: col in df_new.columns for col in IND_COLS}
 
         batch: list[dict] = []
-        for row in df_ind.itertuples(index=False):
+        for row in df_new.itertuples(index=False):
             d = str(getattr(row, "date"))
-            if d in existing:
-                continue
             entry: dict = {"sym": symbol, "d": d}
             for col in IND_COLS:
                 if not col_present[col]:

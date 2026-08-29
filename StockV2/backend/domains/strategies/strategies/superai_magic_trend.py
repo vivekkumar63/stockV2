@@ -264,6 +264,11 @@ class SuperAIMagicTrendStrategy(BaseStrategy):
         low   = df["low"].values
         close = df["close"].values
 
+        _core_cols = ["close", "rsi_14", "stoch_k", "stoch_d", "mfi_14",
+                      "adx_14", "supertrend", "supertrend_direction", "macd_hist"]
+        if any(pd.isna(curr[col]) for col in _core_cols):
+            return Signal(signal_type="NONE", conditions_failed=["NaN in core values"])
+
         c       = float(curr["close"])
         rsi     = float(curr["rsi_14"])
         stoch_k = float(curr["stoch_k"])
@@ -273,9 +278,6 @@ class SuperAIMagicTrendStrategy(BaseStrategy):
         st      = float(curr["supertrend"])
         st_dir  = int(curr["supertrend_direction"])
         hist    = float(curr["macd_hist"])
-
-        if any(pd.isna(x) for x in [c, rsi, stoch_k, stoch_d, mfi, adx, st, hist]):
-            return Signal(signal_type="NONE", conditions_failed=["NaN in core values"])
 
         # ── Compute indicators not in precomputed set ──────────────────────────
         psar_val, psar_bull  = _compute_psar(high, low)

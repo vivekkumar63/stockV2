@@ -43,7 +43,8 @@ class ChartinkBearishEngulfing(BaseStrategy):
             failed.append(f"Today green (no bearish reversal)")
 
         if o0 >= c1 and c0 <= o1:
-            engulf_pct = (o0 - c0) / (c1 - o1) * 100
+            prev_body = c1 - o1
+            engulf_pct = (o0 - c0) / prev_body * 100 if prev_body > 0 else 100.0
             met.append(f"Full engulfment: today body covers prev body ({engulf_pct:.0f}%)")
         elif o0 >= c1:
             met.append(f"Partial engulf: opened above prev close {c1:.1f}")

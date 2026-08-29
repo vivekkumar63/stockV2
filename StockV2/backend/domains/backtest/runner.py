@@ -297,7 +297,11 @@ class BacktestRunner:
             if strat is not None
         ]
         if not strats_to_run:
+            logger.info("[precompute_all] no matching active strategies found — nothing to do")
             return 0
+
+        logger.info("[precompute_all] starting — %d strategies: %s",
+                    len(strats_to_run), ", ".join(sname for _, sname, _ in strats_to_run))
 
         existing: dict[tuple[str, int], str] = {
             (r[0], r[1]): str(r[2])
@@ -321,8 +325,9 @@ class BacktestRunner:
         cache = IndicatorCache(self.db)
         all_indicators: dict[str, pd.DataFrame] = {}
         t_cache = time.time()
+        logger.info("[precompute_all] phase 2 — building indicator cache for up to %d symbols", len(symbols))
 
-        for symbol in symbols:
+        for i, symbol in enumerate(symbols, 1):
             lpd = last_price_date.get(symbol)
             if not lpd:
                 continue
@@ -345,6 +350,10 @@ class BacktestRunner:
             except Exception as e:
                 logger.warning("[precompute_all] %s: indicator error: %s", symbol, e)
 
+            if i % 50 == 0 or i == len(symbols):
+                logger.info("[precompute_all] cache build: %d/%d symbols (%.0f%%)",
+                            i, len(symbols), i / len(symbols) * 100)
+
         logger.info("[precompute_all] %d symbols to update — indicator cache ready in %.1fs",
                     len(all_indicators), time.time() - t_cache)
 
@@ -359,33 +368,39 @@ class BacktestRunner:
 
         def _process_symbol(symbol: str, df_ind: pd.DataFrame) -> list:
             lpd = last_price_date.get(symbol)
-            sym_results = []
             from_date = df_ind["date"].min()
             to_date_val = df_ind["date"].max()
-            sim = BacktestSimulator()
 
-            for sid, sname, strat in strats_to_run:
-                if lpd and existing.get((symbol, sid)) == lpd:
-                    continue
-                try:
-                    trades = sim.run(
-                        symbol=symbol,
-                        prices_df=df_ind,
-                        from_date=from_date,
-                        to_date=to_date_val,
-                        strategies=[strat],
-                        use_aggregator=False,
-                        initial_capital=500_000.0,
-                        _df_ind_precomputed=df_ind,
-                        round_trip_cost_pct=0.30,
-                    )
-                    m = compute_metrics(trades, 500_000.0, from_date, to_date_val)
-                    sym_results.append((symbol, sid, m, str(to_date_val)))
-                except Exception as e:
-                    logger.warning("[precompute_all] %s/%s: %s", symbol, sname, e)
-            return sym_results
+            strats_needed = [
+                (sid, strat)
+                for sid, sname, strat in strats_to_run
+                if not (lpd and existing.get((symbol, sid)) == lpd)
+            ]
+            if not strats_needed:
+                return []
+
+            try:
+                trades_map = BacktestSimulator().run_multi(
+                    symbol=symbol,
+                    df_ind=df_ind,
+                    strategies_with_ids=strats_needed,
+                    from_date=from_date,
+                    to_date=to_date_val,
+                    round_trip_cost_pct=0.30,
+                )
+            except Exception as e:
+                logger.warning("[precompute_all] %s: run_multi failed: %s", symbol, e)
+                return []
+
+            return [
+                (symbol, sid, compute_metrics(trades, 500_000.0, from_date, to_date_val), str(to_date_val))
+                for sid, trades in trades_map.items()
+            ]
 
         t_compute = time.time()
+        n_symbols = len(all_indicators)
+        logger.info("[precompute_all] phase 3 — parallel computation: %d symbols × %d strategies (%d workers)",
+                    n_symbols, len(strats_to_run), n_workers)
         with ThreadPoolExecutor(max_workers=n_workers) as executor:
             futures = {
                 executor.submit(_process_symbol, sym, df): sym
@@ -399,12 +414,13 @@ class BacktestRunner:
                 except Exception as e:
                     logger.warning("[precompute_all] %s: worker error: %s", sym, e)
                 done += 1
-                if done % 20 == 0:
-                    logger.info("[precompute_all] %d/%d symbols computed",
-                                done, len(all_indicators))
+                if done % 25 == 0 or done == n_symbols:
+                    logger.info("[precompute_all] compute: %d/%d symbols (%.0f%%) — %d pairs so far",
+                                done, n_symbols, done / n_symbols * 100, len(results))
 
-        logger.info("[precompute_all] %d pairs computed in %.1fs — writing to DB",
+        logger.info("[precompute_all] phase 3 done — %d pairs computed in %.1fs",
                     len(results), time.time() - t_compute)
+        logger.info("[precompute_all] phase 4 — writing %d rows to DB", len(results))
 
         # ── 4. Write all results (single-threaded, no lock contention) ───────
         count = 0

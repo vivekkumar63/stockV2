@@ -417,11 +417,12 @@ def _run_precompute_bg(strategy_ids: list[int]) -> None:
 
 @router.post("/backtest/precompute")
 def trigger_precompute(
-    force: bool = Query(False, description="Recompute even strategies that already have data"),
+    force: bool = Query(False, description="Hard reset: delete all data and recompute from scratch"),
     db: Session = Depends(get_db),
 ):
-    """Trigger strategy_performance precompute for all strategies that are missing it.
-    Use force=true to recompute all strategies from scratch."""
+    """Trigger strategy_performance precompute.
+    force=false (default): only compute strategies that are missing data.
+    force=true: delete all existing strategy_performance rows, then recompute everything."""
     if _precompute_state["is_running"]:
         return {
             "status": "already_running",
@@ -430,6 +431,8 @@ def trigger_precompute(
         }
 
     if force:
+        db.execute(text("DELETE FROM strategy_performance"))
+        db.commit()
         rows = db.execute(text("SELECT id FROM strategies WHERE is_active = 1")).fetchall()
     else:
         rows = db.execute(text("""
@@ -446,13 +449,31 @@ def trigger_precompute(
     return {
         "status": "started",
         "strategies_queued": len(strategy_ids),
-        "message": f"Precomputing {len(strategy_ids)} strategies in background. Check /backtest/precompute/status.",
+        "force": force,
+        "message": f"{'Hard recompute' if force else 'Incremental precompute'}: {len(strategy_ids)} strategies queued. Check /backtest/precompute/status.",
     }
 
 
 @router.get("/backtest/precompute/status")
-def precompute_status():
-    """Check progress of the running precompute job."""
+def precompute_status(db: Session = Depends(get_db)):
+    """Current precompute state: running progress + coverage stats from DB."""
+    symbol_strategy_pairs = db.execute(
+        text("SELECT COUNT(*) FROM strategy_performance")
+    ).scalar() or 0
+
+    symbols_computed = db.execute(
+        text("SELECT COUNT(DISTINCT symbol) FROM strategy_performance")
+    ).scalar() or 0
+
+    total_active_strategies = db.execute(
+        text("SELECT COUNT(*) FROM strategies WHERE is_active = 1")
+    ).scalar() or 0
+
+    last_updated_row = db.execute(
+        text("SELECT MAX(computed_at) FROM strategy_performance")
+    ).scalar()
+    last_updated = str(last_updated_row)[:19] if last_updated_row else None
+
     return {
         "is_running": _precompute_state["is_running"],
         "done": _precompute_state["done"],
@@ -460,6 +481,10 @@ def precompute_status():
         "pct_done": round(_precompute_state["done"] / _precompute_state["total"] * 100, 1)
                     if _precompute_state["total"] > 0 else 0,
         "error": _precompute_state["error"],
+        "symbol_strategy_pairs": symbol_strategy_pairs,
+        "symbols_computed": symbols_computed,
+        "total_active_strategies": total_active_strategies,
+        "last_updated": last_updated,
     }
 
 

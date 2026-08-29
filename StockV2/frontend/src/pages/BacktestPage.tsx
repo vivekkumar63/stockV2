@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   getBacktestTrades, listBacktestResults, runBacktest,
   getPrecomputedScan, getScanStatus, triggerPrecompute, getPrecomputeStatus,
-  runWalkForward, getWalkForwardResult,
+  runWalkForward, getWalkForwardResult, resetDb,
   type BacktestResult, type BacktestTrade, type ScanResult, type WalkForwardResult,
 } from '../api/backtest'
 import { getStrategies, getStockList } from '../api/strategies'
@@ -93,11 +93,14 @@ export function BacktestPage() {
     },
   })
 
-  const { data: precomputeStatus } = useQuery({
+  const { data: precomputeStatus, refetch: refetchPrecompute } = useQuery({
     queryKey: ['backtest', 'precompute', 'status'],
     queryFn: getPrecomputeStatus,
     refetchInterval: (query) => query.state.data?.is_running ? 3000 : false,
   })
+  const [forceConfirm, setForceConfirm] = useState(false)
+  const [resetConfirm, setResetConfirm] = useState<'computed' | 'full' | null>(null)
+  const [resetResult, setResetResult] = useState<string | null>(null)
 
   const precomputeMut = useMutation({
     mutationFn: (force: boolean) => triggerPrecompute(force),
@@ -105,6 +108,17 @@ export function BacktestPage() {
       queryClient.invalidateQueries({ queryKey: ['backtest', 'scan', 'status'] })
       queryClient.invalidateQueries({ queryKey: ['backtest', 'precompute', 'status'] })
     },
+  })
+
+  const resetMut = useMutation({
+    mutationFn: (scope: 'computed' | 'full') => resetDb(scope),
+    onSuccess: (data) => {
+      setResetResult(data.message)
+      queryClient.invalidateQueries({ queryKey: ['backtest', 'precompute', 'status'] })
+      queryClient.invalidateQueries({ queryKey: ['backtest', 'results'] })
+      queryClient.invalidateQueries({ queryKey: ['backtest', 'scan', 'status'] })
+    },
+    onError: (err) => setResetResult(`Error: ${String(err)}`),
   })
 
   const wfMut = useMutation({
@@ -350,33 +364,12 @@ export function BacktestPage() {
             Done — {runMut.data.total_trades} trades · CAGR {runMut.data.cagr?.toFixed(2)}% · Sharpe {runMut.data.sharpe_ratio?.toFixed(2) ?? '—'}
           </p>
         )}
-        {/* Precompute status banner */}
         {precomputeStatus?.is_running && (
           <div className="flex items-center gap-3 bg-amber-50 border border-amber-200 rounded px-3 py-2">
             <span className="text-amber-600 text-sm animate-pulse">
-              Precomputing strategy data: {precomputeStatus.done}/{precomputeStatus.total} strategies
-              ({precomputeStatus.pct_done.toFixed(0)}%)
+              Precomputing strategy data… ({precomputeStatus.pct_done.toFixed(0)}%)
             </span>
           </div>
-        )}
-        {!precomputeStatus?.is_running && scanStatus && !scanStatus.ready && (
-          <div className="flex items-center gap-3 bg-amber-50 border border-amber-200 rounded px-3 py-2">
-            <span className="text-amber-600 text-sm">
-              {scanStatus.pending} strategies need performance data — "Scan All Stocks" shows partial results.
-            </span>
-            <button
-              onClick={() => precomputeMut.mutate(false)}
-              disabled={precomputeMut.isPending}
-              className="px-2 py-1 text-xs bg-amber-600 text-white rounded hover:bg-amber-700 disabled:opacity-50 whitespace-nowrap"
-            >
-              {precomputeMut.isPending ? 'Starting…' : 'Precompute Now'}
-            </button>
-          </div>
-        )}
-        {scanStatus?.ready && (
-          <p className="text-emerald-600 text-sm">
-            All {scanStatus.total} strategies precomputed — Scan All Stocks returns instantly.
-          </p>
         )}
       </form>
 
@@ -489,6 +482,173 @@ export function BacktestPage() {
           )}
         </section>
       )}
+
+      {/* Precompute Control Panel */}
+      <section className="border border-gray-200 rounded-lg bg-white shadow-sm">
+        <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
+          <h2 className="text-sm font-semibold text-gray-700">Strategy Performance Cache</h2>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => refetchPrecompute()}
+              disabled={precomputeStatus?.is_running}
+              className="px-3 py-1.5 text-xs bg-gray-100 text-gray-700 border border-gray-300 rounded hover:bg-gray-200 disabled:opacity-50"
+            >
+              Refresh Status
+            </button>
+            {!forceConfirm ? (
+              <button
+                onClick={() => setForceConfirm(true)}
+                disabled={precomputeStatus?.is_running}
+                className="px-3 py-1.5 text-xs bg-red-600 text-white rounded hover:bg-red-700 disabled:opacity-50"
+              >
+                Force Recompute
+              </button>
+            ) : (
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-red-600">Delete all data and recompute?</span>
+                <button
+                  onClick={() => { precomputeMut.mutate(true); setForceConfirm(false) }}
+                  disabled={precomputeMut.isPending}
+                  className="px-2 py-1 text-xs bg-red-600 text-white rounded hover:bg-red-700 disabled:opacity-50"
+                >
+                  Yes, wipe &amp; recompute
+                </button>
+                <button
+                  onClick={() => setForceConfirm(false)}
+                  className="px-2 py-1 text-xs bg-gray-200 text-gray-700 rounded hover:bg-gray-300"
+                >
+                  Cancel
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+        <div className="px-4 py-3">
+          {precomputeStatus?.is_running ? (
+            <p className="text-sm text-amber-600 animate-pulse">
+              Precomputing… ({precomputeStatus.pct_done.toFixed(0)}%)
+            </p>
+          ) : precomputeStatus ? (
+            <div className="flex flex-wrap gap-6 text-sm">
+              <div>
+                <span className="text-gray-500">Pairs computed</span>
+                <span className="ml-2 font-semibold text-gray-800">{precomputeStatus.symbol_strategy_pairs.toLocaleString()}</span>
+                <span className="ml-1 text-gray-400 text-xs">
+                  ({precomputeStatus.symbols_computed} symbols × {precomputeStatus.total_active_strategies} strategies)
+                </span>
+              </div>
+              <div>
+                <span className="text-gray-500">Last updated</span>
+                <span className="ml-2 font-semibold text-gray-800">
+                  {precomputeStatus.last_updated ?? 'never'}
+                </span>
+              </div>
+              {precomputeStatus.error && (
+                <div className="text-red-600 text-xs">Error: {precomputeStatus.error}</div>
+              )}
+            </div>
+          ) : (
+            <p className="text-sm text-gray-400">Loading…</p>
+          )}
+        </div>
+      </section>
+
+      {/* Database Management */}
+      <section className="border border-gray-200 rounded-lg bg-white shadow-sm">
+        <div className="px-4 py-3 border-b border-gray-100">
+          <h2 className="text-sm font-semibold text-gray-700">Database Management</h2>
+          <p className="text-xs text-gray-400 mt-0.5">
+            Clear cached or all data to start fresh.
+          </p>
+        </div>
+        <div className="px-4 py-3 space-y-3">
+          {/* Computed-only reset */}
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <p className="text-sm font-medium text-gray-700">Clear Computed Data</p>
+              <p className="text-xs text-gray-400">
+                Deletes strategy performance, indicator cache, scan cache, backtests, combinations.
+                Keeps price data — fast (&lt;1s).
+              </p>
+            </div>
+            {resetConfirm !== 'computed' ? (
+              <button
+                onClick={() => { setResetConfirm('computed'); setResetResult(null) }}
+                disabled={resetMut.isPending}
+                className="shrink-0 px-3 py-1.5 text-xs bg-amber-500 text-white rounded hover:bg-amber-600 disabled:opacity-50"
+              >
+                Clear Computed
+              </button>
+            ) : (
+              <div className="flex items-center gap-2 shrink-0">
+                <span className="text-xs text-amber-700">Delete computed data?</span>
+                <button
+                  onClick={() => { resetMut.mutate('computed'); setResetConfirm(null) }}
+                  disabled={resetMut.isPending}
+                  className="px-2 py-1 text-xs bg-amber-500 text-white rounded hover:bg-amber-600 disabled:opacity-50"
+                >
+                  Yes, clear it
+                </button>
+                <button
+                  onClick={() => setResetConfirm(null)}
+                  className="px-2 py-1 text-xs bg-gray-200 text-gray-700 rounded hover:bg-gray-300"
+                >
+                  Cancel
+                </button>
+              </div>
+            )}
+          </div>
+
+          <div className="border-t border-gray-100" />
+
+          {/* Full reset */}
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <p className="text-sm font-medium text-red-700">Full Reset</p>
+              <p className="text-xs text-gray-400">
+                Wipes ALL data including price history, portfolio, fundamentals.
+                Re-seeds strategies and triggers re-download (takes hours).
+              </p>
+            </div>
+            {resetConfirm !== 'full' ? (
+              <button
+                onClick={() => { setResetConfirm('full'); setResetResult(null) }}
+                disabled={resetMut.isPending}
+                className="shrink-0 px-3 py-1.5 text-xs bg-red-600 text-white rounded hover:bg-red-700 disabled:opacity-50"
+              >
+                Full Reset
+              </button>
+            ) : (
+              <div className="flex items-center gap-2 shrink-0">
+                <span className="text-xs text-red-700 font-medium">Wipe ALL data? This cannot be undone.</span>
+                <button
+                  onClick={() => { resetMut.mutate('full'); setResetConfirm(null) }}
+                  disabled={resetMut.isPending}
+                  className="px-2 py-1 text-xs bg-red-600 text-white rounded hover:bg-red-700 disabled:opacity-50"
+                >
+                  Yes, wipe everything
+                </button>
+                <button
+                  onClick={() => setResetConfirm(null)}
+                  className="px-2 py-1 text-xs bg-gray-200 text-gray-700 rounded hover:bg-gray-300"
+                >
+                  Cancel
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* Feedback */}
+          {resetMut.isPending && (
+            <p className="text-xs text-amber-600 animate-pulse">Resetting…</p>
+          )}
+          {resetResult && (
+            <p className={`text-xs ${resetResult.startsWith('Error') ? 'text-red-600' : 'text-green-600'}`}>
+              {resetResult}
+            </p>
+          )}
+        </div>
+      </section>
 
       {/* Walk-Forward Analysis */}
       <section className="mt-8 border-t pt-6">

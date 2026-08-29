@@ -7,9 +7,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security.api_key import APIKeyHeader
 from sqlalchemy import text
 
-from database import Base, engine, SessionLocal
+from database import Base, engine, SessionLocal, get_db
 from settings import settings
 import models  # noqa
+from sqlalchemy.orm import Session
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
@@ -308,6 +309,101 @@ app.add_middleware(
 @app.get("/health", tags=["system"])
 def health():
     return {"status": "ok", "version": "1.0.0"}
+
+
+# ── Tables cleared by each reset scope ────────────────────────────────────────
+_COMPUTED_TABLES = [
+    "strategy_performance",
+    "stock_indicators_daily",
+    "scan_result_cache",
+    "strategy_signals",
+    "backtest_results",
+    "backtest_trades",
+    "walk_forward_results",
+    "combination_run_log",
+    "combination_results",
+    "combination_regime_perf",
+    "strategy_combinations",
+    "intraday_alerts_sent",
+    "index_trend",
+    "fii_dii_daily",
+]
+
+_FULL_EXTRA_TABLES = [
+    "stock_prices_daily",
+    "stock_prices_intraday",
+    "index_prices_daily",
+    "fundamentals",
+    "corporate_actions",
+    "news",
+    "stocks",
+    "portfolio_holdings",
+    "trades",
+]
+
+
+@app.post("/api/v1/admin/reset-db", tags=["admin"], dependencies=[Depends(verify_api_key)])
+def reset_db(
+    scope: str = "computed",
+    db: Session = Depends(get_db),
+):
+    """Reset the database.
+
+    scope=computed (default): clears all derived/computed data — indicators,
+    strategy performance, scan cache, backtests, combinations. Keeps price data.
+    Fast (~1 second).
+
+    scope=full: wipes everything including price data and portfolio. Re-seeds
+    strategies and triggers background bootstrap (re-download takes hours).
+    """
+    if scope not in ("computed", "full"):
+        raise HTTPException(status_code=400, detail="scope must be 'computed' or 'full'")
+
+    tables = _COMPUTED_TABLES if scope == "computed" else _COMPUTED_TABLES + _FULL_EXTRA_TABLES
+
+    cleared = []
+    for tbl in tables:
+        try:
+            db.execute(text(f"DELETE FROM {tbl}"))
+            cleared.append(tbl)
+        except Exception as e:
+            logger.warning("[reset-db] skipping %s: %s", tbl, e)
+    db.commit()
+    logger.info("[reset-db] scope=%s — cleared %d tables: %s", scope, len(cleared), cleared)
+
+    bootstrap_started = False
+    if scope == "full":
+        from domains.strategies.seed import seed_strategies
+        seed_strategies(db)
+
+        threading.Thread(target=_run_bootstrap, daemon=True, name="reset-bootstrap").start()
+
+        def _reset_index_bootstrap():
+            from domains.data.index_fetcher import fetch_and_store_index_prices, compute_index_trends
+            db_bg = SessionLocal()
+            try:
+                fetch_and_store_index_prices(db_bg, days=365)
+                compute_index_trends(db_bg)
+                logger.info("[reset] index bootstrap complete")
+            except Exception:
+                logger.exception("[reset] index bootstrap failed")
+            finally:
+                db_bg.close()
+
+        threading.Thread(target=_reset_index_bootstrap, daemon=True, name="reset-index").start()
+        bootstrap_started = True
+
+    return {
+        "status": "ok",
+        "scope": scope,
+        "tables_cleared": len(cleared),
+        "bootstrap_started": bootstrap_started,
+        "message": (
+            "Computed data cleared. You can now run Force Recompute to rebuild strategy performance."
+            if scope == "computed"
+            else "Full reset complete. Price data download started in background — this may take several hours."
+        ),
+    }
 
 
 from domains.data.router import router as data_router  # noqa: E402
