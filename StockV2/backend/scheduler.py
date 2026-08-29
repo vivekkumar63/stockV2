@@ -344,21 +344,20 @@ def _weekly_precompute():
 
 
 def _intraday_digest():
-    """Scan all stocks, send top BUY signals + sell alerts for held positions to Telegram."""
+    """Read today's stored BUY signals and send top 10 to Telegram.
+
+    Does NOT re-run scan_all — signals are already in strategy_signals from
+    _intraday_scan which fires at the same 15-min cadence. Reading from DB
+    avoids 353 × 77 redundant strategy computations per digest.
+    """
     from database import SessionLocal
-    from domains.strategies.engine import StrategyEngine
-    from domains.data.nse_universe import NSE_SYMBOLS
     from domains.strategies.service import StrategyService
     from domains.alerts.telegram import AlertService
 
     today = ist_today()
+    today_str = today.strftime("%Y-%m-%d")
     db = SessionLocal()
     try:
-        engine = StrategyEngine(db)
-        scan_count = len(engine.scan_all(NSE_SYMBOLS, today))
-        logger.info("[scheduler] intraday_digest scan: %d signals generated", scan_count)
-
-        today_str = today.strftime("%Y-%m-%d")
         signals = StrategyService(db).get_today_signals(signal_date=today_str)
         buy_signals = [s for s in signals if s["signal_type"] == "BUY"]
         # Only suggest stocks where historical win rate >= 40% (skip if no history yet)
@@ -368,7 +367,8 @@ def _intraday_digest():
         ]
         top_10 = sorted(qualified, key=lambda x: x.get("confidence_score") or 0, reverse=True)[:10]
         AlertService().send_daily_digest(top_10, scan_date=today)
-        logger.info("[scheduler] intraday_digest sent: %d buy signals", len(top_10))
+        logger.info("[scheduler] intraday_digest sent: %d buy signals from %d stored",
+                    len(top_10), len(buy_signals))
 
         # Also fire sell alerts for any held positions
         _send_sell_alerts_for_holdings(db)
