@@ -15,6 +15,7 @@ from domains.backtest.simulator import BacktestSimulator, SimTrade
 from domains.data.indicator_cache import IndicatorCache
 from domains.data.indicators import IndicatorEngine
 from domains.strategies.engine import ALL_STRATEGIES
+from settings import settings
 
 logger = logging.getLogger(__name__)
 
@@ -327,6 +328,9 @@ class BacktestRunner:
                 text("SELECT DISTINCT symbol FROM stock_prices_daily ORDER BY symbol")
             ).fetchall()
         ]
+        if settings.dev_symbol_limit > 0:
+            symbols = symbols[:settings.dev_symbol_limit]
+            logger.warning("[precompute_all] DEV MODE: capped to %d symbols", settings.dev_symbol_limit)
 
         # ── 2. Build indicator cache ──────────────────────────────────────────
         # Strategy: split into parallel compute/load then sequential DB write.

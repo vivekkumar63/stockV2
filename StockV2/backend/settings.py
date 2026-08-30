@@ -31,6 +31,9 @@ class Settings(BaseSettings):
     min_confidence_for_alert: float = 0.65
     max_ai_signals_per_day: int = 10
 
+    # Dev / Testing
+    dev_symbol_limit: int = 0  # 0 = all symbols; set e.g. 20 in .env to cap for fast local testing
+
     # App
     host: str = "127.0.0.1"
     port: int = 8000
