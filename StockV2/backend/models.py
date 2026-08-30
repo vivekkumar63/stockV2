@@ -2,7 +2,7 @@ from datetime import date, datetime
 from typing import Optional
 
 from sqlalchemy import (
-    Boolean, Date, DateTime, Float, Index, Integer,
+    BigInteger, Boolean, Date, DateTime, Float, Index, Integer,
     String, Text, UniqueConstraint, text as sa_text,
 )
 from sqlalchemy.orm import Mapped, mapped_column
@@ -40,7 +40,7 @@ class StockPriceDaily(Base):
     high: Mapped[float] = mapped_column(Float)
     low: Mapped[float] = mapped_column(Float)
     close: Mapped[float] = mapped_column(Float)
-    volume: Mapped[int] = mapped_column(Integer)
+    volume: Mapped[int] = mapped_column(BigInteger)
     adj_close: Mapped[Optional[float]] = mapped_column(Float)
     data_source: Mapped[str] = mapped_column(String(20), default="yfinance")
 
@@ -59,7 +59,7 @@ class StockPriceIntraday(Base):
     high: Mapped[float] = mapped_column(Float)
     low: Mapped[float] = mapped_column(Float)
     close: Mapped[float] = mapped_column(Float)
-    volume: Mapped[int] = mapped_column(Integer)
+    volume: Mapped[int] = mapped_column(BigInteger)
     interval: Mapped[str] = mapped_column(String(5), default="15m")
 
 

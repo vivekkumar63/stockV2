@@ -246,6 +246,17 @@ async def lifespan(app: FastAPI):
             _conn.execute(text(f"ALTER TABLE stock_indicators_daily ADD COLUMN IF NOT EXISTS {_col} REAL"))
         _conn.commit()
 
+    # Migrate volume columns to BIGINT — some stocks (e.g. PCJEWELLER) exceed INT4 max
+    try:
+        with engine.connect() as _conn:
+            for _tbl in ("stock_prices_daily", "stock_prices_intraday"):
+                _conn.execute(text(
+                    f"ALTER TABLE {_tbl} ALTER COLUMN volume TYPE BIGINT"
+                ))
+            _conn.commit()
+    except Exception as _e:
+        logger.warning("[migration] volume BIGINT upgrade skipped: %s", _e)
+
     # Cache invalidation: if lorentzian_pred is NULL for all rows, the cache was built
     # with the old schema — clear it so the startup precompute rebuilds all 91 columns.
     try:
