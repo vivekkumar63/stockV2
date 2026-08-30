@@ -17,7 +17,7 @@ from domains.combinations.reliability import ReliabilityScorer, ReliabilityResul
 from domains.combinations.sensitivity import SensitivityAnalyzer
 from domains.combinations.explanations import ExplanationGenerator
 from domains.backtest.simulator import BacktestSimulator
-from domains.data.indicators import IndicatorEngine
+from domains.data.indicator_cache import IndicatorCache
 from ist import ist_now
 
 logger = logging.getLogger(__name__)
@@ -66,12 +66,16 @@ class CombinationEngine:
             combos = ComboSearch(candidates, self.config.search).generate_combinations()
             logger.info("[engine] %d combinations to evaluate", len(combos))
 
-            # Step 4: Load price data for symbols
+            # Step 4: Load price data + indicators for symbols (indicators loaded once,
+            # reused for every combo — avoids N_combos × N_symbols recomputes)
             logger.info("[engine] Step 4: Loading price data")
             symbols_data = self._load_symbols_data()
             if not symbols_data:
                 self._fail_run(run_id, "No price data available")
                 return run_id
+
+            logger.info("[engine] Step 4b: Loading indicator cache for %d symbols", len(symbols_data))
+            indicators_data = self._load_indicators_data(symbols_data)
 
             # Steps 5-6: Backtest + extended metrics per combo
             logger.info("[engine] Steps 5-6: Backtesting combinations")
@@ -79,7 +83,7 @@ class CombinationEngine:
             for idx, combo in enumerate(combos):
                 if idx % max(1, len(combos) // 10) == 0:
                     logger.info("[engine] Progress: %d/%d combinations", idx, len(combos))
-                result = self._evaluate_combo(combo, symbols_data)
+                result = self._evaluate_combo(combo, symbols_data, indicators_data)
                 if result:
                     combo_results.append(result)
 
@@ -108,7 +112,8 @@ class CombinationEngine:
                 try:
                     sens_score = self.sensitivity_analyzer.test(
                         cr["combination"], symbols_data,
-                        cr["oos_from"], cr["oos_to"]
+                        cr["oos_from"], cr["oos_to"],
+                        df_ind_map=indicators_data,
                     )
                     cr["sensitivity_score"] = sens_score
                 except Exception:
@@ -144,7 +149,12 @@ class CombinationEngine:
 
         return run_id
 
-    def _evaluate_combo(self, combination: list, symbols_data: dict) -> Optional[dict]:
+    def _evaluate_combo(
+        self,
+        combination: list,
+        symbols_data: dict,
+        indicators_data: dict[str, pd.DataFrame],
+    ) -> Optional[dict]:
         """Run backtests for train/val/oos periods for a single combination."""
         all_train, all_val, all_oos = [], [], []
         train_from_date = val_from_date = oos_from_date = None
@@ -152,6 +162,9 @@ class CombinationEngine:
 
         for symbol, prices_df in symbols_data.items():
             if len(prices_df) < 50:
+                continue
+            df_ind = indicators_data.get(symbol)
+            if df_ind is None:
                 continue
             dates = prices_df["date"].values
             n = len(dates)
@@ -171,7 +184,6 @@ class CombinationEngine:
                 oos_from_date, oos_to_date = o_from, o_to
 
             try:
-                df_ind = IndicatorEngine.compute(prices_df)
                 train_trades = self.simulator.run(
                     symbol, prices_df, t_from, t_to, combination,
                     initial_capital=self.config.initial_capital,
@@ -233,6 +245,20 @@ class CombinationEngine:
             "reliability_result": None,
             "explanation": None,
         }
+
+    def _load_indicators_data(self, symbols_data: dict) -> dict[str, pd.DataFrame]:
+        """Use IndicatorCache to load precomputed indicators for all symbols.
+        Reads from stock_indicators_daily if current; computes+stores if stale.
+        Called ONCE before the combo loop so indicators are not recomputed per combo."""
+        cache = IndicatorCache(self.db)
+        result: dict[str, pd.DataFrame] = {}
+        for symbol, prices_df in symbols_data.items():
+            try:
+                result[symbol] = cache.get(symbol, prices_df)
+            except Exception:
+                logger.warning("[engine] indicator load failed for %s, skipping", symbol)
+        logger.info("[engine] indicators ready for %d/%d symbols", len(result), len(symbols_data))
+        return result
 
     def _load_symbols_data(self) -> dict[str, pd.DataFrame]:
         """Load price data for up to symbols_limit symbols in a single bulk query."""

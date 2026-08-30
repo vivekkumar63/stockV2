@@ -9,6 +9,7 @@ The returned DataFrame matches IndicatorEngine.compute() output exactly —
 pass it as _df_ind_precomputed to BacktestSimulator.run() for zero recomputation.
 """
 import logging
+import time
 
 import numpy as np
 import pandas as pd
@@ -132,6 +133,11 @@ class IndicatorCache:
         if not batch:
             return
 
-        self.db.execute(text(_INS), batch)
-        self.db.commit()
+        # Write in chunks so the write lock is released between batches,
+        # allowing UI requests (scan, backtest) to slip in.
+        _CHUNK = 500
+        for i in range(0, len(batch), _CHUNK):
+            self.db.execute(text(_INS), batch[i : i + _CHUNK])
+            self.db.commit()
+            time.sleep(0)   # explicit GIL/lock yield between chunks
         logger.info("[IndicatorCache] %s: stored %d rows", symbol, len(batch))

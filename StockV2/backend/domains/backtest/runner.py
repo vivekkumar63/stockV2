@@ -191,7 +191,8 @@ class BacktestRunner:
             df = pd.DataFrame([dict(r._mapping) for r in rows])
             df["date"] = pd.to_datetime(df["date"]).dt.date
             try:
-                df_ind = IndicatorEngine.compute(df)
+                # Use cache — reads from DB if precomputed (instant), else computes+stores.
+                df_ind = IndicatorCache(self.db).get(symbol, df)
             except Exception as e:
                 logger.warning("[scan] %s: indicator compute failed: %s", symbol, e)
                 continue
@@ -339,7 +340,8 @@ class BacktestRunner:
         #   • Symbols needing recompute → worker loads prices + runs IndicatorEngine.
         #   • Main thread writes newly computed rows to DB (no lock contention).
         t_cache = time.time()
-        n_workers = min(max(os.cpu_count() or 4, 4), 16)
+        # Leave at least half the cores free for FastAPI request handlers.
+        n_workers = max(2, (os.cpu_count() or 4) // 2)
 
         symbols_to_process = [
             s for s in symbols
@@ -490,18 +492,22 @@ class BacktestRunner:
                     len(results), time.time() - t_compute)
         logger.info("[precompute_all] phase 4 — writing %d rows to DB", len(results))
 
-        # ── 4. Write all results (single-threaded, no lock contention) ───────
+        # ── 4. Write all results — small batches so UI requests can slip in ────
+        # Commit every 50 rows + sleep 10ms between commits. This releases the
+        # SQLite write lock frequently so scan/backtest from the UI never waits
+        # longer than a single 50-row transaction (~50ms).
+        _INS_PERF = text("""
+            INSERT OR REPLACE INTO strategy_performance
+                (strategy_id, symbol, total_trades, win_rate, cagr,
+                 sharpe_ratio, max_drawdown, profit_factor, total_pnl,
+                 computed_at, to_date)
+            VALUES (:sid, :sym, :tt, :wr, :cagr, :sharpe, :dd, :pf, :tpnl,
+                    datetime('now'), :to_date)
+        """)
         count = 0
         for symbol, sid, m, to_date_str in results:
             self.db.execute(
-                text("""
-                    INSERT OR REPLACE INTO strategy_performance
-                        (strategy_id, symbol, total_trades, win_rate, cagr,
-                         sharpe_ratio, max_drawdown, profit_factor, total_pnl,
-                         computed_at, to_date)
-                    VALUES (:sid, :sym, :tt, :wr, :cagr, :sharpe, :dd, :pf, :tpnl,
-                            datetime('now'), :to_date)
-                """),
+                _INS_PERF,
                 {
                     "sid": sid, "sym": symbol,
                     "tt": m["total_trades"], "wr": m["win_rate"],
@@ -511,8 +517,9 @@ class BacktestRunner:
                 },
             )
             count += 1
-            if count % 200 == 0:
+            if count % 50 == 0:
                 self.db.commit()
+                time.sleep(0.01)  # 10ms yield — let UI writes through
 
         self.db.commit()
         logger.info("[precompute_all] done — %d pairs written in %.1fs total",

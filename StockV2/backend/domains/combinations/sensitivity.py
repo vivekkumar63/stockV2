@@ -5,7 +5,6 @@ from datetime import date
 
 import pandas as pd
 
-from domains.data.indicators import IndicatorEngine
 
 logger = logging.getLogger(__name__)
 
@@ -18,16 +17,15 @@ class SensitivityAnalyzer:
         from_date: date,
         to_date: date,
         base_threshold: float = 0.65,
+        df_ind_map: dict[str, pd.DataFrame] | None = None,
     ) -> float:
         """Test stability of a combination across 5 consensus threshold variations.
 
         Returns sensitivity score 0-100 where higher = more stable.
+        df_ind_map: pre-loaded indicator DataFrames (pass from engine to avoid recompute).
         """
         variations = [0.80, 0.90, 1.00, 1.10, 1.20]
         thresholds = [base_threshold * v for v in variations]
-
-        # Precompute indicators once per symbol (threshold loop only varies signal aggregation)
-        df_ind_map = {sym: IndicatorEngine.compute(df) for sym, df in prices_df_map.items()}
 
         buy_counts: list[int] = []
 
@@ -68,10 +66,9 @@ class SensitivityAnalyzer:
                 continue
 
             try:
-                if df_ind_map is not None and symbol in df_ind_map:
-                    df_ind = df_ind_map[symbol]
-                else:
-                    df_ind = IndicatorEngine.compute(prices_df)  # compute on full history for warmup
+                if df_ind_map is None or symbol not in df_ind_map:
+                    continue  # skip if no indicators — engine always passes them in
+                df_ind = df_ind_map[symbol]
                 df_ind_range = df_ind[df_ind["date"] >= from_date].reset_index(drop=True)
             except Exception:
                 continue
