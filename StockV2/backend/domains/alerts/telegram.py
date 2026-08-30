@@ -164,3 +164,28 @@ class AlertService:
             f"{fii_dii_line}"
         )
         return self.send(text)
+
+    def send_special_scan_alerts(self, signals: list[dict], scan_date: Optional[date] = None) -> bool:
+        """Send BUY signals from Special Strategies scan."""
+        if not signals:
+            return True
+        today = scan_date or ist_today()
+        lines = [
+            f"<b>⭐ Special Strategies — {today.strftime('%d %b %Y')}</b>",
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+            f"\n<b>BUY SIGNALS ({len(signals)}):</b>",
+        ]
+        for sig in signals[:10]:
+            conf = int((sig.get("confidence") or 0) * 100)
+            price = sig.get("price")
+            strategy = sig.get("strategy_name", "")
+            conditions = sig.get("conditions_met") or []
+            why = " | ".join(conditions[:2]) if conditions else strategy
+            price_str = f"₹{price:,.2f}" if price else "—"
+            lines.append(
+                f"\n🟢 <b>{sig['symbol']}</b> — {conf}% confidence\n"
+                f"   📌 {strategy}\n"
+                f"   💰 Price: {price_str}\n"
+                f"   💡 <i>{why}</i>"
+            )
+        return self.send("\n".join(lines))

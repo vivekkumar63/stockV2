@@ -193,6 +193,80 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning("intraday/fii_dii table migration skipped: %s", e)
 
+    # Special Strategies tables
+    try:
+        with engine.connect() as _conn:
+            _conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS special_strategy_performance (
+                    id                   SERIAL PRIMARY KEY,
+                    special_strategy_id  INTEGER NOT NULL,
+                    symbol               VARCHAR(20) NOT NULL,
+                    total_trades         INTEGER DEFAULT 0,
+                    win_rate             REAL,
+                    cagr                 REAL,
+                    sharpe_ratio         REAL,
+                    max_drawdown         REAL,
+                    profit_factor        REAL,
+                    total_pnl            REAL DEFAULT 0,
+                    avg_pnl_pct          REAL,
+                    to_date              DATE,
+                    computed_at          TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(special_strategy_id, symbol)
+                )
+            """))
+            _conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS idx_sp_perf_strategy ON special_strategy_performance (special_strategy_id)"
+            ))
+            _conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS special_strategies (
+                    id          SERIAL PRIMARY KEY,
+                    name        VARCHAR(100) UNIQUE NOT NULL,
+                    description TEXT,
+                    is_active   BOOLEAN DEFAULT true,
+                    created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """))
+            _conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS special_backtest_results (
+                    id                   SERIAL PRIMARY KEY,
+                    special_strategy_id  INTEGER NOT NULL,
+                    symbol               VARCHAR(20) NOT NULL,
+                    from_date            DATE NOT NULL,
+                    to_date              DATE NOT NULL,
+                    total_trades         INTEGER DEFAULT 0,
+                    win_rate             REAL,
+                    total_pnl            REAL DEFAULT 0,
+                    avg_pnl_pct          REAL,
+                    ran_at               TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """))
+            _conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS special_backtest_trades (
+                    id                  SERIAL PRIMARY KEY,
+                    backtest_result_id  INTEGER NOT NULL,
+                    symbol              VARCHAR(20) NOT NULL,
+                    entry_date          DATE,
+                    entry_price         REAL,
+                    exit_date           DATE,
+                    exit_price          REAL,
+                    quantity            INTEGER,
+                    pnl                 REAL,
+                    pnl_pct             REAL,
+                    exit_reason         VARCHAR(30),
+                    holding_days        INTEGER
+                )
+            """))
+            _conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS idx_sp_bt_results ON special_backtest_results (special_strategy_id, symbol)"
+            ))
+            _conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS idx_sp_bt_trades ON special_backtest_trades (backtest_result_id)"
+            ))
+            _conn.commit()
+        logger.info("Special Strategies tables verified")
+    except Exception as e:
+        logger.warning("special_strategies tables migration skipped: %s", e)
+
     # Indicator cache table — wide table storing IndicatorEngine output per (symbol, date)
     try:
         from domains.data.indicator_cache import IND_COLS as _IND_COLS
@@ -293,9 +367,11 @@ async def lifespan(app: FastAPI):
         logger.warning("[migration] Indicator cache invalidation check failed: %s", e)
 
     from domains.strategies.seed import seed_strategies
+    from domains.special_strategies.seed import seed_special_strategies
     db = SessionLocal()
     try:
         seed_strategies(db)
+        seed_special_strategies(db)
     finally:
         db.close()
 
@@ -506,3 +582,6 @@ app.include_router(intelligence_router, prefix="/api/v1", dependencies=[Depends(
 
 from domains.combinations.router import router as combinations_router  # noqa: E402
 app.include_router(combinations_router, prefix="/api/v1", dependencies=[Depends(verify_api_key)])
+
+from domains.special_strategies.router import router as special_router  # noqa: E402
+app.include_router(special_router, prefix="/api/v1", dependencies=[Depends(verify_api_key)])

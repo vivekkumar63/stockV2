@@ -12,6 +12,7 @@ export function NavBar() {
       <NavLink to="/scanner" className={link}>Scanner</NavLink>
       <NavLink to="/strategy-match" className={link}>Strategy Match</NavLink>
       <NavLink to="/combinations" className={link}>Combos</NavLink>
+      <NavLink to="/special-strategies" className={link}>Special</NavLink>
     </nav>
   )
 }

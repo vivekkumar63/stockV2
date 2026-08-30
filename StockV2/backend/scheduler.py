@@ -340,6 +340,7 @@ def _intraday_digest():
     from database import SessionLocal
     from domains.strategies.service import StrategyService
     from domains.alerts.telegram import AlertService
+    from domains.special_strategies.scanner import SpecialScanner
 
     today = ist_today()
     today_str = today.strftime("%Y-%m-%d")
@@ -353,9 +354,19 @@ def _intraday_digest():
             if s.get("historical_win_rate") is None or (s["historical_win_rate"] or 0) >= 0.40
         ]
         top_10 = sorted(qualified, key=lambda x: x.get("confidence_score") or 0, reverse=True)[:10]
-        AlertService().send_daily_digest(top_10, scan_date=today)
+        alert_svc = AlertService()
+        alert_svc.send_daily_digest(top_10, scan_date=today)
         logger.info("[scheduler] intraday_digest sent: %d buy signals from %d stored",
                     len(top_10), len(buy_signals))
+
+        # Special Strategies scan — send BUY signals separately
+        try:
+            special_signals = SpecialScanner(db).scan()
+            if special_signals:
+                alert_svc.send_special_scan_alerts(special_signals, scan_date=today)
+                logger.info("[scheduler] special_digest: %d special buy signals sent", len(special_signals))
+        except Exception:
+            logger.exception("[scheduler] special strategy scan failed")
 
         # Also fire sell alerts for any held positions
         _send_sell_alerts_for_holdings(db)

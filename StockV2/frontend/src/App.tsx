@@ -7,6 +7,7 @@ import { BacktestPage } from './pages/BacktestPage'
 import { ScannerPage } from './pages/ScannerPage'
 import { StrategyMatchPage } from './pages/StrategyMatchPage'
 import { CombinationsPage } from './pages/CombinationsPage'
+import { SpecialStrategiesPage } from './pages/SpecialStrategiesPage'
 
 const queryClient = new QueryClient()
 
@@ -24,6 +25,7 @@ export function App() {
               <Route path="/scanner" element={<ScannerPage />} />
               <Route path="/strategy-match" element={<StrategyMatchPage />} />
               <Route path="/combinations" element={<CombinationsPage />} />
+              <Route path="/special-strategies" element={<SpecialStrategiesPage />} />
             </Routes>
           </main>
         </div>
