@@ -222,11 +222,25 @@ def trigger_analysis(db: Session = Depends(get_db)):
     def _run():
         from database import SessionLocal
         bg_db = SessionLocal()
+        run_id = None
         try:
             engine = CombinationEngine(bg_db)
-            engine.run_full_analysis()
+            run_id = engine.run_full_analysis()
         except Exception:
             logger.exception("[combinations] Background analysis failed")
+            # Safety net: engine._fail_run may have already run, but if the session
+            # was broken it could have silently failed — use a fresh connection here.
+            if run_id is not None:
+                try:
+                    fix_db = SessionLocal()
+                    fix_db.execute(
+                        text("UPDATE combination_run_log SET status='failed', completed_at=NOW(), error_message='Unexpected crash' WHERE id=:rid AND status='running'"),
+                        {"rid": run_id},
+                    )
+                    fix_db.commit()
+                    fix_db.close()
+                except Exception:
+                    pass
         finally:
             bg_db.close()
 
@@ -234,6 +248,22 @@ def trigger_analysis(db: Session = Depends(get_db)):
     thread.start()
 
     return {"status": "started", "message": "Analysis running in background"}
+
+
+# ── POST /combinations/reset-stuck ───────────────────────────────────────────
+
+@router.post("/combinations/reset-stuck")
+def reset_stuck_runs(db: Session = Depends(get_db)):
+    """Mark any stuck 'running' runs as 'failed' so the page unblocks."""
+    result = db.execute(text("""
+        UPDATE combination_run_log
+        SET status = 'failed', completed_at = NOW(),
+            error_message = 'Manually reset — run was stuck'
+        WHERE status = 'running'
+    """))
+    db.commit()
+    reset_count = result.rowcount
+    return {"reset": reset_count, "message": f"{reset_count} stuck run(s) marked as failed"}
 
 
 # ── GET /combinations/{combination_id} ────────────────────────────────────────

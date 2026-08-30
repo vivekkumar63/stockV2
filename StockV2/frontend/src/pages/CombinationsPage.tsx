@@ -1,7 +1,7 @@
 // frontend/src/pages/CombinationsPage.tsx
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
-  getRunStatus, getCombinationRankings, getBestCombinations, triggerAnalysis,
+  getRunStatus, getCombinationRankings, getBestCombinations, triggerAnalysis, resetStuckRuns,
   type CombinationSummary,
 } from '../api/combinations'
 import { getScanStatus, triggerPrecompute, getPrecomputeStatus } from '../api/backtest'
@@ -48,6 +48,11 @@ export function CombinationsPage() {
 
   const trigger = useMutation({
     mutationFn: triggerAnalysis,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['combinations-status'] }),
+  })
+
+  const resetStuck = useMutation({
+    mutationFn: resetStuckRuns,
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['combinations-status'] }),
   })
 
@@ -106,10 +111,20 @@ export function CombinationsPage() {
       <div className="p-6">
         <div className="flex justify-between items-center mb-4">
           <h1 className="text-2xl font-bold">Strategy Combinations</h1>
-          {runButton}
+          <div className="flex gap-2">
+            {runButton}
+            <button
+              onClick={() => resetStuck.mutate()}
+              disabled={resetStuck.isPending}
+              title="Use if analysis has been stuck for more than a few minutes"
+              className="px-3 py-1.5 text-sm border border-red-300 text-red-600 rounded hover:bg-red-50 disabled:opacity-50"
+            >
+              {resetStuck.isPending ? 'Resetting…' : 'Reset Stuck'}
+            </button>
+          </div>
         </div>
         {precomputeBanner}
-        <p className="text-gray-500">Analysis in progress…</p>
+        <p className="text-gray-500">Analysis in progress… (if this doesn't complete, click Reset Stuck)</p>
       </div>
     )
   }

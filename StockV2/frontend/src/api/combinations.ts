@@ -89,3 +89,6 @@ export const getCombinationDetail = (id: number): Promise<CombinationDetail> =>
 
 export const triggerAnalysis = (): Promise<{ status: string; message?: string; run_id?: number | null }> =>
   apiFetch('/combinations/analyze', { method: 'POST' })
+
+export const resetStuckRuns = (): Promise<{ reset: number; message: string }> =>
+  apiFetch('/combinations/reset-stuck', { method: 'POST' })
