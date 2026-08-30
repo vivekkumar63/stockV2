@@ -10,7 +10,6 @@ import {
   getSpecialPrecomputeStatus,
   getSpecialScanResults,
   type SpecialScanResult,
-  type SpecialBacktestResult,
   type SpecialTrade,
   type SpecialPerformanceRow,
 } from '../api/special'
