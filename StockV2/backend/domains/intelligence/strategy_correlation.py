@@ -48,11 +48,11 @@ class StrategyCorrelationEngine:
         # Get signal counts per strategy
         count_rows = db.execute(
             text("""
-                SELECT strategy_id, COUNT(DISTINCT symbol || '|' || signal_date) AS cnt
+                SELECT strategy_id, COUNT(DISTINCT symbol || '|' || signal_date::text) AS cnt
                 FROM strategy_signals
                 WHERE signal_type = 'BUY'
                 GROUP BY strategy_id
-                HAVING cnt >= :min_sigs
+                HAVING COUNT(DISTINCT symbol || '|' || signal_date::text) >= :min_sigs
             """),
             {"min_sigs": MIN_SIGNALS_FOR_CORRELATION},
         ).fetchall()
