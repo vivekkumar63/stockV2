@@ -11,10 +11,12 @@ Threshold values are documented constants — not magic numbers.
 """
 
 import logging
+import math
 from dataclasses import dataclass
 from datetime import date, timedelta
 from typing import Optional
 
+import numpy as np
 import pandas as pd
 from sqlalchemy.orm import Session
 from sqlalchemy import text
@@ -117,8 +119,10 @@ class MarketRegimeEngine:
             # ATR approximation: mean high-low range over last 14 bars (Wilder-free, breadth use)
             highs = grp["high"].values[-15:].astype(float)
             lows  = grp["low"].values[-15:].astype(float)
-            atr_approx = float((highs - lows).mean())
+            atr_approx = float(np.nanmean(highs - lows))
             atr_ratio  = atr_approx / last_close * 100
+            if not math.isfinite(atr_ratio):
+                atr_ratio = 0.0
 
             # Advance/decline: did the stock close above open on the latest day?
             last_row = grp[grp["date"] == latest_date]
@@ -240,13 +244,17 @@ class MarketRegimeEngine:
         return [self._from_row(dict(r._mapping)) for r in rows]
 
     def _from_row(self, row: dict) -> RegimeResult:
+        def _f(v) -> float:
+            f = float(v) if v is not None else 0.0
+            return f if math.isfinite(f) else 0.0
+
         return RegimeResult(
             regime=row["regime"],
-            confidence=row["confidence"] or 0.0,
-            pct_above_sma50=row["pct_above_sma50"] or 0.0,
-            pct_above_sma200=row["pct_above_sma200"] or 0.0,
-            advance_decline_ratio=row["advance_decline_ratio"] or 0.0,
-            avg_atr_ratio=row["avg_atr_ratio"] or 0.0,
+            confidence=_f(row["confidence"]),
+            pct_above_sma50=_f(row["pct_above_sma50"]),
+            pct_above_sma200=_f(row["pct_above_sma200"]),
+            advance_decline_ratio=_f(row["advance_decline_ratio"]),
+            avg_atr_ratio=_f(row["avg_atr_ratio"]),
             stocks_counted=row["stocks_counted"] or 0,
             as_of_date=date.fromisoformat(str(row["date"])[:10]),
         )
