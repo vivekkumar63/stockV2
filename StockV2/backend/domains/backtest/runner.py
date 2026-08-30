@@ -225,12 +225,18 @@ class BacktestRunner:
             for sym, sid, m in new_entries:
                 self.db.execute(
                     text("""
-                        INSERT OR REPLACE INTO scan_result_cache
+                        INSERT INTO scan_result_cache
                             (symbol, strategy_id, from_date, to_date, initial_capital,
                              stop_loss_pct, target_pct, total_trades, win_rate, cagr,
                              sharpe_ratio, max_drawdown, profit_factor, total_pnl, cached_at)
                         VALUES (:sym, :sid, :fd, :td, :cap, :sl, :tgt,
-                                :tt, :wr, :cagr, :sharpe, :dd, :pf, :tpnl, datetime('now'))
+                                :tt, :wr, :cagr, :sharpe, :dd, :pf, :tpnl, CURRENT_TIMESTAMP)
+                        ON CONFLICT (symbol, strategy_id, from_date, to_date, initial_capital, stop_loss_pct, target_pct)
+                        DO UPDATE SET
+                            total_trades=EXCLUDED.total_trades, win_rate=EXCLUDED.win_rate,
+                            cagr=EXCLUDED.cagr, sharpe_ratio=EXCLUDED.sharpe_ratio,
+                            max_drawdown=EXCLUDED.max_drawdown, profit_factor=EXCLUDED.profit_factor,
+                            total_pnl=EXCLUDED.total_pnl, cached_at=CURRENT_TIMESTAMP
                     """),
                     {
                         "sym": sym, "sid": sid,
@@ -497,12 +503,18 @@ class BacktestRunner:
         # SQLite write lock frequently so scan/backtest from the UI never waits
         # longer than a single 50-row transaction (~50ms).
         _INS_PERF = text("""
-            INSERT OR REPLACE INTO strategy_performance
+            INSERT INTO strategy_performance
                 (strategy_id, symbol, total_trades, win_rate, cagr,
                  sharpe_ratio, max_drawdown, profit_factor, total_pnl,
                  computed_at, to_date)
             VALUES (:sid, :sym, :tt, :wr, :cagr, :sharpe, :dd, :pf, :tpnl,
-                    datetime('now'), :to_date)
+                    CURRENT_TIMESTAMP, :to_date)
+            ON CONFLICT (strategy_id, symbol) DO UPDATE SET
+                total_trades=EXCLUDED.total_trades, win_rate=EXCLUDED.win_rate,
+                cagr=EXCLUDED.cagr, sharpe_ratio=EXCLUDED.sharpe_ratio,
+                max_drawdown=EXCLUDED.max_drawdown, profit_factor=EXCLUDED.profit_factor,
+                total_pnl=EXCLUDED.total_pnl, computed_at=CURRENT_TIMESTAMP,
+                to_date=EXCLUDED.to_date
         """)
         count = 0
         for symbol, sid, m, to_date_str in results:
@@ -599,12 +611,18 @@ class BacktestRunner:
                 m = compute_metrics(trades, 500_000.0, from_date, to_date)
                 self.db.execute(
                     text("""
-                        INSERT OR REPLACE INTO strategy_performance
+                        INSERT INTO strategy_performance
                             (strategy_id, symbol, total_trades, win_rate, cagr,
                              sharpe_ratio, max_drawdown, profit_factor, total_pnl,
                              computed_at, to_date)
                         VALUES (:sid, :sym, :tt, :wr, :cagr, :sharpe, :dd, :pf, :tpnl,
-                                datetime('now'), :to_date)
+                                CURRENT_TIMESTAMP, :to_date)
+                        ON CONFLICT (strategy_id, symbol) DO UPDATE SET
+                            total_trades=EXCLUDED.total_trades, win_rate=EXCLUDED.win_rate,
+                            cagr=EXCLUDED.cagr, sharpe_ratio=EXCLUDED.sharpe_ratio,
+                            max_drawdown=EXCLUDED.max_drawdown, profit_factor=EXCLUDED.profit_factor,
+                            total_pnl=EXCLUDED.total_pnl, computed_at=CURRENT_TIMESTAMP,
+                            to_date=EXCLUDED.to_date
                     """),
                     {
                         "sid": strategy_id, "sym": symbol,
@@ -644,7 +662,7 @@ class BacktestRunner:
                      avg_return_pct, full_metrics_json, ran_at)
                 VALUES (:sid, :sym, :fd, :td,
                         :tt, :wr, :cagr, :sharpe,
-                        NULL, :dd, :pf, :ar, :fmj, datetime('now'))
+                        NULL, :dd, :pf, :ar, :fmj, CURRENT_TIMESTAMP)
             """),
             {
                 "sid": strategy_id,

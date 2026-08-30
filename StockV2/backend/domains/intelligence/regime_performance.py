@@ -72,9 +72,12 @@ class RegimePerformanceEngine:
         for r in results:
             db.execute(
                 text("""
-                    INSERT OR REPLACE INTO strategy_regime_performance
+                    INSERT INTO strategy_regime_performance
                     (strategy_id, regime, total_trades, win_rate, avg_pnl_pct, computed_at)
                     VALUES (:sid, :regime, :n, :wr, :pnl, CURRENT_TIMESTAMP)
+                    ON CONFLICT (strategy_id, regime) DO UPDATE SET
+                        total_trades=EXCLUDED.total_trades, win_rate=EXCLUDED.win_rate,
+                        avg_pnl_pct=EXCLUDED.avg_pnl_pct, computed_at=CURRENT_TIMESTAMP
                 """),
                 {
                     "sid": r.strategy_id, "regime": r.regime, "n": r.total_trades,

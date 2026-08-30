@@ -1,33 +1,14 @@
-from pathlib import Path
-
-from sqlalchemy import create_engine, event, text
+from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, DeclarativeBase
-from sqlalchemy.pool import NullPool
 
 from settings import settings
 
-# Ensure parent directory exists (important when db_path is e.g. data/stockv2.db)
-Path(settings.db_path).parent.mkdir(parents=True, exist_ok=True)
-
-DATABASE_URL = f"sqlite:///{settings.db_path}"
-
 engine = create_engine(
-    DATABASE_URL,
-    connect_args={"check_same_thread": False},
-    poolclass=NullPool,  # SQLite: connections are cheap file handles; no benefit to pooling
+    settings.database_url,
+    pool_size=10,
+    max_overflow=20,
+    pool_pre_ping=True,   # drops stale connections before use
 )
-
-
-@event.listens_for(engine, "connect")
-def _set_sqlite_pragmas(dbapi_connection, _):
-    cursor = dbapi_connection.cursor()
-    cursor.execute("PRAGMA journal_mode=WAL")
-    cursor.execute("PRAGMA busy_timeout=60000")   # wait up to 60s instead of failing instantly
-    cursor.execute("PRAGMA foreign_keys=ON")
-    cursor.execute("PRAGMA synchronous=NORMAL")
-    cursor.execute("PRAGMA cache_size=-64000")
-    cursor.close()
-
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 

@@ -361,9 +361,10 @@ class CombinationEngine:
 
             try:
                 self.db.execute(text("""
-                    INSERT OR IGNORE INTO strategy_combinations
+                    INSERT INTO strategy_combinations
                         (name, strategy_ids, strategy_names, size, search_method)
                     VALUES (:name, :ids, :names, :size, 'exhaustive')
+                    ON CONFLICT (strategy_ids) DO NOTHING
                 """), {
                     "name": cr["combo_name"],
                     "ids": cr["strategy_ids_json"],

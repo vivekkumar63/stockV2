@@ -37,7 +37,7 @@ class Settings(BaseSettings):
     # App
     host: str = "127.0.0.1"
     port: int = 8000
-    db_path: str = "data/stockv2.db"
+    database_url: str = "postgresql://stockv2:stockv2@localhost:5432/stockv2"
     data_dir: Path = Path("data")
     cors_origins: list[str] = ["http://localhost:3000", "http://localhost"]
 

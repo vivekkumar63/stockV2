@@ -65,13 +65,13 @@ async def lifespan(app: FastAPI):
         with engine.connect() as _conn:
             _conn.execute(text("""
                 CREATE TABLE IF NOT EXISTS strategy_combinations (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    id SERIAL PRIMARY KEY,
                     name TEXT NOT NULL,
                     strategy_ids TEXT NOT NULL,
                     strategy_names TEXT NOT NULL,
                     size INTEGER NOT NULL,
                     search_method TEXT NOT NULL,
-                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """))
             _conn.execute(text("""
@@ -80,9 +80,9 @@ async def lifespan(app: FastAPI):
             """))
             _conn.execute(text("""
                 CREATE TABLE IF NOT EXISTS combination_run_log (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    started_at DATETIME NOT NULL,
-                    completed_at DATETIME,
+                    id SERIAL PRIMARY KEY,
+                    started_at TIMESTAMP NOT NULL,
+                    completed_at TIMESTAMP,
                     status TEXT NOT NULL DEFAULT 'running',
                     symbols_analyzed INTEGER,
                     candidates_selected INTEGER,
@@ -94,7 +94,7 @@ async def lifespan(app: FastAPI):
             """))
             _conn.execute(text("""
                 CREATE TABLE IF NOT EXISTS combination_results (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    id SERIAL PRIMARY KEY,
                     combination_id INTEGER NOT NULL REFERENCES strategy_combinations(id),
                     run_id INTEGER NOT NULL REFERENCES combination_run_log(id),
                     train_cagr REAL, train_sharpe REAL, train_win_rate REAL,
@@ -109,12 +109,12 @@ async def lifespan(app: FastAPI):
                     vs_buy_and_hold_cagr REAL, vs_best_single_cagr REAL, vs_sma_crossover_cagr REAL,
                     reliability_score REAL, reliability_label TEXT, sensitivity_score REAL,
                     explanation_json TEXT,
-                    computed_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                    computed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """))
             _conn.execute(text("""
                 CREATE TABLE IF NOT EXISTS combination_regime_perf (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    id SERIAL PRIMARY KEY,
                     combination_id INTEGER NOT NULL REFERENCES strategy_combinations(id),
                     run_id INTEGER NOT NULL REFERENCES combination_run_log(id),
                     regime TEXT NOT NULL,
@@ -131,7 +131,7 @@ async def lifespan(app: FastAPI):
         with engine.connect() as _conn:
             _conn.execute(text("""
                 CREATE TABLE IF NOT EXISTS index_prices_daily (
-                    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                    id         SERIAL PRIMARY KEY,
                     index_name TEXT NOT NULL,
                     date       DATE NOT NULL,
                     open       REAL,
@@ -144,7 +144,7 @@ async def lifespan(app: FastAPI):
             """))
             _conn.execute(text("""
                 CREATE TABLE IF NOT EXISTS index_trend (
-                    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                    id          SERIAL PRIMARY KEY,
                     index_name  TEXT NOT NULL,
                     date        DATE NOT NULL,
                     close       REAL NOT NULL,
@@ -153,7 +153,7 @@ async def lifespan(app: FastAPI):
                     above_sma20 INTEGER NOT NULL DEFAULT 0,
                     above_sma50 INTEGER NOT NULL DEFAULT 0,
                     trend_label TEXT NOT NULL,
-                    computed_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    computed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     UNIQUE(index_name, date)
                 )
             """))
@@ -167,17 +167,17 @@ async def lifespan(app: FastAPI):
         with engine.connect() as _conn:
             _conn.execute(text("""
                 CREATE TABLE IF NOT EXISTS intraday_alerts_sent (
-                    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                    id          SERIAL PRIMARY KEY,
                     symbol      TEXT NOT NULL,
                     strategy_id INTEGER NOT NULL,
                     signal_date DATE NOT NULL,
-                    alerted_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    alerted_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     UNIQUE(symbol, strategy_id, signal_date)
                 )
             """))
             _conn.execute(text("""
                 CREATE TABLE IF NOT EXISTS fii_dii_daily (
-                    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                    id              SERIAL PRIMARY KEY,
                     date            DATE NOT NULL UNIQUE,
                     fii_net_equity  REAL,
                     dii_net_equity  REAL,
@@ -185,7 +185,7 @@ async def lifespan(app: FastAPI):
                     fii_sell        REAL,
                     dii_buy         REAL,
                     dii_sell        REAL,
-                    fetched_at      DATETIME DEFAULT CURRENT_TIMESTAMP
+                    fetched_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """))
             _conn.commit()
@@ -200,11 +200,11 @@ async def lifespan(app: FastAPI):
         with engine.connect() as _conn:
             _conn.execute(text(f"""
                 CREATE TABLE IF NOT EXISTS stock_indicators_daily (
-                    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                    id          SERIAL PRIMARY KEY,
                     symbol      TEXT NOT NULL,
                     date        DATE NOT NULL,
                     {_ind_col_defs}
-                    computed_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    computed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     UNIQUE(symbol, date)
                 )
             """))
@@ -243,11 +243,8 @@ async def lifespan(app: FastAPI):
     ]
     with engine.connect() as _conn:
         for _col in _new_indicator_cols:
-            try:
-                _conn.execute(text(f"ALTER TABLE stock_indicators_daily ADD COLUMN {_col} REAL"))
-                _conn.commit()
-            except Exception:
-                pass  # column already exists
+            _conn.execute(text(f"ALTER TABLE stock_indicators_daily ADD COLUMN IF NOT EXISTS {_col} REAL"))
+        _conn.commit()
 
     # Cache invalidation: if lorentzian_pred is NULL for all rows, the cache was built
     # with the old schema — clear it so the startup precompute rebuilds all 91 columns.

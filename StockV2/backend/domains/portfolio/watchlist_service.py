@@ -16,8 +16,9 @@ class WatchlistService:
 
     def add(self, symbol: str, reason: Optional[str] = None) -> dict:
         self.db.execute(
-            text("INSERT OR IGNORE INTO watchlist (symbol, reason, added_at) "
-                 "VALUES (:sym, :reason, datetime('now'))"),
+            text("INSERT INTO watchlist (symbol, reason, added_at) "
+                 "VALUES (:sym, :reason, CURRENT_TIMESTAMP) "
+                 "ON CONFLICT (symbol) DO NOTHING"),
             {"sym": symbol.upper(), "reason": reason},
         )
         self.db.commit()

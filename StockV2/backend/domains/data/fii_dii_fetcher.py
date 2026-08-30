@@ -91,7 +91,7 @@ def fetch_and_store_fii_dii(db: Session) -> None:
                     dii_net_equity=excluded.dii_net_equity,
                     fii_buy=excluded.fii_buy, fii_sell=excluded.fii_sell,
                     dii_buy=excluded.dii_buy, dii_sell=excluded.dii_sell,
-                    fetched_at=datetime('now')
+                    fetched_at=CURRENT_TIMESTAMP
             """),
             {
                 "date":      today,

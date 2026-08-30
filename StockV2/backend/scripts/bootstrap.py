@@ -45,8 +45,9 @@ class BootstrapRunner:
     def _ensure_stock_record(self, symbol: str) -> None:
         self.db.execute(
             text("""
-                INSERT OR IGNORE INTO stocks (symbol, name, exchange, is_active, added_at)
-                VALUES (:sym, :sym, 'NSE', 1, datetime('now'))
+                INSERT INTO stocks (symbol, name, exchange, is_active, added_at)
+                VALUES (:sym, :sym, 'NSE', 1, CURRENT_TIMESTAMP)
+                ON CONFLICT (symbol) DO NOTHING
             """),
             {"sym": symbol},
         )

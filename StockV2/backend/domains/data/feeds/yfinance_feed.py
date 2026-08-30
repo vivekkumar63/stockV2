@@ -90,9 +90,10 @@ class YFinanceFeed:
             ):
                 db.execute(
                     text("""
-                        INSERT OR IGNORE INTO data_quality_log
+                        INSERT INTO data_quality_log
                             (symbol, date, issue_type, details)
                         VALUES (:sym, :dt, 'bad_tick', :det)
+                        ON CONFLICT DO NOTHING
                     """),
                     {
                         "sym": symbol,
@@ -104,9 +105,10 @@ class YFinanceFeed:
 
             db.execute(
                 text("""
-                    INSERT OR IGNORE INTO stock_prices_daily
+                    INSERT INTO stock_prices_daily
                         (symbol, date, open, high, low, close, volume, data_source)
                     VALUES (:sym, :dt, :o, :h, :l, :c, :v, 'yfinance')
+                    ON CONFLICT (symbol, date) DO NOTHING
                 """),
                 {
                     "sym": symbol, "dt": str(row_date),

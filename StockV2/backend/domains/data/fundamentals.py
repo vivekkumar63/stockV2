@@ -68,7 +68,7 @@ class FundamentalsService:
                         (symbol, pe_ratio, pb_ratio, eps, revenue, net_profit,
                          debt_equity, roe, dividend_yield, data_as_of, updated_at)
                     VALUES (:sym, :pe, :pb, :eps, :rev, :np,
-                            :de, :roe, :dy, :asof, datetime('now'))
+                            :de, :roe, :dy, :asof, CURRENT_TIMESTAMP)
                 """),
                 {
                     "sym": symbol, "pe": pe, "pb": pb, "eps": eps,

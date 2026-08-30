@@ -139,9 +139,10 @@ def _intraday_scan():
                     alert_svc.send_entry_alert(signal, live_prices[sym], fii_dii_row)
                     db.execute(
                         text("""
-                            INSERT OR IGNORE INTO intraday_alerts_sent
+                            INSERT INTO intraday_alerts_sent
                                 (symbol, strategy_id, signal_date)
                             VALUES (:sym, :sid, :date)
+                            ON CONFLICT (symbol, strategy_id, signal_date) DO NOTHING
                         """),
                         {
                             "sym":  sym,

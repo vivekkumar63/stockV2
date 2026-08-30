@@ -117,13 +117,14 @@ class FalseSignalDetector:
 
             db.execute(
                 text("""
-                    INSERT OR IGNORE INTO signal_outcomes
+                    INSERT INTO signal_outcomes
                     (signal_id, symbol, strategy_id, signal_date, signal_type,
                      price_at_signal, outcome_price, outcome_date, pnl_pct,
                      is_profitable, holding_days_actual, computed_at)
                     VALUES (:sid, :sym, :strat, :sdate, 'BUY',
                             :price, :oprice, :odate, :pnl,
                             :prof, :hdays, CURRENT_TIMESTAMP)
+                    ON CONFLICT (signal_id) DO NOTHING
                 """),
                 {
                     "sid": sig_id, "sym": symbol, "strat": strategy_id,

@@ -131,13 +131,25 @@ class StrategyEngine:
         target = price * (1 + signal.target_pct / 100) if signal.target_pct > 0 else None
         self.db.execute(
             text("""
-                INSERT OR REPLACE INTO strategy_signals
+                INSERT INTO strategy_signals
                 (symbol, strategy_id, signal_date, signal_type, price_at_signal,
                  confidence_score, risk_score, expected_upside_pct,
                  suggested_stop_loss, suggested_target, holding_period_days,
                  reasoning_json, indicators_json, created_at)
                 VALUES (:sym, :sid, :sdate, :stype, :price, :conf, :risk, :upside,
-                        :sl, :tgt, :hdays, :reasoning, :indicators, datetime('now'))
+                        :sl, :tgt, :hdays, :reasoning, :indicators, CURRENT_TIMESTAMP)
+                ON CONFLICT (symbol, strategy_id, signal_date) DO UPDATE SET
+                    signal_type=EXCLUDED.signal_type,
+                    price_at_signal=EXCLUDED.price_at_signal,
+                    confidence_score=EXCLUDED.confidence_score,
+                    risk_score=EXCLUDED.risk_score,
+                    expected_upside_pct=EXCLUDED.expected_upside_pct,
+                    suggested_stop_loss=EXCLUDED.suggested_stop_loss,
+                    suggested_target=EXCLUDED.suggested_target,
+                    holding_period_days=EXCLUDED.holding_period_days,
+                    reasoning_json=EXCLUDED.reasoning_json,
+                    indicators_json=EXCLUDED.indicators_json,
+                    created_at=CURRENT_TIMESTAMP
             """),
             {
                 "sym": symbol,

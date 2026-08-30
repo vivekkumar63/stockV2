@@ -113,7 +113,7 @@ class PaperTrader:
                     (symbol, trade_type, quantity, price, total_value, brokerage,
                      mode, strategy_id, signal_id, notes, trade_date)
                 VALUES (:sym, :tt, :qty, :price, :tv, 0, 'paper',
-                        :sid, :sigid, :notes, datetime('now'))
+                        :sid, :sigid, :notes, CURRENT_TIMESTAMP)
             """),
             {"sym": symbol, "tt": trade_type, "qty": quantity, "price": price,
              "tv": total_value, "sid": strategy_id, "sigid": signal_id, "notes": notes},
@@ -132,7 +132,7 @@ class PaperTrader:
             new_avg = round((old_qty * old_avg + quantity * price) / new_qty, 4)
             self.db.execute(
                 text("UPDATE portfolio_holdings SET quantity=:q, avg_buy_price=:a, "
-                     "last_buy_date=date('now') WHERE id=:id"),
+                     "last_buy_date=CURRENT_DATE WHERE id=:id"),
                 {"q": new_qty, "a": new_avg, "id": existing[0]},
             )
         else:
@@ -140,7 +140,7 @@ class PaperTrader:
                 text("""
                     INSERT INTO portfolio_holdings
                         (symbol, quantity, avg_buy_price, first_buy_date, last_buy_date, is_active)
-                    VALUES (:sym, :qty, :avg, date('now'), date('now'), 1)
+                    VALUES (:sym, :qty, :avg, CURRENT_DATE, CURRENT_DATE, 1)
                 """),
                 {"sym": symbol, "qty": quantity, "avg": round(price, 4)},
             )

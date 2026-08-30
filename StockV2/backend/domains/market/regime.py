@@ -209,10 +209,17 @@ class MarketRegimeEngine:
     def save(self, db: Session, r: RegimeResult) -> None:
         db.execute(
             text("""
-                INSERT OR REPLACE INTO market_regime
+                INSERT INTO market_regime
                 (date, regime, confidence, pct_above_sma50, pct_above_sma200,
                  advance_decline_ratio, avg_atr_ratio, stocks_counted, computed_at)
                 VALUES (:d, :regime, :conf, :sma50, :sma200, :adv, :atr, :n, CURRENT_TIMESTAMP)
+                ON CONFLICT (date) DO UPDATE SET
+                    regime=EXCLUDED.regime, confidence=EXCLUDED.confidence,
+                    pct_above_sma50=EXCLUDED.pct_above_sma50,
+                    pct_above_sma200=EXCLUDED.pct_above_sma200,
+                    advance_decline_ratio=EXCLUDED.advance_decline_ratio,
+                    avg_atr_ratio=EXCLUDED.avg_atr_ratio,
+                    stocks_counted=EXCLUDED.stocks_counted, computed_at=CURRENT_TIMESTAMP
             """),
             {
                 "d": str(r.as_of_date), "regime": r.regime, "conf": r.confidence,
@@ -340,10 +347,11 @@ class MarketRegimeEngine:
                 continue
             db.execute(
                 text("""
-                    INSERT OR IGNORE INTO market_regime
+                    INSERT INTO market_regime
                     (date, regime, confidence, pct_above_sma50, pct_above_sma200,
                      advance_decline_ratio, avg_atr_ratio, stocks_counted, computed_at)
                     VALUES (:d, :regime, :conf, :sma50, :sma200, :adv, :atr, :n, CURRENT_TIMESTAMP)
+                    ON CONFLICT (date) DO NOTHING
                 """),
                 {
                     "d": str(d), "regime": r.regime, "conf": r.confidence,

@@ -107,9 +107,12 @@ class StrategyCorrelationEngine:
         for p in pairs:
             db.execute(
                 text("""
-                    INSERT OR REPLACE INTO strategy_correlations
+                    INSERT INTO strategy_correlations
                     (strategy_id_a, strategy_id_b, correlation, shared_signals, computed_at)
                     VALUES (:a, :b, :corr, :shared, CURRENT_TIMESTAMP)
+                    ON CONFLICT (strategy_id_a, strategy_id_b) DO UPDATE SET
+                        correlation=EXCLUDED.correlation, shared_signals=EXCLUDED.shared_signals,
+                        computed_at=CURRENT_TIMESTAMP
                 """),
                 {"a": p.strategy_id_a, "b": p.strategy_id_b,
                  "corr": p.correlation, "shared": p.shared_signals},

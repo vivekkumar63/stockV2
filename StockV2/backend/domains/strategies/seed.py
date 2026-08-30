@@ -13,8 +13,9 @@ def seed_strategies(db: Session) -> None:
     for strategy in ALL_STRATEGIES:
         db.execute(
             text("""
-                INSERT OR IGNORE INTO strategies (name, type, description, parameters_json, is_active, created_at)
-                VALUES (:name, :type, :desc, :params, 1, datetime('now'))
+                INSERT INTO strategies (name, type, description, parameters_json, is_active, created_at)
+                VALUES (:name, :type, :desc, :params, 1, CURRENT_TIMESTAMP)
+                ON CONFLICT (name) DO NOTHING
             """),
             {
                 "name": strategy.name,

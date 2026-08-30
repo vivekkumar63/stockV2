@@ -572,10 +572,16 @@ def _run_walk_forward_bg(symbol: str, strategy_id: int) -> None:
         ])
         db.execute(
             text("""
-                INSERT OR REPLACE INTO walk_forward_results
+                INSERT INTO walk_forward_results
                     (symbol, strategy_id, n_windows, oos_win_rate_mean, oos_win_rate_std,
                      consistency_score, in_sample_win_rate, windows_json, computed_at)
-                VALUES (:sym, :sid, :nw, :mean, :std, :cs, :iswr, :wj, datetime('now'))
+                VALUES (:sym, :sid, :nw, :mean, :std, :cs, :iswr, :wj, CURRENT_TIMESTAMP)
+                ON CONFLICT (symbol, strategy_id) DO UPDATE SET
+                    n_windows=EXCLUDED.n_windows, oos_win_rate_mean=EXCLUDED.oos_win_rate_mean,
+                    oos_win_rate_std=EXCLUDED.oos_win_rate_std,
+                    consistency_score=EXCLUDED.consistency_score,
+                    in_sample_win_rate=EXCLUDED.in_sample_win_rate,
+                    windows_json=EXCLUDED.windows_json, computed_at=CURRENT_TIMESTAMP
             """),
             {
                 "sym": result.symbol, "sid": result.strategy_id,
@@ -593,9 +599,12 @@ def _run_walk_forward_bg(symbol: str, strategy_id: int) -> None:
         try:
             db.execute(
                 text("""
-                    INSERT OR REPLACE INTO walk_forward_results
+                    INSERT INTO walk_forward_results
                         (symbol, strategy_id, n_windows, consistency_score, computed_at)
-                    VALUES (:sym, :sid, -1, 0.0, datetime('now'))
+                    VALUES (:sym, :sid, -1, 0.0, CURRENT_TIMESTAMP)
+                    ON CONFLICT (symbol, strategy_id) DO UPDATE SET
+                        n_windows=EXCLUDED.n_windows, consistency_score=EXCLUDED.consistency_score,
+                        computed_at=CURRENT_TIMESTAMP
                 """),
                 {"sym": symbol, "sid": strategy_id},
             )

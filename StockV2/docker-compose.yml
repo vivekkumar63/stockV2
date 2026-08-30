@@ -1,6 +1,23 @@
 version: "3.9"
 
 services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: stockv2
+      POSTGRES_PASSWORD: stockv2
+      POSTGRES_DB: stockv2
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U stockv2"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
   backend:
     build:
       context: .
@@ -8,9 +25,10 @@ services:
     env_file: .env
     environment:
       TZ: Asia/Kolkata
-    volumes:
-      # Persist the SQLite database across container rebuilds
-      - ./data:/app/data
+      DATABASE_URL: postgresql://stockv2:stockv2@db:5432/stockv2
+    depends_on:
+      db:
+        condition: service_healthy
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
@@ -24,7 +42,6 @@ services:
       context: .
       dockerfile: Dockerfile.frontend
       args:
-        # Relative path — nginx proxies /api → backend. No host needed.
         VITE_API_BASE: /api/v1
         VITE_API_KEY: ${API_KEY:-changeme}
     ports:
@@ -33,4 +50,5 @@ services:
       - backend
     restart: unless-stopped
 
-volumes: {}
+volumes:
+  postgres_data:

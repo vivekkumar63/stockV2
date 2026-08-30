@@ -60,8 +60,9 @@ IND_COLS: list[str] = [
 
 _SEL = f"SELECT date, {', '.join(IND_COLS)} FROM stock_indicators_daily WHERE symbol = :s ORDER BY date ASC"
 _INS = (
-    f"INSERT OR IGNORE INTO stock_indicators_daily (symbol, date, {', '.join(IND_COLS)}) "
-    f"VALUES (:sym, :d, {', '.join(f':{c}' for c in IND_COLS)})"
+    f"INSERT INTO stock_indicators_daily (symbol, date, {', '.join(IND_COLS)}) "
+    f"VALUES (:sym, :d, {', '.join(f':{c}' for c in IND_COLS)}) "
+    f"ON CONFLICT (symbol, date) DO NOTHING"
 )
 
 

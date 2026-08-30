@@ -44,7 +44,7 @@ class SignalExplainer:
                 SELECT content FROM ai_analyses
                 WHERE subject_type = 'signal' AND subject_id = :sid
                   AND analysis_type = :at
-                  AND (expires_at IS NULL OR expires_at > datetime('now'))
+                  AND (expires_at IS NULL OR expires_at > CURRENT_TIMESTAMP)
             """),
             {"sid": signal_id, "at": analysis_type},
         ).fetchone()
@@ -65,7 +65,7 @@ class SignalExplainer:
                 INSERT INTO ai_analyses
                 (subject_type, subject_id, analysis_type, content, model_used, created_at, expires_at)
                 VALUES ('signal', :sid, :at, :content, 'claude-sonnet-4-6',
-                        datetime('now'), datetime('now', :ttl))
+                        CURRENT_TIMESTAMP, datetime('now', :ttl))
             """),
             {
                 "sid": signal_id,

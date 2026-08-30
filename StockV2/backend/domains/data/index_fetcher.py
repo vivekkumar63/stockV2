@@ -84,7 +84,7 @@ def compute_index_trends(db: Session) -> None:
                 ON CONFLICT(index_name, date) DO UPDATE SET
                     close=excluded.close, sma20=excluded.sma20, sma50=excluded.sma50,
                     above_sma20=excluded.above_sma20, above_sma50=excluded.above_sma50,
-                    trend_label=excluded.trend_label, computed_at=datetime('now')
+                    trend_label=excluded.trend_label, computed_at=CURRENT_TIMESTAMP
             """),
             {
                 "name": index_name, "date": str(today),
