@@ -20,6 +20,20 @@ from domains.intelligence.strategy_correlation import StrategyCorrelationEngine
 from domains.intelligence.strategy_selector import StrategySelectionEngine
 from domains.data.index_fetcher import compute_index_alignment_score
 from domains.data.index_universe import STOCK_INDEX_MAP
+
+
+def _index_alignment(parent_index: Optional[str], index_trend_map: dict) -> tuple[int, bool]:
+    """
+    Returns (score 0–100, data_warning).
+    data_warning=True means the stock's sector index exists but has no SMA data
+    (insufficient history) — score is set to 100 so the stock isn't penalised.
+    """
+    if parent_index is None:
+        return compute_index_alignment_score(None), False
+    row = index_trend_map.get(parent_index)
+    if row is None or row.get("sma20") is None:
+        return 100, True
+    return compute_index_alignment_score(row), False
 from domains.market.multi_timeframe import MultiTimeframeEngine
 from domains.market.regime import MarketRegimeEngine
 from domains.market.support_resistance import SupportResistanceEngine
@@ -116,11 +130,11 @@ def get_opportunity_score(
 
     # Index alignment — same lookup as top-opportunities
     _idx_rows = db.execute(
-        text("SELECT index_name, above_sma20, above_sma50 FROM index_trend WHERE date = (SELECT MAX(date) FROM index_trend)")
+        text("SELECT index_name, sma20, above_sma20, above_sma50 FROM index_trend WHERE date = (SELECT MAX(date) FROM index_trend)")
     ).mappings().fetchall()
     _itm = {r["index_name"]: dict(r) for r in _idx_rows}
     _parent_index = STOCK_INDEX_MAP.get(sym)
-    idx_alignment_raw = compute_index_alignment_score(_itm.get(_parent_index) if _parent_index else None)
+    idx_alignment_raw, _idx_warn = _index_alignment(_parent_index, _itm)
 
     opp = OpportunityScorer().full_score(
         symbol=sym,
@@ -213,7 +227,7 @@ def get_top_opportunities(
     # Pre-load latest index trends — one query for all 7 indices
     index_trend_rows = db.execute(
         text("""
-            SELECT index_name, above_sma20, above_sma50, trend_label
+            SELECT index_name, sma20, above_sma20, above_sma50, trend_label
             FROM index_trend
             WHERE date = (SELECT MAX(date) FROM index_trend)
         """)
@@ -283,7 +297,7 @@ def get_top_opportunities(
         # Index alignment
         parent_index = STOCK_INDEX_MAP.get(symbol)
         index_trend_row = index_trend_map.get(parent_index) if parent_index else None
-        idx_alignment_raw = compute_index_alignment_score(index_trend_row)
+        idx_alignment_raw, idx_data_warning = _index_alignment(parent_index, index_trend_map)
 
         ml_prob = ml_scorer.predict({
             "confidence_score": confidence_score or 0.5,
@@ -330,8 +344,9 @@ def get_top_opportunities(
             "ml_probability":   ml_prob,
             "false_signal_rate": false_rate,
             "breakdown":        opp.breakdown,
-            "index_name":       parent_index,
-            "index_trend":      index_trend_row["trend_label"] if index_trend_row else None,
+            "index_name":         parent_index,
+            "index_trend":        index_trend_row["trend_label"] if index_trend_row else None,
+            "index_data_warning": idx_data_warning,
         })
 
     results.sort(key=lambda x: x["score"], reverse=True)

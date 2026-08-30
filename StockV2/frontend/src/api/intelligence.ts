@@ -47,6 +47,7 @@ export interface TopOpportunity {
   false_signal_rate: number | null
   index_name: string | null
   index_trend: 'STRONG_BULL' | 'BULL' | 'NEUTRAL' | 'BEAR' | null
+  index_data_warning: boolean
   breakdown: OpportunityBreakdown
 }
 

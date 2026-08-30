@@ -26,10 +26,27 @@ const INDEX_TREND_STYLE: Record<string, { bg: string; text: string; arrow: strin
   BEAR:        { bg: 'bg-red-50',      text: 'text-red-600',     arrow: '↓'  },
 }
 
-function IndexTrendBadge({ indexName, trend }: { indexName: string | null; trend: string | null }) {
-  if (!indexName || !trend) return null
-  const style = INDEX_TREND_STYLE[trend] ?? INDEX_TREND_STYLE.NEUTRAL
+function IndexTrendBadge({
+  indexName, trend, dataWarning,
+}: {
+  indexName: string | null
+  trend: string | null
+  dataWarning?: boolean
+}) {
+  if (!indexName) return null
   const shortName = indexName.replace('NIFTY ', '')
+  if (dataWarning) {
+    return (
+      <span
+        className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-xs font-medium bg-amber-50 text-amber-600 border border-amber-200"
+        title={`${indexName}: insufficient index history — score not penalised`}
+      >
+        {shortName} ⚠
+      </span>
+    )
+  }
+  if (!trend) return null
+  const style = INDEX_TREND_STYLE[trend] ?? INDEX_TREND_STYLE.NEUTRAL
   return (
     <span
       className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-xs font-medium ${style.bg} ${style.text}`}
@@ -144,7 +161,7 @@ function OpportunityRow({
         <td className="px-4 py-2">
           <div className="flex items-center gap-1.5">
             <span className="font-semibold">{opp.symbol}</span>
-            <IndexTrendBadge indexName={opp.index_name} trend={opp.index_trend} />
+            <IndexTrendBadge indexName={opp.index_name} trend={opp.index_trend} dataWarning={opp.index_data_warning} />
           </div>
         </td>
         <td className="px-4 py-2"><GradeBadge score={opp.score} grade={opp.grade} /></td>
