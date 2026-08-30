@@ -91,12 +91,14 @@ class IndicatorCache:
         rows = self.db.execute(text(_SEL), {"s": symbol}).fetchall()
         df = pd.DataFrame([dict(r._mapping) for r in rows])
         df["date"] = pd.to_datetime(df["date"]).dt.date
-        # SQLite NULLs arrive as Python None → object dtype columns.
-        # Convert every indicator column to float so strategies get NaN (not None),
-        # which their pd.isna() guards handle correctly.
+        # Convert every indicator column to float so strategies get NaN (not None).
         for col in IND_COLS:
             if col in df.columns:
                 df[col] = pd.to_numeric(df[col], errors="coerce")
+        # Drop rows where close is NaN — these came from bad source data and would
+        # cause strategy errors (ta library raises on NaN price inputs).
+        if "close" in df.columns:
+            df = df.dropna(subset=["close"])
         return df
 
     def _store(self, symbol: str, df_ind: pd.DataFrame, cached_max) -> None:

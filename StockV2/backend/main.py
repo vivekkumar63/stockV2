@@ -259,15 +259,20 @@ async def lifespan(app: FastAPI):
 
     # Remove rows where close is NULL or NaN — yfinance sometimes returns partial bars
     # (e.g. for the current day when market hasn't closed) that pass old validate_row checks.
-    # These rows cause non-finite price errors in the scanner.
+    # These rows cause non-finite price errors in the scanner and precompute.
     try:
         with engine.connect() as _conn:
-            _deleted = _conn.execute(text(
+            _d1 = _conn.execute(text(
                 "DELETE FROM stock_prices_daily WHERE close IS NULL OR close = 'NaN'::float"
             )).rowcount
+            # indicator cache stores NaN close as NULL — delete those rows so the cache
+            # is rebuilt from the now-clean price data on next precompute startup.
+            _d2 = _conn.execute(text(
+                "DELETE FROM stock_indicators_daily WHERE close IS NULL"
+            )).rowcount
             _conn.commit()
-            if _deleted:
-                logger.info("[migration] Removed %d rows with NULL/NaN close price", _deleted)
+            if _d1 or _d2:
+                logger.info("[migration] Removed %d bad price rows, %d bad indicator cache rows", _d1, _d2)
     except Exception as _e:
         logger.warning("[migration] NaN close cleanup skipped: %s", _e)
 
