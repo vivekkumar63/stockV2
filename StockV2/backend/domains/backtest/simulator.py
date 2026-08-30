@@ -1,4 +1,5 @@
 import logging
+import math
 from dataclasses import dataclass
 from datetime import date, timedelta
 from types import SimpleNamespace
@@ -94,6 +95,8 @@ class BacktestSimulator:
                 continue
 
             current_price = float(df["close"].iat[idx])
+            if not math.isfinite(current_price):
+                continue
 
             # Check exits before entries
             if open_pos:
@@ -197,6 +200,8 @@ class BacktestSimulator:
                 continue
 
             current_price = float(df_ind["close"].iat[idx])
+            if not math.isfinite(current_price):
+                continue
             # Cap lookback to 500 bars — prevents O(n²) work for strategies that recompute
             # indicators from scratch (lorentzian, qqe_mod, ut_bot, etc.). All strategies
             # need at most ~80 bars of history; 500 gives a comfortable warm-up margin.
