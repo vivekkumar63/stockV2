@@ -36,6 +36,7 @@ def compute_extended_metrics(
     to_date: date,
     db: Session,
     benchmarks: dict,
+    regime_map: Optional[dict] = None,
 ) -> ExtendedMetrics:
     """Compute extended metrics from a list of SimTrade objects.
 
@@ -71,7 +72,11 @@ def compute_extended_metrics(
     if trades:
         regime_buckets: dict[str, list] = defaultdict(list)
         for t in trades:
-            regime = _get_regime_for_date(db, t.exit_date)
+            regime = (
+                regime_map.get(t.exit_date)
+                if regime_map is not None
+                else _get_regime_for_date(db, t.exit_date)
+            )
             if regime:
                 regime_buckets[regime].append(t)
         for regime_label, bucket in regime_buckets.items():

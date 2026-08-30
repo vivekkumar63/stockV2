@@ -2,6 +2,7 @@
 import json
 import logging
 import statistics
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, asdict, field
 from datetime import date
 from typing import Optional
@@ -34,6 +35,7 @@ class EngineConfig:
     val_ratio: float = 0.20
     sensitivity_top_n: int = 30
     explanation_top_n: int = 20
+    max_workers: int = 4
 
 
 class CombinationEngine:
@@ -77,15 +79,35 @@ class CombinationEngine:
             logger.info("[engine] Step 4b: Loading indicator cache for %d symbols", len(symbols_data))
             indicators_data = self._load_indicators_data(symbols_data)
 
-            # Steps 5-6: Backtest + extended metrics per combo
-            logger.info("[engine] Steps 5-6: Backtesting combinations")
+            # Steps 5-6: Backtest + extended metrics per combo (parallelized)
+            logger.info("[engine] Steps 5-6: Backtesting combinations (workers=%d)", self.config.max_workers)
+            regime_map = self._load_regime_map()
+            wf_map = self._load_wf_map()
+            benchmarks = self._compute_benchmarks_once(symbols_data, indicators_data)
             combo_results: list[dict] = []
-            for idx, combo in enumerate(combos):
-                if idx % max(1, len(combos) // 10) == 0:
-                    logger.info("[engine] Progress: %d/%d combinations", idx, len(combos))
-                result = self._evaluate_combo(combo, symbols_data, indicators_data)
-                if result:
-                    combo_results.append(result)
+            completed = 0
+            total = len(combos)
+            log_interval = max(1, total // 20)
+
+            with ThreadPoolExecutor(max_workers=self.config.max_workers) as executor:
+                futures = {
+                    executor.submit(
+                        self._evaluate_combo_pure,
+                        combo, symbols_data, indicators_data,
+                        regime_map, wf_map, benchmarks,
+                    ): combo
+                    for combo in combos
+                }
+                for future in as_completed(futures):
+                    completed += 1
+                    if completed % log_interval == 0 or completed == total:
+                        logger.info("[engine] Progress: %d/%d combinations", completed, total)
+                    try:
+                        result = future.result()
+                        if result:
+                            combo_results.append(result)
+                    except Exception:
+                        logger.exception("[engine] combo evaluation raised exception")
 
             if not combo_results:
                 self._fail_run(run_id, "No combination results produced")
@@ -149,13 +171,17 @@ class CombinationEngine:
 
         return run_id
 
-    def _evaluate_combo(
+    def _evaluate_combo_pure(
         self,
         combination: list,
         symbols_data: dict,
         indicators_data: dict[str, pd.DataFrame],
+        regime_map: dict,
+        wf_map: dict,
+        benchmarks: dict,
     ) -> Optional[dict]:
-        """Run backtests for train/val/oos periods for a single combination."""
+        """Run backtests for train/val/oos periods. No DB calls — safe for parallel threads."""
+        simulator = BacktestSimulator()
         all_train, all_val, all_oos = [], [], []
         train_from_date = val_from_date = oos_from_date = None
         train_to_date = val_to_date = oos_to_date = None
@@ -184,19 +210,19 @@ class CombinationEngine:
                 oos_from_date, oos_to_date = o_from, o_to
 
             try:
-                train_trades = self.simulator.run(
+                train_trades = simulator.run(
                     symbol, prices_df, t_from, t_to, combination,
                     initial_capital=self.config.initial_capital,
                     round_trip_cost_pct=self.config.round_trip_cost_pct,
                     _df_ind_precomputed=df_ind,
                 )
-                val_trades = self.simulator.run(
+                val_trades = simulator.run(
                     symbol, prices_df, v_from, v_to, combination,
                     initial_capital=self.config.initial_capital,
                     round_trip_cost_pct=self.config.round_trip_cost_pct,
                     _df_ind_precomputed=df_ind,
                 )
-                oos_trades = self.simulator.run(
+                oos_trades = simulator.run(
                     symbol, prices_df, o_from, o_to, combination,
                     initial_capital=self.config.initial_capital,
                     round_trip_cost_pct=self.config.round_trip_cost_pct,
@@ -213,17 +239,21 @@ class CombinationEngine:
         if not all_oos or oos_from_date is None:
             return None
 
-        benchmarks = self._compute_benchmarks(symbols_data, oos_from_date, oos_to_date)
-        wf_consistency = self._compute_wf_consistency(combination)
+        wf_consistency = sum(
+            wf_map.get(s.name, 0.0) for s in combination
+        ) / len(combination)
 
         train_metrics = compute_extended_metrics(
-            all_train, self.config.initial_capital, train_from_date, train_to_date, self.db, {}
+            all_train, self.config.initial_capital, train_from_date, train_to_date,
+            None, {}, regime_map=regime_map,
         )
         val_metrics = compute_extended_metrics(
-            all_val, self.config.initial_capital, val_from_date, val_to_date, self.db, {}
+            all_val, self.config.initial_capital, val_from_date, val_to_date,
+            None, {}, regime_map=regime_map,
         )
         oos_metrics = compute_extended_metrics(
-            all_oos, self.config.initial_capital, oos_from_date, oos_to_date, self.db, benchmarks
+            all_oos, self.config.initial_capital, oos_from_date, oos_to_date,
+            None, benchmarks, regime_map=regime_map,
         )
 
         combo_name = "_".join(s.name[:6] for s in combination)
@@ -260,6 +290,39 @@ class CombinationEngine:
         logger.info("[engine] indicators ready for %d/%d symbols", len(result), len(symbols_data))
         return result
 
+    def _load_regime_map(self) -> dict:
+        """Pre-load all market regime rows into a date→label dict (eliminates N+1 per trade)."""
+        rows = self.db.execute(text("SELECT date, regime FROM market_regime")).fetchall()
+        result = {}
+        for r in rows:
+            d = r[0].date() if hasattr(r[0], "date") else r[0]
+            result[d] = r[1]
+        logger.info("[engine] loaded %d regime rows", len(result))
+        return result
+
+    def _load_wf_map(self) -> dict:
+        """Pre-load walk-forward consistency per strategy name into a dict."""
+        rows = self.db.execute(text("""
+            SELECT s.name, AVG(wfr.consistency_score)
+            FROM walk_forward_results wfr
+            JOIN strategies s ON s.id = wfr.strategy_id
+            GROUP BY s.name
+        """)).fetchall()
+        return {str(r[0]): float(r[1]) for r in rows if r[1] is not None}
+
+    def _compute_benchmarks_once(self, symbols_data: dict, _indicators_data: dict) -> dict:
+        """Compute benchmarks using OOS window from first available symbol."""
+        for symbol, prices_df in symbols_data.items():
+            if len(prices_df) < 50:
+                continue
+            dates = prices_df["date"].values
+            n = len(dates)
+            val_end_idx = int(n * (self.config.train_ratio + self.config.val_ratio))
+            oos_from = dates[val_end_idx]
+            oos_to = dates[-1]
+            return self._compute_benchmarks(symbols_data, oos_from, oos_to)
+        return {"buy_and_hold": 0.0, "best_single": 0.0, "sma_crossover": 0.0}
+
     def _load_symbols_data(self) -> dict[str, pd.DataFrame]:
         """Load price data for up to symbols_limit symbols in a single bulk query."""
         # Get top symbols by row count
@@ -294,20 +357,6 @@ class CombinationEngine:
 
         logger.info("[engine] loaded %d symbols", len(result))
         return result
-
-    def _compute_wf_consistency(self, combination: list) -> float:
-        """Approximate walk-forward consistency by averaging per-strategy scores from DB."""
-        strategy_names = [s.name for s in combination]
-        rows = self.db.execute(text("""
-            SELECT AVG(wfr.consistency_score)
-            FROM walk_forward_results wfr
-            JOIN strategies s ON s.id = wfr.strategy_id
-            WHERE s.name IN ({placeholders})
-        """.format(
-            placeholders=",".join(f":n{i}" for i in range(len(strategy_names)))
-        )), {f"n{i}": n for i, n in enumerate(strategy_names)}).fetchone()
-
-        return float(rows[0]) if rows and rows[0] is not None else 0.0
 
     def _compute_benchmarks(
         self, symbols_data: dict, from_date: date, to_date: date
