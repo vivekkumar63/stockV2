@@ -1,4 +1,5 @@
 import logging
+import math
 from typing import Optional
 
 import pandas as pd
@@ -60,6 +61,9 @@ class LiveScanner:
                 continue
             df = IndicatorEngine.compute(df)
             price = float(df["close"].iloc[-1])
+            if not math.isfinite(price):
+                logger.warning("[LiveScanner] %s: non-finite close price, skipping", symbol)
+                continue
 
             for strategy in strategies:
                 try:
@@ -73,13 +77,14 @@ class LiveScanner:
                 if filter_type and signal.signal_type != filter_type:
                     continue
 
+                confidence = signal.confidence if math.isfinite(signal.confidence) else 0.0
                 sid = self._id_map.get(strategy.name)
                 results.append({
                     "symbol": symbol,
                     "strategy_id": sid,
                     "strategy_name": strategy.name,
                     "signal_type": signal.signal_type,
-                    "confidence": round(signal.confidence, 4),
+                    "confidence": round(confidence, 4),
                     "price": price,
                     "stop_loss_pct": signal.stop_loss_pct if signal.stop_loss_pct else None,
                     "target_pct": signal.target_pct if signal.target_pct else None,
@@ -88,7 +93,7 @@ class LiveScanner:
                     "opportunity_score": None,
                     "opportunity_grade": None,
                     "_sid": sid,
-                    "_confidence": signal.confidence,
+                    "_confidence": confidence,
                     "_regime": regime,
                     "_regime_perf": regime_perf,
                 })
