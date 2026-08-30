@@ -27,7 +27,8 @@ class YFinanceFeed:
             df.columns = [c.lower() for c in df.columns]
             df.index = pd.to_datetime(df.index.date)
             df = df[["open", "high", "low", "close", "volume"]].copy()
-            df = df.dropna(subset=["close"])
+            df = df.replace([float("inf"), float("-inf")], float("nan"))
+            df = df.dropna(subset=["open", "high", "low", "close", "volume"])
             return df
         except Exception as e:
             logger.warning("yfinance incremental download failed for %s: %s", symbol, e)
@@ -47,7 +48,8 @@ class YFinanceFeed:
             df.columns = [c.lower() for c in df.columns]
             df.index = pd.to_datetime(df.index.date)
             df = df[["open", "high", "low", "close", "volume"]].copy()
-            df = df.dropna(subset=["close"])
+            df = df.replace([float("inf"), float("-inf")], float("nan"))
+            df = df.dropna(subset=["open", "high", "low", "close", "volume"])
             return df
         except Exception as e:
             logger.warning("yfinance download failed for %s: %s", symbol, e)
