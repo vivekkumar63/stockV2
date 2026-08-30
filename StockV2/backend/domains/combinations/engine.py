@@ -2,7 +2,7 @@
 import json
 import logging
 import statistics
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from dataclasses import dataclass, asdict, field
 from datetime import date
 from typing import Optional
@@ -23,12 +23,102 @@ from ist import ist_now
 
 logger = logging.getLogger(__name__)
 
+# ── Module-level state for ProcessPoolExecutor workers ───────────────────────
+# Each worker process gets its own copy via the 'initializer' argument.
+# Using globals means we serialize the large data once per worker, not per task.
+_W_SYMBOLS: dict = {}
+_W_INDICATORS: dict = {}
+_W_REGIME: dict = {}
+_W_WF: dict = {}
+_W_BENCHMARKS: dict = {}
+_W_CFG: tuple = (0.60, 0.20, 500_000.0, 0.30)
+
+
+def _combo_worker_init(symbols_data, indicators_data, regime_map, wf_map, benchmarks, cfg):
+    global _W_SYMBOLS, _W_INDICATORS, _W_REGIME, _W_WF, _W_BENCHMARKS, _W_CFG
+    _W_SYMBOLS = symbols_data
+    _W_INDICATORS = indicators_data
+    _W_REGIME = regime_map
+    _W_WF = wf_map
+    _W_BENCHMARKS = benchmarks
+    _W_CFG = cfg
+
+
+def _combo_worker_eval(combination: list) -> Optional[dict]:
+    """Evaluate one combination in a worker process. No DB calls."""
+    from domains.backtest.simulator import BacktestSimulator
+    from domains.combinations.metrics import compute_extended_metrics
+
+    train_ratio, val_ratio, initial_capital, round_trip_cost_pct = _W_CFG
+    simulator = BacktestSimulator()
+    all_train, all_val, all_oos = [], [], []
+    train_from = val_from = oos_from = None
+    train_to = val_to = oos_to = None
+
+    for symbol, prices_df in _W_SYMBOLS.items():
+        if len(prices_df) < 50:
+            continue
+        df_ind = _W_INDICATORS.get(symbol)
+        if df_ind is None:
+            continue
+        dates = prices_df["date"].values
+        n = len(dates)
+        train_end = int(n * train_ratio)
+        val_end = int(n * (train_ratio + val_ratio))
+        t_from, t_to = dates[0], dates[train_end - 1]
+        v_from, v_to = dates[train_end], dates[val_end - 1]
+        o_from, o_to = dates[val_end], dates[-1]
+        if train_from is None:
+            train_from, train_to = t_from, t_to
+            val_from, val_to = v_from, v_to
+            oos_from, oos_to = o_from, o_to
+        try:
+            all_train.extend(simulator.run(symbol, prices_df, t_from, t_to, combination,
+                initial_capital=initial_capital, round_trip_cost_pct=round_trip_cost_pct,
+                _df_ind_precomputed=df_ind))
+            all_val.extend(simulator.run(symbol, prices_df, v_from, v_to, combination,
+                initial_capital=initial_capital, round_trip_cost_pct=round_trip_cost_pct,
+                _df_ind_precomputed=df_ind))
+            all_oos.extend(simulator.run(symbol, prices_df, o_from, o_to, combination,
+                initial_capital=initial_capital, round_trip_cost_pct=round_trip_cost_pct,
+                _df_ind_precomputed=df_ind))
+        except Exception:
+            continue
+
+    if not all_oos or oos_from is None:
+        return None
+
+    wf = sum(_W_WF.get(s.name, 0.0) for s in combination) / len(combination)
+    train_m = compute_extended_metrics(all_train, initial_capital, train_from, train_to,
+                                       None, {}, regime_map=_W_REGIME)
+    val_m   = compute_extended_metrics(all_val,   initial_capital, val_from,   val_to,
+                                       None, {}, regime_map=_W_REGIME)
+    oos_m   = compute_extended_metrics(all_oos,   initial_capital, oos_from,   oos_to,
+                                       None, _W_BENCHMARKS, regime_map=_W_REGIME)
+
+    return {
+        "combination": combination,
+        "combo_name": "_".join(s.name[:6] for s in combination),
+        "strategy_ids_json": json.dumps(sorted(s.name for s in combination)),
+        "strategy_names_json": json.dumps([s.name for s in combination]),
+        "size": len(combination),
+        "train_metrics": train_m,
+        "val_metrics": val_m,
+        "oos_metrics": oos_m,
+        "wf_consistency": wf,
+        "oos_from": oos_from,
+        "oos_to": oos_to,
+        "sensitivity_score": None,
+        "reliability_result": None,
+        "explanation": None,
+    }
+
 
 @dataclass
 class EngineConfig:
     filter: FilterConfig = field(default_factory=FilterConfig)
     search: SearchConfig = field(default_factory=SearchConfig)
-    symbols_limit: int = 200
+    symbols_limit: int = 30
     initial_capital: float = 500_000.0
     round_trip_cost_pct: float = 0.30
     train_ratio: float = 0.60
@@ -80,7 +170,8 @@ class CombinationEngine:
             indicators_data = self._load_indicators_data(symbols_data)
 
             # Steps 5-6: Backtest + extended metrics per combo (parallelized)
-            logger.info("[engine] Steps 5-6: Backtesting combinations (workers=%d)", self.config.max_workers)
+            logger.info("[engine] Steps 5-6: Backtesting combinations (workers=%d, symbols=%d)",
+                        self.config.max_workers, len(symbols_data))
             regime_map = self._load_regime_map()
             wf_map = self._load_wf_map()
             benchmarks = self._compute_benchmarks_once(symbols_data, indicators_data)
@@ -88,16 +179,15 @@ class CombinationEngine:
             completed = 0
             total = len(combos)
             log_interval = max(1, total // 20)
+            cfg_tuple = (self.config.train_ratio, self.config.val_ratio,
+                         self.config.initial_capital, self.config.round_trip_cost_pct)
 
-            with ThreadPoolExecutor(max_workers=self.config.max_workers) as executor:
-                futures = {
-                    executor.submit(
-                        self._evaluate_combo_pure,
-                        combo, symbols_data, indicators_data,
-                        regime_map, wf_map, benchmarks,
-                    ): combo
-                    for combo in combos
-                }
+            with ProcessPoolExecutor(
+                max_workers=self.config.max_workers,
+                initializer=_combo_worker_init,
+                initargs=(symbols_data, indicators_data, regime_map, wf_map, benchmarks, cfg_tuple),
+            ) as executor:
+                futures = {executor.submit(_combo_worker_eval, combo): combo for combo in combos}
                 for future in as_completed(futures):
                     completed += 1
                     if completed % log_interval == 0 or completed == total:
@@ -170,111 +260,6 @@ class CombinationEngine:
             self._fail_run(run_id, str(e))
 
         return run_id
-
-    def _evaluate_combo_pure(
-        self,
-        combination: list,
-        symbols_data: dict,
-        indicators_data: dict[str, pd.DataFrame],
-        regime_map: dict,
-        wf_map: dict,
-        benchmarks: dict,
-    ) -> Optional[dict]:
-        """Run backtests for train/val/oos periods. No DB calls — safe for parallel threads."""
-        simulator = BacktestSimulator()
-        all_train, all_val, all_oos = [], [], []
-        train_from_date = val_from_date = oos_from_date = None
-        train_to_date = val_to_date = oos_to_date = None
-
-        for symbol, prices_df in symbols_data.items():
-            if len(prices_df) < 50:
-                continue
-            df_ind = indicators_data.get(symbol)
-            if df_ind is None:
-                continue
-            dates = prices_df["date"].values
-            n = len(dates)
-            train_end_idx = int(n * self.config.train_ratio)
-            val_end_idx = int(n * (self.config.train_ratio + self.config.val_ratio))
-
-            t_from = dates[0]
-            t_to = dates[train_end_idx - 1]
-            v_from = dates[train_end_idx]
-            v_to = dates[val_end_idx - 1]
-            o_from = dates[val_end_idx]
-            o_to = dates[-1]
-
-            if train_from_date is None:
-                train_from_date, train_to_date = t_from, t_to
-                val_from_date, val_to_date = v_from, v_to
-                oos_from_date, oos_to_date = o_from, o_to
-
-            try:
-                train_trades = simulator.run(
-                    symbol, prices_df, t_from, t_to, combination,
-                    initial_capital=self.config.initial_capital,
-                    round_trip_cost_pct=self.config.round_trip_cost_pct,
-                    _df_ind_precomputed=df_ind,
-                )
-                val_trades = simulator.run(
-                    symbol, prices_df, v_from, v_to, combination,
-                    initial_capital=self.config.initial_capital,
-                    round_trip_cost_pct=self.config.round_trip_cost_pct,
-                    _df_ind_precomputed=df_ind,
-                )
-                oos_trades = simulator.run(
-                    symbol, prices_df, o_from, o_to, combination,
-                    initial_capital=self.config.initial_capital,
-                    round_trip_cost_pct=self.config.round_trip_cost_pct,
-                    _df_ind_precomputed=df_ind,
-                )
-            except Exception:
-                logger.debug("[engine] backtest failed for %s, skipping", symbol)
-                continue
-
-            all_train.extend(train_trades)
-            all_val.extend(val_trades)
-            all_oos.extend(oos_trades)
-
-        if not all_oos or oos_from_date is None:
-            return None
-
-        wf_consistency = sum(
-            wf_map.get(s.name, 0.0) for s in combination
-        ) / len(combination)
-
-        train_metrics = compute_extended_metrics(
-            all_train, self.config.initial_capital, train_from_date, train_to_date,
-            None, {}, regime_map=regime_map,
-        )
-        val_metrics = compute_extended_metrics(
-            all_val, self.config.initial_capital, val_from_date, val_to_date,
-            None, {}, regime_map=regime_map,
-        )
-        oos_metrics = compute_extended_metrics(
-            all_oos, self.config.initial_capital, oos_from_date, oos_to_date,
-            None, benchmarks, regime_map=regime_map,
-        )
-
-        combo_name = "_".join(s.name[:6] for s in combination)
-        strategy_ids = sorted([s.name for s in combination])
-
-        return {
-            "combination": combination,
-            "combo_name": combo_name,
-            "strategy_ids_json": json.dumps(strategy_ids),
-            "strategy_names_json": json.dumps([s.name for s in combination]),
-            "size": len(combination),
-            "train_metrics": train_metrics,
-            "val_metrics": val_metrics,
-            "oos_metrics": oos_metrics,
-            "wf_consistency": wf_consistency,
-            "oos_from": oos_from_date,
-            "oos_to": oos_to_date,
-            "sensitivity_score": None,  # populated in step 9 for top-N only
-            "reliability_result": None,
-            "explanation": None,
-        }
 
     def _load_indicators_data(self, symbols_data: dict) -> dict[str, pd.DataFrame]:
         """Use IndicatorCache to load precomputed indicators for all symbols.

@@ -244,7 +244,7 @@ def trigger_analysis(db: Session = Depends(get_db)):
         finally:
             bg_db.close()
 
-    thread = threading.Thread(target=_run, daemon=True)
+    thread = threading.Thread(target=_run, daemon=False)
     thread.start()
 
     return {"status": "started", "message": "Analysis running in background"}
