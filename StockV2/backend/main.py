@@ -257,6 +257,20 @@ async def lifespan(app: FastAPI):
     except Exception as _e:
         logger.warning("[migration] volume BIGINT upgrade skipped: %s", _e)
 
+    # Remove rows where close is NULL or NaN — yfinance sometimes returns partial bars
+    # (e.g. for the current day when market hasn't closed) that pass old validate_row checks.
+    # These rows cause non-finite price errors in the scanner.
+    try:
+        with engine.connect() as _conn:
+            _deleted = _conn.execute(text(
+                "DELETE FROM stock_prices_daily WHERE close IS NULL OR close = 'NaN'::float"
+            )).rowcount
+            _conn.commit()
+            if _deleted:
+                logger.info("[migration] Removed %d rows with NULL/NaN close price", _deleted)
+    except Exception as _e:
+        logger.warning("[migration] NaN close cleanup skipped: %s", _e)
+
     # Cache invalidation: if lorentzian_pred is NULL for all rows, the cache was built
     # with the old schema — clear it so the startup precompute rebuilds all 91 columns.
     try:

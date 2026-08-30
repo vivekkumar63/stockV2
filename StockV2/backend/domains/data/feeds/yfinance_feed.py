@@ -1,4 +1,5 @@
 import logging
+import math
 from datetime import date, datetime
 from typing import Optional
 
@@ -26,6 +27,7 @@ class YFinanceFeed:
             df.columns = [c.lower() for c in df.columns]
             df.index = pd.to_datetime(df.index.date)
             df = df[["open", "high", "low", "close", "volume"]].copy()
+            df = df.dropna(subset=["close"])
             return df
         except Exception as e:
             logger.warning("yfinance incremental download failed for %s: %s", symbol, e)
@@ -45,14 +47,18 @@ class YFinanceFeed:
             df.columns = [c.lower() for c in df.columns]
             df.index = pd.to_datetime(df.index.date)
             df = df[["open", "high", "low", "close", "volume"]].copy()
+            df = df.dropna(subset=["close"])
             return df
         except Exception as e:
             logger.warning("yfinance download failed for %s: %s", symbol, e)
             return pd.DataFrame()
 
-    def validate_row(self, high: float, low: float, close: float, volume: int) -> bool:
+    def validate_row(self, high: float, low: float, close: float, volume: float) -> bool:
         """Return False if a row fails basic sanity checks."""
-        if volume <= 0:
+        # Reject NaN/inf — NaN comparisons return False in Python, so must check explicitly
+        if not math.isfinite(high) or not math.isfinite(low) or not math.isfinite(close):
+            return False
+        if not math.isfinite(volume) or volume <= 0:
             return False
         if high <= 0 or low <= 0 or close <= 0:
             return False
@@ -84,9 +90,10 @@ class YFinanceFeed:
 
         inserted = 0
         for row_date, row in df.iterrows():
+            vol = float(row["volume"])
             if not self.validate_row(
-                high=row["high"], low=row["low"],
-                close=row["close"], volume=int(row["volume"])
+                high=float(row["high"]), low=float(row["low"]),
+                close=float(row["close"]), volume=vol,
             ):
                 db.execute(
                     text("""
@@ -114,7 +121,7 @@ class YFinanceFeed:
                     "sym": symbol, "dt": str(row_date),
                     "o": float(row["open"]),   "h": float(row["high"]),
                     "l": float(row["low"]),    "c": float(row["close"]),
-                    "v": int(row["volume"]),
+                    "v": int(vol),
                 },
             )
             inserted += 1
