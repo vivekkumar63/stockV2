@@ -150,7 +150,7 @@ class LiveScanner:
         rows = self.db.execute(
             text("""
                 SELECT DISTINCT symbol FROM stock_prices_daily
-                WHERE date >= date('now', '-10 days')
+                WHERE date >= CURRENT_DATE - INTERVAL '10 days'
                 ORDER BY symbol
                 LIMIT :lim
             """),

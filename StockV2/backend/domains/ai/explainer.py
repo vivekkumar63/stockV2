@@ -1,5 +1,6 @@
 import json
 import logging
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from sqlalchemy import text
@@ -60,18 +61,19 @@ class SignalExplainer:
             """),
             {"sid": signal_id, "at": analysis_type},
         )
+        expires_at = datetime.now(timezone.utc) + timedelta(hours=ttl_hours)
         self.db.execute(
             text("""
                 INSERT INTO ai_analyses
                 (subject_type, subject_id, analysis_type, content, model_used, created_at, expires_at)
                 VALUES ('signal', :sid, :at, :content, 'claude-sonnet-4-6',
-                        CURRENT_TIMESTAMP, datetime('now', :ttl))
+                        CURRENT_TIMESTAMP, :expires)
             """),
             {
                 "sid": signal_id,
                 "at": analysis_type,
                 "content": json.dumps(content),
-                "ttl": f"+{ttl_hours} hours",
+                "expires": expires_at,
             },
         )
         self.db.commit()
