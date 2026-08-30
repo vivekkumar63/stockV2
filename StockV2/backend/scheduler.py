@@ -45,7 +45,7 @@ def _send_sell_alerts_for_holdings(db) -> None:
             JOIN strategy_signals ss ON ss.symbol = ph.symbol AND ss.signal_type = 'SELL'
             JOIN strategies s ON s.id = ss.strategy_id
             JOIN latest_scan ls ON ss.signal_date = ls.max_date
-            WHERE ph.is_active = 1
+            WHERE ph.is_active = true
             ORDER BY ss.confidence_score DESC
         """)).fetchall()
         alerts = [dict(r._mapping) for r in rows]
@@ -99,7 +99,7 @@ def _intraday_scan():
 
         # Phase 2: exit monitor for open positions
         open_rows = db.execute(
-            text("SELECT ph.symbol FROM portfolio_holdings ph WHERE ph.is_active=1")
+            text("SELECT ph.symbol FROM portfolio_holdings ph WHERE ph.is_active=true")
         ).fetchall()
         open_symbols = [r[0] for r in open_rows]
         if open_symbols:

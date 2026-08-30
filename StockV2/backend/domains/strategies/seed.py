@@ -14,7 +14,7 @@ def seed_strategies(db: Session) -> None:
         db.execute(
             text("""
                 INSERT INTO strategies (name, type, description, parameters_json, is_active, created_at)
-                VALUES (:name, :type, :desc, :params, 1, CURRENT_TIMESTAMP)
+                VALUES (:name, :type, :desc, :params, true, CURRENT_TIMESTAMP)
                 ON CONFLICT (name) DO NOTHING
             """),
             {

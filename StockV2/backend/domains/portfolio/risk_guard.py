@@ -147,7 +147,7 @@ class RiskGuard:
 
     def _count_open_positions(self, db: Session) -> int:
         row = db.execute(
-            text("SELECT COUNT(*) FROM portfolio_holdings WHERE is_active = 1")
+            text("SELECT COUNT(*) FROM portfolio_holdings WHERE is_active = true")
         ).fetchone()
         return int(row[0]) if row else 0
 
@@ -169,7 +169,7 @@ class RiskGuard:
                 SELECT s.sector, COUNT(*) AS cnt
                 FROM portfolio_holdings ph
                 LEFT JOIN stocks s ON s.symbol = ph.symbol
-                WHERE ph.is_active = 1
+                WHERE ph.is_active = true
                 GROUP BY s.sector
             """)
         ).fetchall()

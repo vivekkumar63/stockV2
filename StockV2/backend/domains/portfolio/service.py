@@ -20,7 +20,7 @@ class PortfolioService:
                        er.stop_loss_price, er.target_1_price, er.max_exit_date
                 FROM portfolio_holdings ph
                 LEFT JOIN exit_rules er ON er.symbol = ph.symbol
-                WHERE ph.is_active = 1
+                WHERE ph.is_active = true
                 ORDER BY ph.symbol
             """)
         ).fetchall()

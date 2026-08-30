@@ -118,11 +118,11 @@ class BacktestRunner:
         if strategy_ids:
             placeholders = ",".join(str(int(i)) for i in strategy_ids)
             strats_rows = self.db.execute(
-                text(f"SELECT id, name FROM strategies WHERE id IN ({placeholders}) AND is_active = 1")
+                text(f"SELECT id, name FROM strategies WHERE id IN ({placeholders}) AND is_active = true")
             ).fetchall()
         else:
             strats_rows = self.db.execute(
-                text("SELECT id, name FROM strategies WHERE is_active = 1")
+                text("SELECT id, name FROM strategies WHERE is_active = true")
             ).fetchall()
 
         strats_to_run: list[tuple[int, str, object]] = []
@@ -298,11 +298,11 @@ class BacktestRunner:
         if strategy_ids:
             placeholders = ",".join(str(int(i)) for i in strategy_ids)
             strats_rows = self.db.execute(
-                text(f"SELECT id, name FROM strategies WHERE id IN ({placeholders}) AND is_active = 1")
+                text(f"SELECT id, name FROM strategies WHERE id IN ({placeholders}) AND is_active = true")
             ).fetchall()
         else:
             strats_rows = self.db.execute(
-                text("SELECT id, name FROM strategies WHERE is_active = 1")
+                text("SELECT id, name FROM strategies WHERE is_active = true")
             ).fetchall()
 
         strats_to_run: list[tuple[int, str, object]] = [

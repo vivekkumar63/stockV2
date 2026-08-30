@@ -91,8 +91,8 @@ class YFinanceFeed:
                 db.execute(
                     text("""
                         INSERT INTO data_quality_log
-                            (symbol, date, issue_type, details)
-                        VALUES (:sym, :dt, 'bad_tick', :det)
+                            (symbol, date, issue_type, details, resolved)
+                        VALUES (:sym, :dt, 'bad_tick', :det, false)
                         ON CONFLICT DO NOTHING
                     """),
                     {

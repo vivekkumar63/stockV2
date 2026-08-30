@@ -50,7 +50,7 @@ class ExitMonitor:
                        er.target_1_price, er.max_exit_date
                 FROM exit_rules er
                 JOIN portfolio_holdings ph
-                    ON er.symbol = ph.symbol AND ph.is_active = 1
+                    ON er.symbol = ph.symbol AND ph.is_active = true
             """)
         ).fetchall()
         return [dict(r._mapping) for r in rows]

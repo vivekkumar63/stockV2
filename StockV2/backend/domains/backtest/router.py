@@ -135,7 +135,7 @@ def scan_backtest(body: ScanRequest, db: Session = Depends(get_db)):
 def scan_precompute_status(db: Session = Depends(get_db)):
     """Returns how many strategies have been precomputed vs total."""
     total = db.execute(
-        text("SELECT COUNT(*) FROM strategies WHERE is_active = 1")
+        text("SELECT COUNT(*) FROM strategies WHERE is_active = true")
     ).fetchone()[0]
     computed = db.execute(
         text("SELECT COUNT(DISTINCT strategy_id) FROM strategy_performance")
@@ -313,7 +313,7 @@ def leaderboard_status(
     ).scalar() or 0
 
     total_strategies = db.execute(
-        text("SELECT COUNT(*) FROM strategies WHERE is_active = 1")
+        text("SELECT COUNT(*) FROM strategies WHERE is_active = true")
     ).scalar() or 0
 
     total_expected = total_symbols * total_strategies
@@ -437,10 +437,10 @@ def trigger_precompute(
     if force:
         db.execute(text("DELETE FROM strategy_performance"))
         db.commit()
-        rows = db.execute(text("SELECT id FROM strategies WHERE is_active = 1")).fetchall()
+        rows = db.execute(text("SELECT id FROM strategies WHERE is_active = true")).fetchall()
     else:
         rows = db.execute(text("""
-            SELECT id FROM strategies WHERE is_active = 1
+            SELECT id FROM strategies WHERE is_active = true
             AND id NOT IN (SELECT DISTINCT strategy_id FROM strategy_performance)
         """)).fetchall()
 
@@ -470,7 +470,7 @@ def precompute_status(db: Session = Depends(get_db)):
     ).scalar() or 0
 
     total_active_strategies = db.execute(
-        text("SELECT COUNT(*) FROM strategies WHERE is_active = 1")
+        text("SELECT COUNT(*) FROM strategies WHERE is_active = true")
     ).scalar() or 0
 
     last_updated_row = db.execute(

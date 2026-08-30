@@ -46,7 +46,7 @@ class BootstrapRunner:
         self.db.execute(
             text("""
                 INSERT INTO stocks (symbol, name, exchange, is_active, added_at)
-                VALUES (:sym, :sym, 'NSE', 1, CURRENT_TIMESTAMP)
+                VALUES (:sym, :sym, 'NSE', true, CURRENT_TIMESTAMP)
                 ON CONFLICT (symbol) DO NOTHING
             """),
             {"sym": symbol},

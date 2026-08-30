@@ -74,7 +74,7 @@ class PaperTrader:
         )
         self.db.execute(
             text("UPDATE portfolio_holdings SET is_active=0, quantity=0 "
-                 "WHERE symbol=:s AND is_active=1"),
+                 "WHERE symbol=:s AND is_active=true"),
             {"s": symbol},
         )
         self.db.commit()
@@ -98,7 +98,7 @@ class PaperTrader:
     def _portfolio_state(self) -> tuple[int, float]:
         row = self.db.execute(
             text("SELECT COUNT(*), COALESCE(SUM(quantity * avg_buy_price), 0.0) "
-                 "FROM portfolio_holdings WHERE is_active=1")
+                 "FROM portfolio_holdings WHERE is_active=true")
         ).fetchone()
         return row[0], float(row[1])
 
@@ -123,7 +123,7 @@ class PaperTrader:
     def _upsert_holding(self, symbol: str, quantity: int, price: float):
         existing = self.db.execute(
             text("SELECT id, quantity, avg_buy_price FROM portfolio_holdings "
-                 "WHERE symbol=:s AND is_active=1"),
+                 "WHERE symbol=:s AND is_active=true"),
             {"s": symbol},
         ).fetchone()
         if existing:
@@ -140,7 +140,7 @@ class PaperTrader:
                 text("""
                     INSERT INTO portfolio_holdings
                         (symbol, quantity, avg_buy_price, first_buy_date, last_buy_date, is_active)
-                    VALUES (:sym, :qty, :avg, CURRENT_DATE, CURRENT_DATE, 1)
+                    VALUES (:sym, :qty, :avg, CURRENT_DATE, CURRENT_DATE, true)
                 """),
                 {"sym": symbol, "qty": quantity, "avg": round(price, 4)},
             )
@@ -153,7 +153,7 @@ class PaperTrader:
                 INSERT INTO exit_rules
                     (order_id, symbol, entry_price, stop_loss_price,
                      target_1_price, target_2_price, max_exit_date, partial_exit_at_t1)
-                VALUES (:oid, :sym, :ep, :sl, :t1, :t2, :med, 0)
+                VALUES (:oid, :sym, :ep, :sl, :t1, :t2, :med, false)
             """),
             {"oid": trade_id, "sym": symbol, "ep": entry_price,
              "sl": stop_loss_price, "t1": target_price,
@@ -162,7 +162,7 @@ class PaperTrader:
 
     def _load_holding(self, symbol: str) -> Optional[dict]:
         row = self.db.execute(
-            text("SELECT * FROM portfolio_holdings WHERE symbol=:s AND is_active=1"),
+            text("SELECT * FROM portfolio_holdings WHERE symbol=:s AND is_active=true"),
             {"s": symbol},
         ).fetchone()
         return dict(row._mapping) if row else None

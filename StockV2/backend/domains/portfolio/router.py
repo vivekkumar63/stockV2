@@ -72,7 +72,7 @@ def portfolio_sell_alerts(db: Session = Depends(get_db)):
         JOIN strategy_signals ss ON ss.symbol = ph.symbol AND ss.signal_type = 'SELL'
         JOIN strategies s ON s.id = ss.strategy_id
         JOIN latest_scan ls ON ss.signal_date = ls.max_date
-        WHERE ph.is_active = 1
+        WHERE ph.is_active = true
         ORDER BY ss.confidence_score DESC
     """)).fetchall()
     return [dict(r._mapping) for r in rows]

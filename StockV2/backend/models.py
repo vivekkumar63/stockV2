@@ -22,7 +22,7 @@ class Stock(Base):
     industry: Mapped[Optional[str]] = mapped_column(String(200))
     market_cap: Mapped[Optional[float]] = mapped_column(Float)
     exchange: Mapped[str] = mapped_column(String(10), default="NSE")
-    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
     added_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
@@ -123,7 +123,7 @@ class Strategy(Base):
     type: Mapped[str] = mapped_column(String(20))
     description: Mapped[Optional[str]] = mapped_column(Text)
     parameters_json: Mapped[Optional[str]] = mapped_column(Text)
-    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
@@ -282,7 +282,7 @@ class PortfolioHolding(Base):
     first_buy_date: Mapped[date] = mapped_column(Date)
     last_buy_date: Mapped[date] = mapped_column(Date)
     notes: Mapped[Optional[str]] = mapped_column(Text)
-    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
 
 
 class Trade(Base):
@@ -334,7 +334,7 @@ class ExitRule(Base):
     target_1_price: Mapped[float] = mapped_column(Float)
     target_2_price: Mapped[float] = mapped_column(Float)
     max_exit_date: Mapped[Optional[date]] = mapped_column(Date)
-    partial_exit_at_t1: Mapped[bool] = mapped_column(Boolean, default=True)
+    partial_exit_at_t1: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
 
 
 class Watchlist(Base):
@@ -387,7 +387,7 @@ class Alert(Base):
     condition_json: Mapped[Optional[str]] = mapped_column(Text)
     message_template: Mapped[Optional[str]] = mapped_column(Text)
     channels_json: Mapped[str] = mapped_column(Text, default='["telegram"]')
-    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
@@ -415,7 +415,7 @@ class DataQualityLog(Base):
     date: Mapped[Optional[date]] = mapped_column(Date)
     issue_type: Mapped[str] = mapped_column(String(30))
     details: Mapped[Optional[str]] = mapped_column(Text)
-    resolved: Mapped[bool] = mapped_column(Boolean, default=False)
+    resolved: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
     logged_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 

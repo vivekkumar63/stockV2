@@ -53,7 +53,7 @@ class StrategySelectionEngine:
                     FROM strategy_regime_performance
                     GROUP BY strategy_id
                 ) overall ON overall.strategy_id = s.id
-                WHERE s.is_active = 1
+                WHERE s.is_active = true
                 ORDER BY
                     COALESCE(srp.win_rate, overall.avg_win_rate, 0.5) DESC
             """),
