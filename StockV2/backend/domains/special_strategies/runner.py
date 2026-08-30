@@ -138,7 +138,7 @@ class SpecialBacktestRunner:
                             _df_ind_precomputed=df_ind,
                         )
                         metrics = compute_metrics(trades, _INITIAL_CAPITAL, _FROM_DATE, to_date_val)
-                        symbol_results.append((sym, sid, metrics, str(to_date_val)))
+                        symbol_results.append((sym, sid, metrics, str(to_date_val), trades))
                     except Exception as e:
                         logger.warning("[SpecialRunner] %s/%s failed: %s", sym, strat.name, e)
                 return symbol_results
@@ -157,7 +157,7 @@ class SpecialBacktestRunner:
                 sym = futures[fut]
                 try:
                     sym_results = fut.result()
-                    results.extend(sym_results)
+                    results.extend(sym_results)  # each item: (sym, sid, metrics, to_date_str, trades)
                     done_count += len(sym_results)
                 except Exception as e:
                     logger.warning("[SpecialRunner] future error for %s: %s", sym, e)
@@ -170,7 +170,7 @@ class SpecialBacktestRunner:
         written = 0
         for i in range(0, len(results), _CHUNK):
             batch = results[i: i + _CHUNK]
-            for sym, sid, m, to_date_str in batch:
+            for sym, sid, m, to_date_str, sym_trades in batch:
                 self.db.execute(
                     text("""
                         INSERT INTO special_strategy_performance
@@ -202,6 +202,27 @@ class SpecialBacktestRunner:
                         "td": to_date_str,
                     },
                 )
+                # Replace cached trades for this (strategy, symbol) pair
+                self.db.execute(
+                    text("DELETE FROM special_strategy_trades WHERE special_strategy_id=:sid AND symbol=:sym"),
+                    {"sid": sid, "sym": sym},
+                )
+                for t in sym_trades:
+                    self.db.execute(
+                        text("""
+                            INSERT INTO special_strategy_trades
+                                (special_strategy_id, symbol, entry_date, entry_price, exit_date, exit_price,
+                                 quantity, pnl, pnl_pct, exit_reason, holding_days)
+                            VALUES (:sid, :sym, :ed, :ep, :xd, :xp, :qty, :pnl, :pct, :reason, :hd)
+                        """),
+                        {
+                            "sid": sid, "sym": sym,
+                            "ed": t.entry_date, "ep": t.entry_price,
+                            "xd": t.exit_date, "xp": t.exit_price,
+                            "qty": t.quantity, "pnl": t.pnl, "pct": t.pnl_pct,
+                            "reason": t.exit_reason, "hd": t.holding_days,
+                        },
+                    )
                 written += 1
             self.db.commit()
             time.sleep(0.01)

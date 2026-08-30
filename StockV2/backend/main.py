@@ -262,6 +262,26 @@ async def lifespan(app: FastAPI):
             _conn.execute(text(
                 "CREATE INDEX IF NOT EXISTS idx_sp_bt_trades ON special_backtest_trades (backtest_result_id)"
             ))
+            # Precomputed trades per (strategy, symbol) — populated by precompute_all, served as cache
+            _conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS special_strategy_trades (
+                    id                  SERIAL PRIMARY KEY,
+                    special_strategy_id INTEGER NOT NULL,
+                    symbol              VARCHAR(20) NOT NULL,
+                    entry_date          DATE,
+                    entry_price         REAL,
+                    exit_date           DATE,
+                    exit_price          REAL,
+                    quantity            INTEGER,
+                    pnl                 REAL,
+                    pnl_pct             REAL,
+                    exit_reason         VARCHAR(30),
+                    holding_days        INTEGER
+                )
+            """))
+            _conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS idx_sst_sid_sym ON special_strategy_trades (special_strategy_id, symbol)"
+            ))
             _conn.commit()
         logger.info("Special Strategies tables verified")
     except Exception as e:

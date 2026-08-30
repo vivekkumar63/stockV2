@@ -301,6 +301,70 @@ def get_special_precompute_status(db: Session = Depends(get_db)):
     }
 
 
+@router.get("/special/performance/trades")
+def get_special_performance_trades(strategy_id: int, symbol: str, db: Session = Depends(get_db)):
+    """Return cached trades for a precomputed (strategy, symbol) pair."""
+    rows = db.execute(
+        text("""
+            SELECT id, entry_date, entry_price, exit_date, exit_price,
+                   quantity, pnl, pnl_pct, exit_reason, holding_days
+            FROM special_strategy_trades
+            WHERE special_strategy_id = :sid AND symbol = :sym
+            ORDER BY entry_date ASC
+        """),
+        {"sid": strategy_id, "sym": symbol},
+    ).fetchall()
+    return [
+        {
+            "id": r[0], "symbol": symbol,
+            "entry_date": r[1], "entry_price": r[2],
+            "exit_date": r[3], "exit_price": r[4],
+            "quantity": r[5], "pnl": r[6], "pnl_pct": r[7],
+            "exit_reason": r[8], "holding_days": r[9],
+        }
+        for r in rows
+    ]
+
+
+@router.get("/special/recommendations")
+def get_special_recommendations(db: Session = Depends(get_db)):
+    """Live buy signals enriched with historical performance metrics."""
+    scanner = SpecialScanner(db)
+    signals = scanner.scan()
+    if not signals:
+        return []
+
+    strategy_ids = list({s["strategy_id"] for s in signals if s["strategy_id"] is not None})
+    perf_rows = db.execute(
+        text("""
+            SELECT symbol, special_strategy_id, total_trades, win_rate, cagr,
+                   sharpe_ratio, max_drawdown, profit_factor, total_pnl, avg_pnl_pct
+            FROM special_strategy_performance
+            WHERE special_strategy_id = ANY(:sids)
+        """),
+        {"sids": strategy_ids},
+    ).fetchall()
+    perf_map: dict[tuple, tuple] = {(r[0], r[1]): r for r in perf_rows}
+
+    result = []
+    for s in signals:
+        p = perf_map.get((s["symbol"], s["strategy_id"]))
+        result.append({
+            **s,
+            "total_trades": p[2] if p else None,
+            "win_rate":     p[3] if p else None,
+            "cagr":         p[4] if p else None,
+            "sharpe_ratio": p[5] if p else None,
+            "max_drawdown": p[6] if p else None,
+            "profit_factor":p[7] if p else None,
+            "total_pnl":    p[8] if p else None,
+            "avg_pnl_pct":  p[9] if p else None,
+        })
+
+    result.sort(key=lambda r: (r["win_rate"] or 0, r["confidence"]), reverse=True)
+    return result
+
+
 @router.get("/special/scan/results")
 def get_special_scan_results(
     strategy_id: Optional[int] = None,

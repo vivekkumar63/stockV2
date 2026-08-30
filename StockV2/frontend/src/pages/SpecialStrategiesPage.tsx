@@ -9,13 +9,16 @@ import {
   triggerSpecialPrecompute,
   getSpecialPrecomputeStatus,
   getSpecialScanResults,
+  getSpecialRecommendations,
+  getSpecialStrategyTrades,
   type SpecialScanResult,
   type SpecialTrade,
   type SpecialPerformanceRow,
+  type SpecialRecommendation,
 } from '../api/special'
 import { inr } from '../utils/format'
 
-type Tab = 'scan' | 'backtest' | 'all'
+type Tab = 'recs' | 'scan' | 'backtest' | 'all'
 type SortDir = 'asc' | 'desc'
 
 function isoDate(d: Date) { return d.toISOString().slice(0, 10) }
@@ -26,6 +29,12 @@ function PnlCell({ v }: { v: number | null }) {
   if (v == null) return <span className="text-gray-400">—</span>
   const cls = v >= 0 ? 'text-green-600 font-medium' : 'text-red-600 font-medium'
   return <span className={cls}>{v >= 0 ? '+' : ''}{v.toFixed(2)}%</span>
+}
+
+function WinRateCell({ v }: { v: number | null }) {
+  if (v == null) return <span className="text-gray-400">—</span>
+  const pct = v * 100
+  return <span className={pct >= 50 ? 'text-green-600 font-medium' : 'text-red-600'}>{pct.toFixed(1)}%</span>
 }
 
 function ExitBadge({ reason }: { reason: string }) {
@@ -41,7 +50,7 @@ function ExitBadge({ reason }: { reason: string }) {
 }
 
 export function SpecialStrategiesPage() {
-  const [tab, setTab] = useState<Tab>('scan')
+  const [tab, setTab] = useState<Tab>('recs')
 
   return (
     <div className="space-y-4">
@@ -56,7 +65,7 @@ export function SpecialStrategiesPage() {
       </p>
 
       <div className="flex gap-1 border-b border-gray-200">
-        {([['scan', 'Scan'], ['backtest', 'Backtest'], ['all', 'All Stocks']] as [Tab, string][]).map(([t, label]) => (
+        {([['recs', 'Recommendations'], ['scan', 'Scan'], ['backtest', 'Backtest'], ['all', 'All Stocks']] as [Tab, string][]).map(([t, label]) => (
           <button
             key={t}
             onClick={() => setTab(t)}
@@ -69,9 +78,90 @@ export function SpecialStrategiesPage() {
         ))}
       </div>
 
+      {tab === 'recs' && <RecommendationsTab />}
       {tab === 'scan' && <ScanTab />}
       {tab === 'backtest' && <BacktestTab />}
       {tab === 'all' && <AllStocksTab />}
+    </div>
+  )
+}
+
+// ── Recommendations Tab ───────────────────────────────────────────────────────
+
+function RecommendationsTab() {
+  const [results, setResults] = useState<SpecialRecommendation[] | null>(null)
+  const recsMut = useMutation({ mutationFn: getSpecialRecommendations, onSuccess: setResults })
+
+  return (
+    <div className="space-y-4">
+      <div className="bg-white rounded-lg border border-gray-200 p-4 flex items-center gap-4">
+        <div className="flex-1">
+          <p className="text-sm text-gray-600">
+            Stocks with a live BUY signal today, ranked by historical success rate.
+            Run <span className="font-medium">Precompute</span> in All Stocks first to populate win rate data.
+          </p>
+        </div>
+        <button onClick={() => { setResults(null); recsMut.mutate() }}
+          disabled={recsMut.isPending}
+          className="px-4 py-2 bg-purple-600 text-white text-sm font-medium rounded hover:bg-purple-700 disabled:opacity-50 whitespace-nowrap">
+          {recsMut.isPending ? 'Scanning…' : 'Get Recommendations'}
+        </button>
+      </div>
+
+      {recsMut.isError && <ErrBox msg={(recsMut.error as Error).message} />}
+
+      {results !== null && (
+        <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
+          {results.length === 0
+            ? <p className="text-gray-500 text-sm p-4">No buy signals found today.</p>
+            : (
+              <>
+                <div className="px-4 py-2 border-b border-gray-100 bg-gray-50 flex items-center justify-between">
+                  <span className="text-sm font-medium text-gray-700">{results.length} buy signals</span>
+                  <span className="text-xs text-gray-400">Sorted by historical success rate</span>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead className="bg-gray-50 border-b border-gray-200">
+                      <tr>
+                        {['Symbol', 'Strategy', 'Confidence', 'Price', 'Success %', 'Trades', 'CAGR %', 'PF', 'Conditions Met'].map((h) => (
+                          <th key={h} className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100">
+                      {results.map((r, i) => (
+                        <tr key={i} className="hover:bg-gray-50">
+                          <td className="px-3 py-2 font-semibold text-gray-800">{r.symbol}</td>
+                          <td className="px-3 py-2 text-gray-600 whitespace-nowrap">{r.strategy_name}</td>
+                          <td className="px-3 py-2">
+                            <span className="px-2 py-0.5 bg-purple-50 text-purple-700 rounded text-xs font-medium">
+                              {(r.confidence * 100).toFixed(0)}%
+                            </span>
+                          </td>
+                          <td className="px-3 py-2 text-gray-700 whitespace-nowrap">₹{r.price.toFixed(2)}</td>
+                          <td className="px-3 py-2"><WinRateCell v={r.win_rate} /></td>
+                          <td className="px-3 py-2 text-center text-gray-600">
+                            {r.total_trades ?? <span className="text-gray-400">—</span>}
+                          </td>
+                          <td className="px-3 py-2">
+                            {r.cagr != null
+                              ? <span className={r.cagr >= 0 ? 'text-green-600 font-medium' : 'text-red-600'}>{r.cagr >= 0 ? '+' : ''}{r.cagr.toFixed(1)}%</span>
+                              : <span className="text-gray-400">—</span>}
+                          </td>
+                          <td className="px-3 py-2 text-gray-600">
+                            {r.profit_factor != null ? r.profit_factor.toFixed(2) : <span className="text-gray-400">—</span>}
+                          </td>
+                          <td className="px-3 py-2 text-gray-500 text-xs">{r.conditions_met.join(', ')}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </>
+            )}
+        </div>
+      )}
     </div>
   )
 }
@@ -283,6 +373,9 @@ function AllStocksTab() {
   const [sortDir, setSortDir] = useState<SortDir>('desc')
   const [scanResults, setScanResults] = useState<SpecialPerformanceRow[] | null>(null)
   const [forceConfirm, setForceConfirm] = useState(false)
+  const [expandedRow, setExpandedRow] = useState<string | null>(null)
+  const [rowTrades, setRowTrades] = useState<Record<string, SpecialTrade[]>>({})
+  const [loadingRow, setLoadingRow] = useState<string | null>(null)
 
   const { data: strategies = [] } = useQuery({ queryKey: ['special-strategies'], queryFn: getSpecialStrategies })
 
@@ -302,6 +395,24 @@ function AllStocksTab() {
     const mt = hideZero ? Math.max(Number(minTrades), 1) : 0
     const data = await getSpecialScanResults(sid, mt)
     setScanResults(data)
+    setExpandedRow(null)
+    setRowTrades({})
+  }
+
+  const toggleRow = async (r: SpecialPerformanceRow) => {
+    if (r.strategy_id == null) return
+    const key = `${r.strategy_id}-${r.symbol}`
+    if (expandedRow === key) { setExpandedRow(null); return }
+    setExpandedRow(key)
+    if (!rowTrades[key]) {
+      setLoadingRow(key)
+      try {
+        const t = await getSpecialStrategyTrades(r.strategy_id, r.symbol)
+        setRowTrades((prev) => ({ ...prev, [key]: t }))
+      } finally {
+        setLoadingRow(null)
+      }
+    }
   }
 
   const toggleSort = (key: PerfKey) => {
@@ -402,7 +513,7 @@ function AllStocksTab() {
           Load Results
         </button>
         {scanResults !== null && (
-          <span className="text-xs text-gray-500 self-end">{sorted.length} rows</span>
+          <span className="text-xs text-gray-500 self-end">{sorted.length} rows · click a row to see trades</span>
         )}
       </div>
 
@@ -433,41 +544,61 @@ function AllStocksTab() {
                         {label}{sortKey === col ? (sortDir === 'desc' ? ' ↓' : ' ↑') : ''}
                       </th>
                     ))}
+                    <th className="px-3 py-2 w-8"></th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100">
-                  {sorted.map((r, i) => (
-                    <tr key={i} className="hover:bg-gray-50">
-                      <td className="px-3 py-2 font-semibold text-gray-800">{r.symbol}</td>
-                      <td className="px-3 py-2 text-gray-600 whitespace-nowrap">{r.strategy_name}</td>
-                      <td className="px-3 py-2 text-center">{r.total_trades}</td>
-                      <td className="px-3 py-2">
-                        {r.win_rate != null
-                          ? <span className={r.win_rate >= 0.5 ? 'text-green-600 font-medium' : 'text-red-600'}>{(r.win_rate * 100).toFixed(1)}%</span>
-                          : <span className="text-gray-400">—</span>}
-                      </td>
-                      <td className="px-3 py-2">
-                        {r.cagr != null
-                          ? <span className={r.cagr >= 0 ? 'text-green-600 font-medium' : 'text-red-600'}>{r.cagr >= 0 ? '+' : ''}{r.cagr.toFixed(2)}%</span>
-                          : <span className="text-gray-400">—</span>}
-                      </td>
-                      <td className="px-3 py-2 whitespace-nowrap">
-                        <span className={r.total_pnl >= 0 ? 'text-green-600 font-medium' : 'text-red-600 font-medium'}>{inr(r.total_pnl)}</span>
-                      </td>
-                      <td className="px-3 py-2"><PnlCell v={r.avg_pnl_pct} /></td>
-                      <td className="px-3 py-2 text-gray-600">
-                        {r.sharpe_ratio != null ? r.sharpe_ratio.toFixed(2) : <span className="text-gray-400">—</span>}
-                      </td>
-                      <td className="px-3 py-2">
-                        {r.max_drawdown != null
-                          ? <span className="text-red-600">{r.max_drawdown.toFixed(1)}%</span>
-                          : <span className="text-gray-400">—</span>}
-                      </td>
-                      <td className="px-3 py-2">
-                        {r.profit_factor != null ? r.profit_factor.toFixed(2) : <span className="text-gray-400">—</span>}
-                      </td>
-                    </tr>
-                  ))}
+                  {sorted.map((r, i) => {
+                    const key = `${r.strategy_id}-${r.symbol}`
+                    const isExpanded = expandedRow === key
+                    const isLoading = loadingRow === key
+                    return (
+                      <>
+                        <tr key={i}
+                          onClick={() => toggleRow(r)}
+                          className="hover:bg-blue-50 cursor-pointer transition-colors">
+                          <td className="px-3 py-2 font-semibold text-gray-800">{r.symbol}</td>
+                          <td className="px-3 py-2 text-gray-600 whitespace-nowrap">{r.strategy_name}</td>
+                          <td className="px-3 py-2 text-center">{r.total_trades}</td>
+                          <td className="px-3 py-2"><WinRateCell v={r.win_rate} /></td>
+                          <td className="px-3 py-2">
+                            {r.cagr != null
+                              ? <span className={r.cagr >= 0 ? 'text-green-600 font-medium' : 'text-red-600'}>{r.cagr >= 0 ? '+' : ''}{r.cagr.toFixed(2)}%</span>
+                              : <span className="text-gray-400">—</span>}
+                          </td>
+                          <td className="px-3 py-2 whitespace-nowrap">
+                            <span className={r.total_pnl >= 0 ? 'text-green-600 font-medium' : 'text-red-600 font-medium'}>{inr(r.total_pnl)}</span>
+                          </td>
+                          <td className="px-3 py-2"><PnlCell v={r.avg_pnl_pct} /></td>
+                          <td className="px-3 py-2 text-gray-600">
+                            {r.sharpe_ratio != null ? r.sharpe_ratio.toFixed(2) : <span className="text-gray-400">—</span>}
+                          </td>
+                          <td className="px-3 py-2">
+                            {r.max_drawdown != null
+                              ? <span className="text-red-600">{r.max_drawdown.toFixed(1)}%</span>
+                              : <span className="text-gray-400">—</span>}
+                          </td>
+                          <td className="px-3 py-2">
+                            {r.profit_factor != null ? r.profit_factor.toFixed(2) : <span className="text-gray-400">—</span>}
+                          </td>
+                          <td className="px-3 py-2 text-gray-400 text-xs text-center select-none">
+                            {isLoading ? '…' : isExpanded ? '▲' : '▼'}
+                          </td>
+                        </tr>
+                        {isExpanded && (
+                          <tr key={`trades-${key}`}>
+                            <td colSpan={11} className="bg-blue-50 px-6 py-3 border-b border-blue-100">
+                              {isLoading
+                                ? <p className="text-sm text-gray-500">Loading trades…</p>
+                                : rowTrades[key]
+                                  ? <TradeTable trades={rowTrades[key]} />
+                                  : <p className="text-sm text-gray-500">No trades found. Run precompute first.</p>}
+                            </td>
+                          </tr>
+                        )}
+                      </>
+                    )
+                  })}
                 </tbody>
               </table>
             )}
@@ -504,7 +635,7 @@ function ErrBox({ msg }: { msg: string }) {
 }
 
 function TradeTable({ trades }: { trades: SpecialTrade[] }) {
-  if (!trades.length) return <p className="text-sm text-gray-500">No trades.</p>
+  if (!trades.length) return <p className="text-sm text-gray-500">No trades recorded.</p>
   return (
     <table className="w-full text-xs">
       <thead>

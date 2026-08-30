@@ -108,6 +108,23 @@ export interface SpecialPerformanceRow {
   to_date: string | null
 }
 
+export interface SpecialRecommendation extends SpecialScanResult {
+  total_trades: number | null
+  win_rate: number | null
+  cagr: number | null
+  sharpe_ratio: number | null
+  max_drawdown: number | null
+  profit_factor: number | null
+  total_pnl: number | null
+  avg_pnl_pct: number | null
+}
+
+export const getSpecialRecommendations = () =>
+  apiFetch<SpecialRecommendation[]>('/special/recommendations')
+
+export const getSpecialStrategyTrades = (strategyId: number, symbol: string) =>
+  apiFetch<SpecialTrade[]>(`/special/performance/trades?strategy_id=${strategyId}&symbol=${encodeURIComponent(symbol)}`)
+
 export const triggerSpecialPrecompute = (force = false) =>
   apiFetch<{ status: string; message: string; strategies_queued: number }>(`/special/precompute?force=${force}`, { method: 'POST' })
 
