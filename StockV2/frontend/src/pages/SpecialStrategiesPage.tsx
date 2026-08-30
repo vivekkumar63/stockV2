@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useMutation, useQuery } from '@tanstack/react-query'
 import {
   getSpecialStrategies,
@@ -90,22 +90,77 @@ export function SpecialStrategiesPage() {
 
 function RecommendationsTab() {
   const [results, setResults] = useState<SpecialRecommendation[] | null>(null)
+
   const recsMut = useMutation({ mutationFn: getSpecialRecommendations, onSuccess: setResults })
+
+  const { data: status, refetch: refetchStatus } = useQuery({
+    queryKey: ['special-precompute-status-recs'],
+    queryFn: getSpecialPrecomputeStatus,
+    refetchInterval: (query) => query.state.data?.is_running ? 2000 : false,
+  })
+
+  const refreshMut = useMutation({
+    mutationFn: () => triggerSpecialPrecompute(true),
+    onSuccess: () => refetchStatus(),
+  })
+
+  const isRunning = status?.is_running ?? false
+  const pct = status?.pct_done ?? 0
+
+  // Auto-fetch recommendations once a force-refresh precompute finishes
+  const wasRunningRef = useRef(false)
+  useEffect(() => {
+    if (wasRunningRef.current && !isRunning) {
+      recsMut.mutate()
+    }
+    wasRunningRef.current = isRunning
+  }, [isRunning])  // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div className="space-y-4">
-      <div className="bg-white rounded-lg border border-gray-200 p-4 flex items-center gap-4">
-        <div className="flex-1">
-          <p className="text-sm text-gray-600">
-            Stocks with a live BUY signal today, ranked by historical success rate.
-            Run <span className="font-medium">Precompute</span> in All Stocks first to populate win rate data.
-          </p>
+      <div className="bg-white rounded-lg border border-gray-200 p-4 space-y-3">
+        <div className="flex items-center gap-4 flex-wrap">
+          <div className="flex-1">
+            <p className="text-sm text-gray-600">
+              Stocks with a live BUY signal today, ranked by historical success rate.
+            </p>
+            {status && !isRunning && (
+              <p className="text-xs text-gray-400 mt-0.5">
+                Performance cache: {status.symbol_strategy_pairs} pairs
+                {status.last_updated && ` · updated ${new Date(status.last_updated).toLocaleString('en-IN', { dateStyle: 'short', timeStyle: 'short' })}`}
+              </p>
+            )}
+          </div>
+          <div className="flex gap-2">
+            <button onClick={() => { setResults(null); recsMut.mutate() }}
+              disabled={recsMut.isPending || isRunning}
+              className="px-4 py-2 bg-purple-600 text-white text-sm font-medium rounded hover:bg-purple-700 disabled:opacity-50 whitespace-nowrap">
+              {recsMut.isPending ? 'Scanning…' : 'Get Recommendations'}
+            </button>
+            <button
+              onClick={() => refreshMut.mutate()}
+              disabled={isRunning || refreshMut.isPending}
+              title="Re-run backtests for all stocks across all strategies, then refresh recommendations"
+              className="px-3 py-2 border border-gray-300 text-gray-600 text-sm rounded hover:bg-gray-50 disabled:opacity-50 whitespace-nowrap">
+              {isRunning ? 'Refreshing…' : 'Force Refresh All'}
+            </button>
+          </div>
         </div>
-        <button onClick={() => { setResults(null); recsMut.mutate() }}
-          disabled={recsMut.isPending}
-          className="px-4 py-2 bg-purple-600 text-white text-sm font-medium rounded hover:bg-purple-700 disabled:opacity-50 whitespace-nowrap">
-          {recsMut.isPending ? 'Scanning…' : 'Get Recommendations'}
-        </button>
+
+        {isRunning && (
+          <div className="space-y-1">
+            <div className="flex justify-between text-xs text-gray-600">
+              <span>{status?.phase ?? 'running'} — {status?.message}</span>
+              <span>{pct.toFixed(1)}%</span>
+            </div>
+            <div className="w-full bg-gray-200 rounded-full h-2">
+              <div className="bg-purple-500 h-2 rounded-full transition-all" style={{ width: `${pct}%` }} />
+            </div>
+            <div className="text-xs text-gray-500">{status?.done} / {status?.total} pairs computed</div>
+          </div>
+        )}
+
+        {status?.error && <ErrBox msg={status.error} />}
       </div>
 
       {recsMut.isError && <ErrBox msg={(recsMut.error as Error).message} />}
