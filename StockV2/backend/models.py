@@ -23,7 +23,7 @@ class Stock(Base):
     market_cap: Mapped[Optional[float]] = mapped_column(Float)
     exchange: Mapped[str] = mapped_column(String(10), default="NSE")
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
-    added_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    added_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, server_default="CURRENT_TIMESTAMP")
 
 
 class StockPriceDaily(Base):
@@ -80,7 +80,7 @@ class Fundamental(Base):
     dii_holding: Mapped[Optional[float]] = mapped_column(Float)
     dividend_yield: Mapped[Optional[float]] = mapped_column(Float)   # Phase F
     data_as_of: Mapped[Optional[date]] = mapped_column(Date)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, server_default="CURRENT_TIMESTAMP")
 
 
 class CorporateAction(Base):
@@ -110,7 +110,7 @@ class News(Base):
     impact_score: Mapped[Optional[float]] = mapped_column(Float)
     category: Mapped[Optional[str]] = mapped_column(String(30))
     ai_summary: Mapped[Optional[str]] = mapped_column(Text)
-    fetched_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    fetched_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, server_default="CURRENT_TIMESTAMP")
 
 
 # ─── Strategy & Signals ───────────────────────────────────────────────────────
@@ -124,7 +124,7 @@ class Strategy(Base):
     description: Mapped[Optional[str]] = mapped_column(Text)
     parameters_json: Mapped[Optional[str]] = mapped_column(Text)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, server_default="CURRENT_TIMESTAMP")
 
 
 class StrategySignal(Base):
@@ -148,7 +148,7 @@ class StrategySignal(Base):
     holding_period_days: Mapped[Optional[int]] = mapped_column(Integer)
     reasoning_json: Mapped[Optional[str]] = mapped_column(Text)
     indicators_json: Mapped[Optional[str]] = mapped_column(Text)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, server_default="CURRENT_TIMESTAMP")
 
 
 class StrategyPerformance(Base):
@@ -172,7 +172,7 @@ class StrategyPerformance(Base):
     max_drawdown: Mapped[Optional[float]] = mapped_column(Float)
     profit_factor: Mapped[Optional[float]] = mapped_column(Float)
     total_pnl: Mapped[float] = mapped_column(Float, default=0.0)
-    computed_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    computed_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, server_default="CURRENT_TIMESTAMP")
 
 
 class ScanResultCache(Base):
@@ -207,7 +207,7 @@ class ScanResultCache(Base):
     max_drawdown: Mapped[Optional[float]] = mapped_column(Float)
     profit_factor: Mapped[Optional[float]] = mapped_column(Float)
     total_pnl: Mapped[float] = mapped_column(Float, default=0.0)
-    cached_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    cached_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, server_default="CURRENT_TIMESTAMP")
 
 
 class BacktestResult(Base):
@@ -227,7 +227,7 @@ class BacktestResult(Base):
     profit_factor: Mapped[Optional[float]] = mapped_column(Float)
     avg_return_pct: Mapped[Optional[float]] = mapped_column(Float)
     full_metrics_json: Mapped[Optional[str]] = mapped_column(Text)
-    ran_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    ran_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, server_default="CURRENT_TIMESTAMP")
 
 
 class BacktestTrade(Base):
@@ -267,7 +267,7 @@ class WalkForwardResult(Base):
     consistency_score: Mapped[float] = mapped_column(Float, default=0.0)
     in_sample_win_rate: Mapped[Optional[float]] = mapped_column(Float)
     windows_json: Mapped[Optional[str]] = mapped_column(Text)
-    computed_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    computed_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, server_default="CURRENT_TIMESTAMP")
 
 
 # ─── Portfolio ────────────────────────────────────────────────────────────────
@@ -298,7 +298,7 @@ class Trade(Base):
     price: Mapped[float] = mapped_column(Float)
     total_value: Mapped[float] = mapped_column(Float)
     brokerage: Mapped[float] = mapped_column(Float, default=0.0)
-    trade_date: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    trade_date: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, server_default="CURRENT_TIMESTAMP")
     order_id: Mapped[Optional[int]] = mapped_column(Integer)
     mode: Mapped[str] = mapped_column(String(10), default="paper")
     strategy_id: Mapped[Optional[int]] = mapped_column(Integer)
@@ -318,7 +318,7 @@ class Order(Base):
     trigger_price: Mapped[Optional[float]] = mapped_column(Float)
     status: Mapped[str] = mapped_column(String(15), default="pending")
     broker_order_id: Mapped[Optional[str]] = mapped_column(String(50))
-    placed_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    placed_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, server_default="CURRENT_TIMESTAMP")
     executed_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
     mode: Mapped[str] = mapped_column(String(10), default="paper")
 
@@ -342,7 +342,7 @@ class Watchlist(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     symbol: Mapped[str] = mapped_column(String(20), unique=True, nullable=False)
-    added_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    added_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, server_default="CURRENT_TIMESTAMP")
     reason: Mapped[Optional[str]] = mapped_column(Text)
     strategy_id: Mapped[Optional[int]] = mapped_column(Integer)
     alert_price: Mapped[Optional[float]] = mapped_column(Float)
@@ -363,7 +363,7 @@ class AIAnalysis(Base):
     content: Mapped[str] = mapped_column(Text)
     model_used: Mapped[str] = mapped_column(String(50), default="claude-sonnet-4-6")
     tokens_used: Mapped[Optional[int]] = mapped_column(Integer)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, server_default="CURRENT_TIMESTAMP")
     expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
 
 
@@ -373,7 +373,7 @@ class AIConversation(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     role: Mapped[str] = mapped_column(String(10))
     content: Mapped[str] = mapped_column(Text)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, server_default="CURRENT_TIMESTAMP")
 
 
 # ─── Alerts ───────────────────────────────────────────────────────────────────
@@ -388,7 +388,7 @@ class Alert(Base):
     message_template: Mapped[Optional[str]] = mapped_column(Text)
     channels_json: Mapped[str] = mapped_column(Text, default='["telegram"]')
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, server_default="CURRENT_TIMESTAMP")
 
 
 class AlertHistory(Base):
@@ -397,7 +397,7 @@ class AlertHistory(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     alert_id: Mapped[int] = mapped_column(Integer, nullable=False)
     symbol: Mapped[Optional[str]] = mapped_column(String(20))
-    triggered_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    triggered_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, server_default="CURRENT_TIMESTAMP")
     message_sent: Mapped[Optional[str]] = mapped_column(Text)
     delivery_status_json: Mapped[Optional[str]] = mapped_column(Text)
 
@@ -416,7 +416,7 @@ class DataQualityLog(Base):
     issue_type: Mapped[str] = mapped_column(String(30))
     details: Mapped[Optional[str]] = mapped_column(Text)
     resolved: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
-    logged_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    logged_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, server_default="CURRENT_TIMESTAMP")
 
 
 # ─── Market Intelligence ──────────────────────────────────────────────────────
@@ -435,7 +435,7 @@ class MarketRegime(Base):
     advance_decline_ratio: Mapped[Optional[float]] = mapped_column(Float)
     avg_atr_ratio: Mapped[Optional[float]] = mapped_column(Float)
     stocks_counted: Mapped[Optional[int]] = mapped_column(Integer)
-    computed_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    computed_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, server_default="CURRENT_TIMESTAMP")
 
 
 class SupportResistanceLevel(Base):
@@ -479,7 +479,7 @@ class SignalOutcome(Base):
     pnl_pct: Mapped[Optional[float]] = mapped_column(Float)       # % change at outcome
     is_profitable: Mapped[Optional[bool]] = mapped_column(Boolean)
     holding_days_actual: Mapped[Optional[int]] = mapped_column(Integer)
-    computed_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    computed_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, server_default="CURRENT_TIMESTAMP")
 
 
 class StrategyCorrelation(Base):
@@ -497,7 +497,7 @@ class StrategyCorrelation(Base):
     strategy_id_b: Mapped[int] = mapped_column(Integer, nullable=False)
     correlation: Mapped[float] = mapped_column(Float, nullable=False)   # 0.0–1.0
     shared_signals: Mapped[int] = mapped_column(Integer, default=0)
-    computed_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    computed_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, server_default="CURRENT_TIMESTAMP")
 
 
 class StrategyRegimePerformance(Base):
@@ -514,4 +514,4 @@ class StrategyRegimePerformance(Base):
     total_trades: Mapped[int] = mapped_column(Integer, default=0)
     win_rate: Mapped[Optional[float]] = mapped_column(Float)       # 0.0–1.0
     avg_pnl_pct: Mapped[Optional[float]] = mapped_column(Float)    # average % return per trade
-    computed_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    computed_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, server_default="CURRENT_TIMESTAMP")
