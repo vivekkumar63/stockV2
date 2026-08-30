@@ -16,7 +16,7 @@ class PortfolioService:
             text("""
                 SELECT ph.id, ph.symbol, ph.quantity, ph.avg_buy_price,
                        ph.first_buy_date, ph.last_buy_date,
-                       ROUND(ph.quantity * ph.avg_buy_price, 2) AS invested_value,
+                       ROUND(CAST(ph.quantity * ph.avg_buy_price AS NUMERIC), 2) AS invested_value,
                        er.stop_loss_price, er.target_1_price, er.max_exit_date
                 FROM portfolio_holdings ph
                 LEFT JOIN exit_rules er ON er.symbol = ph.symbol
