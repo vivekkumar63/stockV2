@@ -46,6 +46,15 @@ IND_COLS: list[str] = [
     "volume_sma_20", "volume_ratio", "volume_sma_5bar_change",
     "obv", "obv_sma_10",
     "gap_pct",
+    # Strategy-specific precomputed (eliminates O(n²)/GIL-serialised work)
+    "sma_200",
+    "hma_50", "ut_bot_stop",
+    "squeeze_on", "squeeze_mom",
+    "qqe_fast_rsi", "qqe_fast", "qqe_slow_rsi", "qqe_slow",
+    "connors_rsi",
+    "lorentzian_pred",
+    "nw_yhat", "nw_upper", "nw_lower",
+    "mc_wt1", "mc_wt2", "rsimfi_60",
 ]
 
 _SEL = f"SELECT date, {', '.join(IND_COLS)} FROM stock_indicators_daily WHERE symbol = :s ORDER BY date ASC"

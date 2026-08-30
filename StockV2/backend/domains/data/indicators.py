@@ -227,6 +227,184 @@ class IndicatorEngine:
         # ── Rolling 200-bar high (for CANSLIM 52-week high check) ─────────────
         out["rolling_high_200"] = high.rolling(200, min_periods=100).max()
 
+        # ══════════════════════════════════════════════════════════════════════
+        # Strategy-specific precomputed indicators
+        # Eliminates O(n²) / GIL-serialised work in run_multi() for 7 strategies
+        # that contain Python for-loops. Each is computed ONCE per symbol here.
+        # ══════════════════════════════════════════════════════════════════════
+
+        def _rsi_s(ser: pd.Series, period: int) -> pd.Series:
+            delta = ser.diff()
+            gain  = delta.clip(lower=0).ewm(com=period - 1, adjust=False).mean()
+            loss  = (-delta.clip(upper=0)).ewm(com=period - 1, adjust=False).mean().clip(lower=1e-10)
+            return (100 - 100 / (1 + gain / loss)).fillna(50)
+
+        # ── SMA(200) ──────────────────────────────────────────────────────────
+        out["sma_200"] = close.rolling(200, min_periods=100).mean()
+
+        # ── HMA(50) ── vectorised WMA via rolling-apply (runs once, not n times)
+        if n >= 56:
+            def _wma_s(s: pd.Series, p: int) -> pd.Series:
+                w = np.arange(1, p + 1, dtype=float); ws = float(w.sum())
+                return s.rolling(p).apply(lambda x: float(np.dot(x, w)) / ws, raw=True)
+            _raw_hma = 2.0 * _wma_s(close, 25) - _wma_s(close, 50)
+            out["hma_50"] = _wma_s(_raw_hma, 7)
+        else:
+            out["hma_50"] = pd.Series(float("nan"), index=close.index)
+
+        # ── UT Bot ATR trailing stop (key=1.0, ATR=atr_14) ───────────────────
+        if n >= 15:
+            _cl_v = close.values; _atr_v = out["atr_14"].values
+            _ts = np.zeros(n); _ts[0] = _cl_v[0]
+            for _i in range(1, n):
+                _c, _pc, _pt = _cl_v[_i], _cl_v[_i - 1], _ts[_i - 1]
+                _nl = 0.0 if np.isnan(_atr_v[_i]) else _atr_v[_i]
+                if   _c > _pt and _pc > _pt: _ts[_i] = max(_pt, _c - _nl)
+                elif _c < _pt and _pc < _pt: _ts[_i] = min(_pt, _c + _nl)
+                elif _c > _pt:              _ts[_i] = _c - _nl
+                else:                       _ts[_i] = _c + _nl
+            out["ut_bot_stop"] = pd.Series(_ts, index=close.index)
+        else:
+            out["ut_bot_stop"] = pd.Series(float("nan"), index=close.index)
+
+        # ── Squeeze Momentum (BB/KC squeeze + linreg momentum) ───────────────
+        if n >= 35:
+            _sqz_n  = 20
+            _bb_sma = close.rolling(_sqz_n).mean()
+            _bb_std = close.rolling(_sqz_n).std(ddof=0)
+            _bb_u   = _bb_sma + 2.0 * _bb_std
+            _bb_l   = _bb_sma - 2.0 * _bb_std
+            _kc_atr = IndicatorEngine._atr(high, low, close, window=_sqz_n)
+            _kc_u   = _bb_sma + 1.5 * _kc_atr
+            _kc_l   = _bb_sma - 1.5 * _kc_atr
+            out["squeeze_on"] = ((_bb_l > _kc_l) & (_bb_u < _kc_u)).astype(float)
+            _hi_n   = high.rolling(_sqz_n).max()
+            _lo_n   = low.rolling(_sqz_n).min()
+            _delta  = close - ((_hi_n + _lo_n) / 2 + _bb_sma) / 2
+            _d_v    = _delta.values
+            _x_fit  = np.arange(_sqz_n, dtype=float)
+            _mom_v  = np.full(n, np.nan)
+            for _i in range(_sqz_n - 1, n):
+                _y = _d_v[_i - _sqz_n + 1:_i + 1]
+                if not np.any(np.isnan(_y)):
+                    _cf, _ci = np.polyfit(_x_fit, _y, 1)
+                    _mom_v[_i] = float(np.polyval([_cf, _ci], _sqz_n - 1))
+            out["squeeze_mom"] = pd.Series(_mom_v, index=close.index)
+        else:
+            out["squeeze_on"] = out["squeeze_mom"] = pd.Series(float("nan"), index=close.index)
+
+        # ── QQE Mod (fast RSI6/SF4.238, slow RSI14/SF4.238) ─────────────────
+        def _qqe_c(cl: pd.Series, rsi_p: int, sf: float) -> tuple[pd.Series, pd.Series]:
+            _rm   = _rsi_s(cl, rsi_p).ewm(span=5, adjust=False).mean()
+            _w    = rsi_p * 2 - 1
+            _dar  = _rm.diff().abs().ewm(com=_w - 1, adjust=False).mean()\
+                       .ewm(com=_w - 1, adjust=False).mean() * sf
+            _ra   = _rm.values; _da = _dar.values; _qq = np.zeros(len(_ra)); _qq[0] = _ra[0]
+            for _i in range(1, len(_ra)):
+                _r = _ra[_i]; _d = float(_da[_i]) if not np.isnan(_da[_i]) else 0.0
+                _qq[_i] = max(_qq[_i - 1], _r - _d) if _r >= _qq[_i - 1] \
+                     else min(_qq[_i - 1], _r + _d)
+            return pd.Series(_rm.values, index=cl.index), pd.Series(_qq, index=cl.index)
+
+        if n >= 50:
+            _qfr, _qfl = _qqe_c(close, 6,  4.238)
+            _qsr, _qsl = _qqe_c(close, 14, 4.238)
+            out["qqe_fast_rsi"] = _qfr; out["qqe_fast"] = _qfl
+            out["qqe_slow_rsi"] = _qsr; out["qqe_slow"] = _qsl
+        else:
+            for _q in ("qqe_fast_rsi", "qqe_fast", "qqe_slow_rsi", "qqe_slow"):
+                out[_q] = pd.Series(float("nan"), index=close.index)
+
+        # ── Connors RSI ───────────────────────────────────────────────────────
+        if n >= 110:
+            _rsi3  = _rsi_s(close, 3)
+            _clv   = close.values; _sv = np.zeros(n)
+            for _i in range(1, n):
+                if   _clv[_i] > _clv[_i - 1]: _sv[_i] = max(_sv[_i - 1], 0) + 1
+                elif _clv[_i] < _clv[_i - 1]: _sv[_i] = min(_sv[_i - 1], 0) - 1
+            _srsi  = _rsi_s(pd.Series(_sv, index=close.index), 2)
+            _pret  = close.pct_change()
+            def _pr_fn(x):
+                p = x[:-1]; t = x[-1]; v = p[~np.isnan(p)]
+                return 50.0 if len(v) == 0 or np.isnan(t) else float(np.sum(v < t) / len(v) * 100)
+            _prank = _pret.rolling(101).apply(_pr_fn, raw=True)
+            out["connors_rsi"] = (_rsi3 + _srsi + _prank) / 3
+        else:
+            out["connors_rsi"] = pd.Series(float("nan"), index=close.index)
+
+        # ── Nadaraya-Watson Envelope (RQ kernel h=8 α=8 mult=3) ──────────────
+        if n >= 50:
+            _nw_look = min(100, n)
+            _nw_i    = np.arange(_nw_look, dtype=float)
+            _nw_w    = (1 + _nw_i ** 2 / (2.0 * 8.0 * 64.0)) ** (-8.0)
+            _nw_w   /= _nw_w.sum()
+            _clv     = close.values; _yh = np.full(n, np.nan)
+            for _i in range(_nw_look - 1, n):
+                _seg = _clv[max(0, _i - _nw_look + 1):_i + 1][::-1]
+                _ww  = _nw_w[:len(_seg)]; _ww = _ww / _ww.sum()
+                _yh[_i] = float(np.dot(_ww, _seg))
+            _yh_s       = pd.Series(_yh, index=close.index)
+            _nw_mae     = (close - _yh_s).abs().rolling(_nw_look).mean()
+            out["nw_yhat"]  = _yh_s
+            out["nw_upper"] = _yh_s + 3.0 * _nw_mae
+            out["nw_lower"] = _yh_s - 3.0 * _nw_mae
+        else:
+            for _nc in ("nw_yhat", "nw_upper", "nw_lower"):
+                out[_nc] = pd.Series(float("nan"), index=close.index)
+
+        # ── Market Cipher B (WaveTrend 9,13 + RSI-MFI 60) ───────────────────
+        if n >= 30:
+            _hlc3    = (high + low + close) / 3
+            _wt_e1   = _hlc3.ewm(span=9, adjust=False).mean()
+            _wt_d    = _hlc3 - _wt_e1
+            _wt_e2   = _wt_d.abs().ewm(span=9, adjust=False).mean().clip(lower=1e-10)
+            _wt1_raw = (_wt_d / (0.015 * _wt_e2)).ewm(span=13, adjust=False).mean()
+            out["mc_wt1"]    = _wt1_raw
+            out["mc_wt2"]    = _wt1_raw.rolling(4).mean()
+            out["rsimfi_60"] = (_rsi_s(close - out["open"], 60) - 50) * 150
+        else:
+            for _mc in ("mc_wt1", "mc_wt2", "rsimfi_60"):
+                out[_mc] = pd.Series(float("nan"), index=close.index)
+
+        # ── Lorentzian Classification (vectorised simple KNN, max_back=500) ──
+        if n >= 60:
+            _f1 = out["rsi_14"].values
+            _lc_hlc3 = (high + low + close) / 3
+            _lc_e1   = _lc_hlc3.ewm(span=10, adjust=False).mean()
+            _lc_d    = _lc_hlc3 - _lc_e1
+            _lc_e2   = _lc_d.abs().ewm(span=10, adjust=False).mean().clip(lower=1e-10)
+            _f2      = (_lc_d / (0.015 * _lc_e2)).ewm(span=11, adjust=False).mean().fillna(0).values
+            _f3      = out["cci_20"].values
+            _f4      = out["adx_14"].values
+            _f5      = out["rsi_9"].values
+            _feats   = np.column_stack([_f1, _f2, _f3, _f4, _f5])
+            _cmeans  = np.nanmean(_feats, axis=0)
+            _nmask   = np.isnan(_feats)
+            _feats[_nmask] = np.take(_cmeans, np.where(_nmask)[1])
+            _clv     = close.values; _lbl = np.zeros(n, dtype=np.int8)
+            for _i in range(n - 4):
+                if   _clv[_i + 4] > _clv[_i]: _lbl[_i] =  1
+                elif _clv[_i + 4] < _clv[_i]: _lbl[_i] = -1
+            _pred  = np.full(n, np.nan, dtype=np.float32)
+            _k_nn  = 8; _mb = 500
+            _all_c = np.where(np.arange(n) % 4 != 0)[0]   # precompute candidate mask
+            for _bar in range(60, n):
+                _s = max(0, _bar - _mb)
+                _e = max(0, _bar - 4)
+                _lo = np.searchsorted(_all_c, _s)
+                _hi = np.searchsorted(_all_c, _e)
+                _cands = _all_c[_lo:_hi]
+                if len(_cands) == 0:
+                    continue
+                _diffs = np.abs(_feats[_cands] - _feats[_bar])
+                _dists = np.sum(np.log1p(_diffs), axis=1)
+                _k_eff = min(_k_nn, len(_cands))
+                _top   = np.argpartition(_dists, _k_eff - 1)[:_k_eff]
+                _pred[_bar] = float(np.sum(_lbl[_cands[_top]]))
+            out["lorentzian_pred"] = pd.Series(_pred.astype(np.float64), index=close.index)
+        else:
+            out["lorentzian_pred"] = pd.Series(float("nan"), index=close.index)
+
         return out
 
     @staticmethod

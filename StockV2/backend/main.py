@@ -231,6 +231,15 @@ async def lifespan(app: FastAPI):
         "chandelier_long",
         "ao", "alligator_jaw", "alligator_teeth", "alligator_lips",
         "rolling_high_200",
+        # Strategy-specific precomputed indicators
+        "sma_200",
+        "hma_50", "ut_bot_stop",
+        "squeeze_on", "squeeze_mom",
+        "qqe_fast_rsi", "qqe_fast", "qqe_slow_rsi", "qqe_slow",
+        "connors_rsi",
+        "lorentzian_pred",
+        "nw_yhat", "nw_upper", "nw_lower",
+        "mc_wt1", "mc_wt2", "rsimfi_60",
     ]
     with engine.connect() as _conn:
         for _col in _new_indicator_cols:
@@ -240,12 +249,12 @@ async def lifespan(app: FastAPI):
             except Exception:
                 pass  # column already exists
 
-    # Cache invalidation: if psar is NULL for all rows, the cache was built with the
-    # old schema — clear it so the startup precompute rebuilds with new columns.
+    # Cache invalidation: if lorentzian_pred is NULL for all rows, the cache was built
+    # with the old schema — clear it so the startup precompute rebuilds all 91 columns.
     try:
         with engine.connect() as _conn:
             _has_new = _conn.execute(
-                text("SELECT COUNT(*) FROM stock_indicators_daily WHERE psar IS NOT NULL")
+                text("SELECT COUNT(*) FROM stock_indicators_daily WHERE lorentzian_pred IS NOT NULL")
             ).scalar()
             if _has_new == 0:
                 _total = _conn.execute(text("SELECT COUNT(*) FROM stock_indicators_daily")).scalar()
