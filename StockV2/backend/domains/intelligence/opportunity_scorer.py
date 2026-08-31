@@ -10,7 +10,7 @@ Component weights:
   sr_context             7  — proximity to support vs resistance (normalised 0–1)
   regime_strategy        4  — strategy's historical win rate in the current regime
   ml_signal_probability  7  — ML model probability that signal will be profitable
-  index_alignment       10  — index (Nifty/Sensex) alignment score (0–100 raw)
+  sector_health         10  — sector rotation health score (0–100 from sector_breadth_daily)
   ── total ────────── 100
 
 Quick mode (scanner): only win_rate, confidence, regime_alignment, regime_strategy
@@ -41,7 +41,7 @@ _WEIGHTS: dict[str, int] = {
     "sr_context":             7,   # was 8
     "regime_strategy":        4,
     "ml_signal_probability":  7,   # was 8
-    "index_alignment":       10,   # NEW
+    "sector_health":         10,   # replaced index_alignment
     # false_signal_safety: inverted false-signal rate; included in full_score only
     # Weight not in this dict — applied as a flat multiplier after base score
 }
@@ -106,7 +106,7 @@ class OpportunityScorer:
         sr_score: Optional[float],
         false_signal_rate: Optional[float] = None,
         ml_probability: Optional[float] = None,
-        index_alignment_score: Optional[int] = None,   # 0–100 raw; None = unmapped (treated as 50)
+        sector_health_score: Optional[float] = None,   # 0–1; None = unknown sector (treated as 0.5)
     ) -> OpportunityScore:
         parts: dict[str, Optional[float]] = {
             "historical_win_rate": historical_win_rate,
@@ -117,7 +117,7 @@ class OpportunityScorer:
             "volume":              volume_score,
             "sr_context":          sr_score,
             "ml_signal_probability": ml_probability,
-            "index_alignment": (index_alignment_score / 100.0) if index_alignment_score is not None else 0.5,
+            "sector_health":       sector_health_score if sector_health_score is not None else 0.5,
         }
         opp = self._compute(symbol, strategy_id, parts)
 

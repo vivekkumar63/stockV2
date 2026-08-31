@@ -19,40 +19,14 @@ const REGIME_SHORT: Record<string, string> = {
   BEAR: 'Bear', STRONG_BEAR: 'S.Bear', HIGH_VOLATILITY: 'Hi.Vol',
 }
 
-const INDEX_TREND_STYLE: Record<string, { bg: string; text: string; arrow: string }> = {
-  STRONG_BULL: { bg: 'bg-emerald-100', text: 'text-emerald-700', arrow: '↑↑' },
-  BULL:        { bg: 'bg-green-50',    text: 'text-green-700',   arrow: '↑'  },
-  NEUTRAL:     { bg: 'bg-gray-100',    text: 'text-gray-500',    arrow: '→'  },
-  BEAR:        { bg: 'bg-red-50',      text: 'text-red-600',     arrow: '↓'  },
-}
-
-function IndexTrendBadge({
-  indexName, trend, dataWarning,
-}: {
-  indexName: string | null
-  trend: string | null
-  dataWarning?: boolean
-}) {
-  if (!indexName) return null
-  const shortName = indexName.replace('NIFTY ', '')
-  if (dataWarning) {
-    return (
-      <span
-        className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-xs font-medium bg-amber-50 text-amber-600 border border-amber-200"
-        title={`${indexName}: insufficient index history — score not penalised`}
-      >
-        {shortName} ⚠
-      </span>
-    )
-  }
-  if (!trend) return null
-  const style = INDEX_TREND_STYLE[trend] ?? INDEX_TREND_STYLE.NEUTRAL
+function SectorBadge({ sector }: { sector: string | null }) {
+  if (!sector) return null
   return (
     <span
-      className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-xs font-medium ${style.bg} ${style.text}`}
-      title={`${indexName}: ${trend}`}
+      className="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-blue-50 text-blue-600"
+      title={`Sector: ${sector}`}
     >
-      {shortName} {style.arrow}
+      {sector}
     </span>
   )
 }
@@ -64,7 +38,7 @@ const SCORE_COMPONENTS: { key: ComponentKey; label: string; weight: number }[] =
   { key: 'strategy_confidence',   label: 'Strategy Confidence',   weight: 16 },
   { key: 'regime_alignment',      label: 'Regime Alignment',      weight: 14 },
   { key: 'mtf_alignment',         label: 'MTF Alignment',         weight: 13 },
-  { key: 'index_alignment',       label: 'Index Alignment',       weight: 10 },
+  { key: 'sector_health',          label: 'Sector Health',          weight: 10 },
   { key: 'volume',                label: 'Volume',                weight:  9 },
   { key: 'sr_context',            label: 'S/R Context',           weight:  7 },
   { key: 'ml_signal_probability', label: 'ML Probability',        weight:  7 },
@@ -161,7 +135,7 @@ function OpportunityRow({
         <td className="px-4 py-2">
           <div className="flex items-center gap-1.5">
             <span className="font-semibold">{opp.symbol}</span>
-            <IndexTrendBadge indexName={opp.index_name} trend={opp.index_trend} dataWarning={opp.index_data_warning} />
+            <SectorBadge sector={opp.sector_name} />
           </div>
         </td>
         <td className="px-4 py-2"><GradeBadge score={opp.score} grade={opp.grade} /></td>

@@ -8,6 +8,7 @@ import { ScannerPage } from './pages/ScannerPage'
 import { StrategyMatchPage } from './pages/StrategyMatchPage'
 import { CombinationsPage } from './pages/CombinationsPage'
 import { SpecialStrategiesPage } from './pages/SpecialStrategiesPage'
+import { SectorRotationPage } from './pages/SectorRotationPage'
 
 const queryClient = new QueryClient()
 
@@ -26,6 +27,7 @@ export function App() {
               <Route path="/strategy-match" element={<StrategyMatchPage />} />
               <Route path="/combinations" element={<CombinationsPage />} />
               <Route path="/special-strategies" element={<SpecialStrategiesPage />} />
+              <Route path="/sector-rotation" element={<SectorRotationPage />} />
             </Routes>
           </main>
         </div>

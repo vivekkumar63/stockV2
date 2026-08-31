@@ -23,6 +23,7 @@ class JobIds:
     LEADERBOARD_REFRESH = "leaderboard_refresh"
     COMBINATION_ANALYSIS = "combination_analysis"
     FII_DII_FETCH = "fii_dii_fetch"
+    SECTOR_ROTATION = "sector_rotation_daily"
 
 
 _IST = "Asia/Kolkata"
@@ -419,6 +420,26 @@ def _fii_dii_fetch():
         db.close()
 
 
+def _sector_rotation_daily():
+    """Compute sector breadth and signal flow after EOD data and index trends are available."""
+    from datetime import timedelta
+    from database import SessionLocal
+    from domains.sector_rotation.engine import SectorRotationEngine
+    from ist import ist_today
+    db = SessionLocal()
+    try:
+        engine = SectorRotationEngine()
+        today = ist_today()
+        week_start = today - timedelta(days=today.weekday())
+        b = engine.compute_breadth(db, today)
+        f = engine.compute_signal_flow(db, week_start)
+        logger.info("[sector_rotation_daily] breadth=%d flow=%d", b, f)
+    except Exception:
+        logger.exception("[sector_rotation_daily] failed")
+    finally:
+        db.close()
+
+
 def register_jobs():
     # 3:45pm — fetch today's closing data before EOD scan runs at 4pm
     scheduler.add_job(
@@ -518,6 +539,13 @@ def register_jobs():
         _combination_analysis,
         CronTrigger(day_of_week="sun", hour=23, minute=0, timezone=_IST),
         id=JobIds.COMBINATION_ANALYSIS,
+        replace_existing=True,
+    )
+    # 4:40pm — sector rotation (after 4:20 index trend update and 4:35 FII/DII)
+    scheduler.add_job(
+        _sector_rotation_daily,
+        CronTrigger(hour=16, minute=40, day_of_week="mon-fri", timezone=_IST),
+        id=JobIds.SECTOR_ROTATION,
         replace_existing=True,
     )
     logger.info("APScheduler jobs registered: %s", [j.id for j in scheduler.get_jobs()])

@@ -287,6 +287,41 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning("special_strategies tables migration skipped: %s", e)
 
+    # Sector rotation tables
+    try:
+        with engine.connect() as _conn:
+            _conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS sector_breadth_daily (
+                    id                  SERIAL PRIMARY KEY,
+                    sector_name         VARCHAR(30) NOT NULL,
+                    trade_date          DATE NOT NULL,
+                    pct_above_sma50     REAL,
+                    index_vs_sma20      REAL,
+                    return_1m           REAL,
+                    return_3m           REAL,
+                    sector_health_score REAL,
+                    rotation_direction  VARCHAR(20),
+                    UNIQUE(sector_name, trade_date)
+                )
+            """))
+            _conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS sector_signal_flow (
+                    id                  SERIAL PRIMARY KEY,
+                    sector_name         VARCHAR(30) NOT NULL,
+                    week_start          DATE NOT NULL,
+                    signal_count        INTEGER DEFAULT 0,
+                    prev_signal_count   INTEGER DEFAULT 0,
+                    avg_win_rate        REAL,
+                    top_strategy        VARCHAR(100),
+                    stocks_with_signals TEXT,
+                    UNIQUE(sector_name, week_start)
+                )
+            """))
+            _conn.commit()
+        logger.info("Sector rotation tables verified")
+    except Exception as e:
+        logger.warning("sector rotation tables migration skipped: %s", e)
+
     # Indicator cache table — wide table storing IndicatorEngine output per (symbol, date)
     try:
         from domains.data.indicator_cache import IND_COLS as _IND_COLS
@@ -605,3 +640,6 @@ app.include_router(combinations_router, prefix="/api/v1", dependencies=[Depends(
 
 from domains.special_strategies.router import router as special_router  # noqa: E402
 app.include_router(special_router, prefix="/api/v1", dependencies=[Depends(verify_api_key)])
+
+from domains.sector_rotation.router import router as sector_router  # noqa: E402
+app.include_router(sector_router, prefix="/api/v1", dependencies=[Depends(verify_api_key)])
