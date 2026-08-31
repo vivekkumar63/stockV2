@@ -160,7 +160,7 @@ class FalseSignalDetector:
                 )
                 SELECT strategy_id,
                        COUNT(*) AS total,
-                       SUM(CASE WHEN is_profitable = 0 THEN 1 ELSE 0 END) AS false_count
+                       SUM(CASE WHEN is_profitable = false THEN 1 ELSE 0 END) AS false_count
                 FROM ranked
                 WHERE rn <= :lookback
                 GROUP BY strategy_id
@@ -188,7 +188,7 @@ class FalseSignalDetector:
             text("""
                 SELECT so.strategy_id, s.name,
                        COUNT(*)  AS total_evaluated,
-                       SUM(CASE WHEN so.is_profitable = 1 THEN 1 ELSE 0 END) AS profitable,
+                       SUM(CASE WHEN so.is_profitable = true THEN 1 ELSE 0 END) AS profitable,
                        AVG(so.pnl_pct) AS avg_pnl_pct,
                        MAX(so.signal_date) AS latest_signal_date
                 FROM signal_outcomes so
