@@ -58,6 +58,57 @@ def get_signal_flow(weeks: int = 8, db: Session = Depends(get_db)):
     return [dict(r._mapping) for r in rows]
 
 
+@router.get("/{sector_name}/stocks")
+def get_sector_stocks(sector_name: str, db: Session = Depends(get_db)):
+    """Per-stock metrics for all stocks in a sector: latest close, above SMA20/50, 3M return."""
+    from domains.sector_rotation.engine import _SECTOR_STOCKS
+    stocks = _SECTOR_STOCKS.get(sector_name.upper())
+    if not stocks:
+        raise HTTPException(status_code=404, detail=f"Unknown sector: {sector_name}")
+
+    placeholders = ",".join(f"'{s}'" for s in stocks)
+
+    rows = db.execute(text(f"""
+        WITH ranked AS (
+            SELECT symbol, close, date,
+                   ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY date DESC) AS rn
+            FROM stock_prices_daily
+            WHERE symbol IN ({placeholders})
+        ),
+        latest  AS (SELECT symbol, close, date FROM ranked WHERE rn = 1),
+        sma20   AS (
+            SELECT symbol, AVG(close) AS sma
+            FROM ranked WHERE rn <= 20
+            GROUP BY symbol HAVING COUNT(*) >= 5
+        ),
+        sma50   AS (
+            SELECT symbol, AVG(close) AS sma
+            FROM ranked WHERE rn <= 50
+            GROUP BY symbol HAVING COUNT(*) >= 10
+        ),
+        price3m AS (
+            SELECT symbol, close AS close_3m
+            FROM ranked WHERE rn = 63
+        )
+        SELECT
+            l.symbol,
+            l.close,
+            l.date                                           AS last_date,
+            CASE WHEN l.close > s20.sma THEN true ELSE false END AS above_sma20,
+            CASE WHEN l.close > s50.sma THEN true ELSE false END AS above_sma50,
+            ROUND(((l.close - s20.sma) / s20.sma * 100)::numeric, 2)  AS pct_vs_sma20,
+            ROUND(((l.close - s50.sma) / s50.sma * 100)::numeric, 2)  AS pct_vs_sma50,
+            ROUND(((l.close - p3m.close_3m) / p3m.close_3m * 100)::numeric, 2) AS return_3m
+        FROM latest l
+        LEFT JOIN sma20   s20 ON s20.symbol = l.symbol
+        LEFT JOIN sma50   s50 ON s50.symbol = l.symbol
+        LEFT JOIN price3m p3m ON p3m.symbol = l.symbol
+        ORDER BY above_sma50 DESC NULLS LAST, pct_vs_sma50 DESC NULLS LAST
+    """)).fetchall()
+
+    return [dict(r._mapping) for r in rows]
+
+
 @router.post("/recompute")
 def recompute(db: Session = Depends(get_db)):
     today = date.today()

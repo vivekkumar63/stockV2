@@ -21,8 +21,22 @@ export interface SectorSummary {
   sectors: SectorData[]
 }
 
+export interface SectorStock {
+  symbol: string
+  close: number
+  last_date: string
+  above_sma20: boolean
+  above_sma50: boolean
+  pct_vs_sma20: number | null
+  pct_vs_sma50: number | null
+  return_3m: number | null
+}
+
 export const getSectorSummary = () =>
   apiFetch<SectorSummary>('/sector/summary')
+
+export const getSectorStocks = (sector: string) =>
+  apiFetch<SectorStock[]>(`/sector/${encodeURIComponent(sector)}/stocks`)
 
 export const recomputeSectors = () =>
   apiFetch<{ status: string; breadth_written: number; flow_written: number }>(

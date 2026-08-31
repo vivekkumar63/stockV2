@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { getSectorSummary, recomputeSectors, type SectorData, type SectorSummary } from '../api/sector'
+import { getSectorSummary, getSectorStocks, recomputeSectors, type SectorData, type SectorSummary, type SectorStock } from '../api/sector'
 
 type Tab = 'breadth' | 'signals'
 
@@ -83,6 +83,63 @@ function Sidebar({ summary, activeTab }: { summary: SectorSummary; activeTab: Ta
   )
 }
 
+function pctColor(v: number | null) {
+  if (v == null) return 'text-gray-400'
+  return v >= 0 ? 'text-emerald-600' : 'text-red-600'
+}
+
+function StockTable({ sector }: { sector: string }) {
+  const { data, isLoading } = useQuery({
+    queryKey: ['sector-stocks', sector],
+    queryFn: () => getSectorStocks(sector),
+    staleTime: 30 * 60 * 1000,
+  })
+
+  if (isLoading) return <p className="text-xs text-gray-400 py-2">Loading stocks…</p>
+  if (!data || data.length === 0) return <p className="text-xs text-gray-400 py-2">No stock data available.</p>
+
+  return (
+    <div className="mt-3 overflow-x-auto">
+      <table className="w-full text-xs border-collapse">
+        <thead>
+          <tr className="text-gray-400 border-b border-gray-200">
+            <th className="text-left py-1 pr-3 font-medium">Symbol</th>
+            <th className="text-right py-1 px-2 font-medium">Close</th>
+            <th className="text-right py-1 px-2 font-medium">vs SMA20</th>
+            <th className="text-right py-1 px-2 font-medium">vs SMA50</th>
+            <th className="text-right py-1 px-2 font-medium">3M Return</th>
+            <th className="text-center py-1 px-2 font-medium">SMA20</th>
+            <th className="text-center py-1 px-2 font-medium">SMA50</th>
+          </tr>
+        </thead>
+        <tbody>
+          {data.map(s => (
+            <tr key={s.symbol} className="border-b border-gray-100 hover:bg-white">
+              <td className="py-1 pr-3 font-semibold text-gray-800">{s.symbol}</td>
+              <td className="py-1 px-2 text-right text-gray-600">₹{s.close.toFixed(1)}</td>
+              <td className={`py-1 px-2 text-right font-medium ${pctColor(s.pct_vs_sma20)}`}>
+                {s.pct_vs_sma20 != null ? `${s.pct_vs_sma20 >= 0 ? '+' : ''}${s.pct_vs_sma20.toFixed(1)}%` : '—'}
+              </td>
+              <td className={`py-1 px-2 text-right font-medium ${pctColor(s.pct_vs_sma50)}`}>
+                {s.pct_vs_sma50 != null ? `${s.pct_vs_sma50 >= 0 ? '+' : ''}${s.pct_vs_sma50.toFixed(1)}%` : '—'}
+              </td>
+              <td className={`py-1 px-2 text-right font-medium ${pctColor(s.return_3m)}`}>
+                {s.return_3m != null ? `${s.return_3m >= 0 ? '+' : ''}${s.return_3m.toFixed(1)}%` : '—'}
+              </td>
+              <td className="py-1 px-2 text-center">
+                <span className={`inline-block w-2 h-2 rounded-full ${s.above_sma20 ? 'bg-emerald-400' : 'bg-red-400'}`} />
+              </td>
+              <td className="py-1 px-2 text-center">
+                <span className={`inline-block w-2 h-2 rounded-full ${s.above_sma50 ? 'bg-emerald-400' : 'bg-red-400'}`} />
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
 function BreadthRow({ sector }: { sector: SectorData }) {
   const [expanded, setExpanded] = useState(false)
   const ds = DIR_STYLE[sector.rotation_direction] ?? DIR_STYLE.NEUTRAL
@@ -104,7 +161,7 @@ function BreadthRow({ sector }: { sector: SectorData }) {
       </button>
 
       {expanded && (
-        <div className="px-4 pb-3 bg-gray-50 border-t border-gray-100">
+        <div className="px-4 pb-4 bg-gray-50 border-t border-gray-100">
           <div className="grid grid-cols-3 gap-3 mt-3 mb-3">
             <div className="bg-white rounded p-2 text-center border border-gray-100">
               <div className="text-xs text-gray-400 mb-0.5">% above SMA50</div>
@@ -113,7 +170,7 @@ function BreadthRow({ sector }: { sector: SectorData }) {
               </div>
             </div>
             <div className="bg-white rounded p-2 text-center border border-gray-100">
-              <div className="text-xs text-gray-400 mb-0.5">vs SMA20</div>
+              <div className="text-xs text-gray-400 mb-0.5">Index vs SMA20</div>
               <div className={`text-lg font-bold ${sector.index_vs_sma20 >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
                 {sector.index_vs_sma20 >= 0 ? '+' : ''}{sector.index_vs_sma20.toFixed(1)}%
               </div>
@@ -125,12 +182,7 @@ function BreadthRow({ sector }: { sector: SectorData }) {
               </div>
             </div>
           </div>
-          {sector.stocks_with_signals.length > 0 && (
-            <div className="text-xs text-gray-500">
-              <span className="text-gray-400">Stocks with signals: </span>
-              {sector.stocks_with_signals.join(' · ')}
-            </div>
-          )}
+          <StockTable sector={sector.name} />
         </div>
       )}
     </div>
@@ -158,7 +210,7 @@ function SignalRow({ sector }: { sector: SectorData }) {
       </button>
 
       {expanded && (
-        <div className="px-4 pb-3 bg-gray-50 border-t border-gray-100">
+        <div className="px-4 pb-4 bg-gray-50 border-t border-gray-100">
           <div className="grid grid-cols-4 gap-3 mt-3 mb-3">
             <div className="bg-white rounded p-2 text-center border border-gray-100">
               <div className="text-xs text-gray-400 mb-0.5">This week</div>
@@ -181,12 +233,7 @@ function SignalRow({ sector }: { sector: SectorData }) {
               </div>
             </div>
           </div>
-          {sector.stocks_with_signals.length > 0 && (
-            <div className="text-xs text-gray-500">
-              <span className="text-gray-400">Stocks with signals: </span>
-              {sector.stocks_with_signals.join(' · ')}
-            </div>
-          )}
+          <StockTable sector={sector.name} />
         </div>
       )}
     </div>
