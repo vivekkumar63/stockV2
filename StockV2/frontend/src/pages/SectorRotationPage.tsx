@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { getSectorSummary, getSectorStocks, recomputeSectors, type SectorData, type SectorSummary, type SectorStock } from '../api/sector'
+import { getSectorSummary, getSectorStocks, recomputeSectors, type SectorData, type SectorSummary } from '../api/sector'
 
 type Tab = 'breadth' | 'signals'
 
