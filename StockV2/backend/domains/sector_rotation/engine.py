@@ -74,15 +74,34 @@ class SectorRotationEngine:
 
             placeholders = ",".join(f"'{s}'" for s in stocks)
 
-            # % of stocks above their 50-day SMA (using precomputed indicator cache)
+            # % of stocks above their 50-day SMA — computed directly from price history
+            # so this works even before the indicator cache is populated for today.
             above_sma50_row = db.execute(text(f"""
-                SELECT COUNT(*) AS above, COUNT(*) FILTER (WHERE close > sma_50) AS cnt
-                FROM stock_indicators_daily
-                WHERE date = :d AND symbol IN ({placeholders})
+                WITH ranked AS (
+                    SELECT symbol, close,
+                           ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY date DESC) AS rn
+                    FROM stock_prices_daily
+                    WHERE symbol IN ({placeholders})
+                      AND date <= :d
+                ),
+                latest AS (
+                    SELECT symbol, close FROM ranked WHERE rn = 1
+                ),
+                sma50 AS (
+                    SELECT symbol, AVG(close) AS sma
+                    FROM ranked WHERE rn <= 50
+                    GROUP BY symbol
+                    HAVING COUNT(*) >= 10
+                )
+                SELECT
+                    COUNT(*) AS total,
+                    SUM(CASE WHEN l.close > s.sma THEN 1 ELSE 0 END) AS above
+                FROM latest l
+                JOIN sma50 s ON s.symbol = l.symbol
             """), {"d": str(trade_date)}).fetchone()
 
             if above_sma50_row is None or above_sma50_row[0] == 0:
-                logger.debug("[sector_breadth] no indicator data for %s on %s — skipping", sector, trade_date)
+                logger.debug("[sector_breadth] no price data for %s on %s — skipping", sector, trade_date)
                 continue
 
             total_stocks = above_sma50_row[0]

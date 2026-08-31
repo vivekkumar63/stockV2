@@ -130,6 +130,7 @@ class Strategy(Base):
 class StrategySignal(Base):
     __tablename__ = "strategy_signals"
     __table_args__ = (
+        UniqueConstraint("symbol", "strategy_id", "signal_date", name="uq_signal_sym_strat_date"),
         Index("idx_signals_symbol_date", "symbol", "signal_date"),
         Index("idx_signals_strategy_date", "strategy_id", "signal_date"),
     )

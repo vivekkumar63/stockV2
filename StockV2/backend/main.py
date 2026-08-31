@@ -60,6 +60,19 @@ async def lifespan(app: FastAPI):
         except Exception:
             pass  # column already exists
 
+    # Phase H: add unique constraint on strategy_signals (symbol, strategy_id, signal_date)
+    # Required for ON CONFLICT upsert in StrategyEngine._save_signal
+    with engine.connect() as _conn:
+        try:
+            _conn.execute(text("""
+                ALTER TABLE strategy_signals
+                ADD CONSTRAINT uq_signal_sym_strat_date
+                UNIQUE (symbol, strategy_id, signal_date)
+            """))
+            _conn.commit()
+        except Exception:
+            pass  # constraint already exists
+
     # Strategy Combination Engine tables
     try:
         with engine.connect() as _conn:
