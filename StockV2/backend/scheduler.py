@@ -364,8 +364,11 @@ def _intraday_digest():
         try:
             special_signals = SpecialScanner(db).scan()
             if special_signals:
-                alert_svc.send_special_scan_alerts(special_signals, scan_date=today)
-                logger.info("[scheduler] special_digest: %d special buy signals sent", len(special_signals))
+                ok = alert_svc.send_special_scan_alerts(special_signals, scan_date=today)
+                if ok:
+                    logger.info("[scheduler] special_digest: %d special buy signals sent", len(special_signals))
+                else:
+                    logger.error("[scheduler] special_digest: Telegram send failed for %d signals", len(special_signals))
         except Exception:
             logger.exception("[scheduler] special strategy scan failed")
 
