@@ -64,14 +64,29 @@ async def lifespan(app: FastAPI):
     # Required for ON CONFLICT upsert in StrategyEngine._save_signal
     with engine.connect() as _conn:
         try:
+            # Deduplicate first — keeping the latest row per (symbol, strategy_id, signal_date)
+            # so the UNIQUE constraint can be applied even if duplicates exist.
+            _conn.execute(text("""
+                DELETE FROM strategy_signals
+                WHERE id NOT IN (
+                    SELECT MAX(id)
+                    FROM strategy_signals
+                    GROUP BY symbol, strategy_id, signal_date
+                )
+            """))
             _conn.execute(text("""
                 ALTER TABLE strategy_signals
                 ADD CONSTRAINT uq_signal_sym_strat_date
                 UNIQUE (symbol, strategy_id, signal_date)
             """))
             _conn.commit()
-        except Exception:
-            pass  # constraint already exists
+            logger.info("[migration] uq_signal_sym_strat_date constraint added")
+        except Exception as e:
+            _conn.rollback()
+            if "already exists" in str(e) or "uq_signal_sym_strat_date" in str(e):
+                logger.debug("[migration] uq_signal_sym_strat_date already exists — skipping")
+            else:
+                logger.error("[migration] Phase H failed: %s", e)
 
     # Strategy Combination Engine tables
     try:

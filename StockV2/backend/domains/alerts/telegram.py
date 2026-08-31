@@ -1,3 +1,4 @@
+import html
 import json
 import logging
 from datetime import date
@@ -72,11 +73,11 @@ class AlertService:
                 conditions = reasoning.get("conditions_met", [])
             except Exception:
                 pass
-            why = " | ".join(conditions[:3]) if conditions else strategy
+            why = html.escape(" | ".join(conditions[:3]) if conditions else strategy)
 
             lines.append(
                 f"\n🟢 <b>{sig['symbol']}</b> — {conf}% confidence\n"
-                f"   📌 {strategy}\n"
+                f"   📌 {html.escape(strategy)}\n"
                 f"   💰 Price: {price_str}  |  SL: {sl_str}  |  Target: {tgt_str}\n"
                 + (f"   📈 Upside: {upside:.1f}%  |  Hold: {hold}d\n" if upside and hold else "")
                 + f"   📊 {win_str}\n"
@@ -110,11 +111,11 @@ class AlertService:
                 conditions = reasoning.get("conditions_met", [])
             except Exception:
                 pass
-            why = " | ".join(conditions[:2]) if conditions else strategy
+            why = html.escape(" | ".join(conditions[:2]) if conditions else strategy)
 
             lines.append(
                 f"\n🔴 <b>{a['symbol']}</b> — {conf}% confidence{pnl_str}\n"
-                f"   📌 {strategy}\n"
+                f"   📌 {html.escape(strategy)}\n"
                 f"   💰 Signal price: ₹{price:,.0f}  (date: {signal_date})\n"
                 f"   💡 <i>{why}</i>"
             )
@@ -180,11 +181,11 @@ class AlertService:
             price = sig.get("price")
             strategy = sig.get("strategy_name", "")
             conditions = sig.get("conditions_met") or []
-            why = " | ".join(conditions[:2]) if conditions else strategy
+            why = html.escape(" | ".join(conditions[:2]) if conditions else strategy)
             price_str = f"₹{price:,.2f}" if price else "—"
             lines.append(
                 f"\n🟢 <b>{sig['symbol']}</b> — {conf}% confidence\n"
-                f"   📌 {strategy}\n"
+                f"   📌 {html.escape(strategy)}\n"
                 f"   💰 Price: {price_str}\n"
                 f"   💡 <i>{why}</i>"
             )
