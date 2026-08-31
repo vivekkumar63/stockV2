@@ -98,6 +98,8 @@ function StockTable({ sector }: { sector: string }) {
   if (isLoading) return <p className="text-xs text-gray-400 py-2">Loading stocks…</p>
   if (!data || data.length === 0) return <p className="text-xs text-gray-400 py-2">No stock data available.</p>
 
+  const sorted = [...data].sort((a, b) => (b.return_3m ?? -Infinity) - (a.return_3m ?? -Infinity))
+
   return (
     <div className="mt-3 overflow-x-auto">
       <table className="w-full text-xs border-collapse">
@@ -107,13 +109,13 @@ function StockTable({ sector }: { sector: string }) {
             <th className="text-right py-1 px-2 font-medium">Close</th>
             <th className="text-right py-1 px-2 font-medium">vs SMA20</th>
             <th className="text-right py-1 px-2 font-medium">vs SMA50</th>
-            <th className="text-right py-1 px-2 font-medium">3M Return</th>
+            <th className="text-right py-1 px-2 font-medium">3M Return ↓</th>
             <th className="text-center py-1 px-2 font-medium">SMA20</th>
             <th className="text-center py-1 px-2 font-medium">SMA50</th>
           </tr>
         </thead>
         <tbody>
-          {data.map(s => (
+          {sorted.map(s => (
             <tr key={s.symbol} className="border-b border-gray-100 hover:bg-white">
               <td className="py-1 pr-3 font-semibold text-gray-800">{s.symbol}</td>
               <td className="py-1 px-2 text-right text-gray-600">₹{s.close.toFixed(1)}</td>
