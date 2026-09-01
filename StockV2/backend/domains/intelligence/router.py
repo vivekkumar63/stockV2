@@ -17,8 +17,6 @@ from database import get_db
 from domains.intelligence.false_signal_detector import FalseSignalDetector
 from domains.intelligence.ml_scorer import (
     MLSignalScorer, regime_to_code,
-    MODEL_PATH as NORMAL_ML_MODEL_PATH,
-    METRICS_PATH as NORMAL_ML_METRICS_PATH,
     MIN_TRAINING_SAMPLES as NORMAL_ML_MIN_SAMPLES,
 )
 from domains.intelligence.opportunity_scorer import OpportunityScorer
@@ -558,26 +556,21 @@ def _compute_sr_score(sr) -> Optional[float]:
 
 @router.get("/intelligence/ml-status")
 def get_normal_ml_status(db: Session = Depends(get_db)):
-    """Model file existence, last-trained timestamp, sample count, and quality metrics."""
-    exists = os.path.exists(NORMAL_ML_MODEL_PATH)
-    last_trained = None
-    metrics: dict = {}
-    if exists:
-        last_trained = datetime.fromtimestamp(os.path.getmtime(NORMAL_ML_MODEL_PATH)).isoformat()
-        if os.path.exists(NORMAL_ML_METRICS_PATH):
-            with open(NORMAL_ML_METRICS_PATH) as f:
-                metrics = json.load(f)
+    """Aggregate status across all per-strategy models."""
+    agg = MLSignalScorer().get_aggregate_status(db)
     samples = db.execute(
         text("SELECT COUNT(*) FROM signal_outcomes WHERE is_profitable IS NOT NULL")
     ).scalar() or 0
     return {
-        "exists": exists,
-        "last_trained": last_trained,
+        "exists": agg["models_trained"] > 0,
+        "models_trained": agg["models_trained"],
+        "models_total": agg["models_total"],
+        "last_trained": agg["last_trained"],
         "samples_available": int(samples),
-        "auc_roc": metrics.get("auc_roc"),
-        "precision_at_60": metrics.get("precision_at_60"),
-        "high_conf_signals": metrics.get("high_conf_signals"),
-        "class_balance": metrics.get("class_balance"),
+        "auc_roc": agg["auc_roc"],
+        "precision_at_60": agg["precision_at_60"],
+        "high_conf_signals": agg["high_conf_signals"],
+        "class_balance": agg["class_balance"],
     }
 
 
@@ -752,16 +745,24 @@ def compute_signal_outcomes(db: Session = Depends(get_db)):
 
 @router.post("/intelligence/train")
 def train_normal_ml_model(db: Session = Depends(get_db)):
-    """Train the normal-strategy ML model on signal_outcomes data."""
+    """Train one model per active strategy on signal_outcomes data."""
     scorer = MLSignalScorer()
-    result = scorer.train(db)
-    if result["samples"] == 0:
+    results = scorer.train_all(db)
+    trained = {sid: r for sid, r in results.items() if r.get("samples", 0) > 0}
+    if not trained:
         return {
             "status": "skipped", "samples": 0,
-            "message": f"Need at least {NORMAL_ML_MIN_SAMPLES} labelled signal_outcomes rows",
+            "message": f"No strategy has >= {NORMAL_ML_MIN_SAMPLES} labelled signal_outcomes rows",
         }
+    total_samples = sum(r["samples"] for r in trained.values())
+    import numpy as _np
+    aucs = [r["auc_roc"] for r in trained.values() if r.get("auc_roc") is not None]
+    avg_auc = round(float(_np.mean(aucs)), 4) if aucs else None
     return {
         "status": "ok",
-        "message": f"Trained on {result['samples']} samples",
-        **result,
+        "message": f"Trained {len(trained)}/{len(results)} strategy models on {total_samples} total samples",
+        "strategies_trained": len(trained),
+        "strategies_total": len(results),
+        "samples": total_samples,
+        "auc_roc": avg_auc,
     }

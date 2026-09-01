@@ -2,6 +2,8 @@ import { apiFetch } from './client'
 
 export interface MLModelStatus {
   exists: boolean
+  models_trained: number
+  models_total: number
   last_trained: string | null
   samples_available: number
   auc_roc: number | null
@@ -14,6 +16,8 @@ export interface MLTrainResult {
   status: 'ok' | 'skipped'
   samples: number
   message: string
+  strategies_trained?: number
+  strategies_total?: number
   auc_roc?: number
   precision_at_60?: number
   high_conf_signals?: number

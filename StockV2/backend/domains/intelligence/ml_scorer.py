@@ -12,8 +12,7 @@ from sqlalchemy.orm import Session
 logger = logging.getLogger(__name__)
 
 MIN_TRAINING_SAMPLES = 50
-MODEL_PATH = os.path.join(os.path.dirname(__file__), "..", "..", "ml_models", "signal_scorer.pkl")
-METRICS_PATH = os.path.join(os.path.dirname(__file__), "..", "..", "ml_models", "signal_scorer_metrics.json")
+_MODEL_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "ml_models")
 
 _REGIME_MAP = {
     "STRONG_BULL": 5,
@@ -24,9 +23,16 @@ _REGIME_MAP = {
     "HIGH_VOLATILITY": 0,
 }
 
-# Module-level cache — load attempted at most once per process.
 _LOAD_FAILED = object()
-_cached_model: object = None
+_model_cache: dict = {}  # {strategy_id: model | _LOAD_FAILED}
+
+
+def _model_path(strategy_id: int) -> str:
+    return os.path.join(_MODEL_DIR, f"strategy_scorer_{strategy_id}.pkl")
+
+
+def _metrics_path(strategy_id: int) -> str:
+    return os.path.join(_MODEL_DIR, f"strategy_scorer_{strategy_id}_metrics.json")
 
 
 def regime_to_code(regime: str) -> int:
@@ -35,21 +41,25 @@ def regime_to_code(regime: str) -> int:
 
 class MLSignalScorer:
     """
-    LightGBM classifier trained on signal_outcomes with isotonic calibration.
+    LightGBM classifier trained per-strategy on signal_outcomes with isotonic calibration.
     Features: confidence_score, regime_code, strategy_id, month, day_of_week,
               strategy_win_rate, log_total_trades, strategy_recent_win_rate,
               pe_ratio, pb_ratio, roe, debt_equity.
+    One model file per strategy: ml_models/strategy_scorer_{id}.pkl
     """
 
-    def train(self, db: Session) -> dict:
-        """Train on signal_outcomes, calibrate, save model + metrics. Returns metrics dict."""
-        X, y = self._extract_features(db)
+    def train(self, db: Session, strategy_id: int) -> dict:
+        """Train on signal_outcomes for one strategy. Returns metrics dict."""
+        X, y = self._extract_features(db, strategy_id)
         if len(X) < MIN_TRAINING_SAMPLES:
-            logger.warning("[ml_scorer] insufficient training samples: %d < %d", len(X), MIN_TRAINING_SAMPLES)
-            return {"samples": 0}
+            logger.warning(
+                "[ml_scorer] strategy %d: insufficient samples: %d < %d",
+                strategy_id, len(X), MIN_TRAINING_SAMPLES,
+            )
+            return {"samples": 0, "strategy_id": strategy_id}
         if len(np.unique(y)) < 2:
-            logger.warning("[ml_scorer] training data has only one class — skipping")
-            return {"samples": 0}
+            logger.warning("[ml_scorer] strategy %d: only one class — skipping", strategy_id)
+            return {"samples": 0, "strategy_id": strategy_id}
 
         from lightgbm import LGBMClassifier
         from sklearn.calibration import CalibratedClassifierCV
@@ -88,16 +98,17 @@ class MLSignalScorer:
         high_conf_mask = cal_probs >= 0.6
         precision_at_60 = float(y_cal[high_conf_mask].mean()) if high_conf_mask.sum() > 0 else None
 
-        # Production model: isotonic calibration on full data (better than sigmoid for LGBM)
+        # Production model: isotonic calibration on full data
         cal_method = "isotonic" if len(X) >= 500 else "sigmoid"
         model = CalibratedClassifierCV(LGBMClassifier(**_lgb), cv=5, method=cal_method)
         model.fit(X, y)
 
-        os.makedirs(os.path.dirname(MODEL_PATH), exist_ok=True)
-        with open(MODEL_PATH, "wb") as f:
+        os.makedirs(_MODEL_DIR, exist_ok=True)
+        with open(_model_path(strategy_id), "wb") as f:
             pickle.dump(model, f)
 
         metrics = {
+            "strategy_id": strategy_id,
             "auc_roc": round(auc_roc, 4),
             "precision_at_60": round(precision_at_60, 4) if precision_at_60 is not None else None,
             "high_conf_signals": int(high_conf_mask.sum()),
@@ -105,22 +116,58 @@ class MLSignalScorer:
             "samples": len(X),
             "trained_at": datetime.now().isoformat(),
         }
-        with open(METRICS_PATH, "w") as f:
+        with open(_metrics_path(strategy_id), "w") as f:
             json.dump(metrics, f)
 
-        global _cached_model
-        _cached_model = model
-        logger.info("[ml_scorer] trained on %d samples, auc_roc=%.3f", len(X), auc_roc)
+        _model_cache[strategy_id] = model
+        logger.info(
+            "[ml_scorer] strategy %d: trained on %d samples, auc_roc=%.3f",
+            strategy_id, len(X), auc_roc,
+        )
         return metrics
 
+    def train_all(self, db: Session) -> dict:
+        """Train one model per active strategy. Returns {strategy_id: metrics}."""
+        ids = [r[0] for r in db.execute(text("SELECT id FROM strategies WHERE is_active = true")).fetchall()]
+        results = {}
+        for sid in ids:
+            results[sid] = self.train(db, sid)
+        return results
+
+    def get_aggregate_status(self, db) -> dict:
+        """Aggregate status across all per-strategy models."""
+        ids = [r[0] for r in db.execute(text("SELECT id FROM strategies WHERE is_active = true")).fetchall()]
+        trained, all_metrics = [], []
+        for sid in ids:
+            if os.path.exists(_model_path(sid)):
+                trained.append(sid)
+                mp = _metrics_path(sid)
+                if os.path.exists(mp):
+                    with open(mp) as f:
+                        all_metrics.append(json.load(f))
+
+        last_trained = max(
+            (m["trained_at"] for m in all_metrics if m.get("trained_at")), default=None
+        )
+        aucs = [m["auc_roc"] for m in all_metrics if m.get("auc_roc") is not None]
+        p60s = [m["precision_at_60"] for m in all_metrics if m.get("precision_at_60") is not None]
+        return {
+            "models_trained": len(trained),
+            "models_total": len(ids),
+            "last_trained": last_trained,
+            "auc_roc": round(float(np.mean(aucs)), 4) if aucs else None,
+            "precision_at_60": round(float(np.mean(p60s)), 4) if p60s else None,
+            "high_conf_signals": sum(m.get("high_conf_signals", 0) for m in all_metrics),
+            "class_balance": None,
+        }
+
     def predict(self, features: dict, db=None, symbol: str = None) -> Optional[float]:
-        """Return calibrated win-probability in [0,1], or None if model not available.
+        """Return calibrated win-probability in [0,1], or None if no model for this strategy.
 
         Required keys: confidence_score, regime_code, strategy_id, month, day_of_week
-        Optional keys (auto-computed from db if absent):
-            strategy_win_rate, log_total_trades, strategy_recent_win_rate
         """
-        model = self._load_model()
+        strategy_id = int(features["strategy_id"])
+        model = self._load_model(strategy_id)
         if model is None:
             return None
 
@@ -129,7 +176,7 @@ class MLSignalScorer:
         strategy_recent_win_rate = features.get("strategy_recent_win_rate")
 
         if db is not None and strategy_win_rate is None:
-            stats = self._get_strategy_stats(db, int(features["strategy_id"]))
+            stats = self._get_strategy_stats(db, strategy_id)
             strategy_win_rate = stats["win_rate"]
             log_total_trades = stats["log_total_trades"]
             strategy_recent_win_rate = stats["recent_win_rate"]
@@ -157,7 +204,7 @@ class MLSignalScorer:
         X_row = np.array([[
             features["confidence_score"],
             features["regime_code"],
-            features["strategy_id"],
+            strategy_id,
             features["month"],
             features["day_of_week"],
             strategy_win_rate,
@@ -172,13 +219,8 @@ class MLSignalScorer:
         try:
             probs = model.predict_proba(X_row)[0]
         except ValueError:
-            # Feature count mismatch — model was trained before fundamentals were added.
-            # Invalidate cache so next load picks up a freshly-trained model.
-            global _cached_model
-            _cached_model = None
-            logger.warning(
-                "[ml_scorer] feature mismatch — model needs retraining with fundamentals features"
-            )
+            _model_cache[strategy_id] = None
+            logger.warning("[ml_scorer] strategy %d: feature mismatch — needs retraining", strategy_id)
             return None
         classes = list(model.classes_)
         if 1 not in classes:
@@ -214,27 +256,27 @@ class MLSignalScorer:
             "recent_win_rate": recent_win_rate,
         }
 
-    def _load_model(self):
-        """Load persisted model or return None. Loads at most once per process."""
-        global _cached_model
-        if _cached_model is _LOAD_FAILED:
+    def _load_model(self, strategy_id: int):
+        cached = _model_cache.get(strategy_id)
+        if cached is _LOAD_FAILED:
             return None
-        if _cached_model is not None:
-            return _cached_model
-        if not os.path.exists(MODEL_PATH):
-            _cached_model = _LOAD_FAILED
+        if cached is not None:
+            return cached
+        path = _model_path(strategy_id)
+        if not os.path.exists(path):
+            _model_cache[strategy_id] = _LOAD_FAILED
             return None
         try:
-            with open(MODEL_PATH, "rb") as f:
-                _cached_model = pickle.load(f)
-            return _cached_model
+            with open(path, "rb") as f:
+                _model_cache[strategy_id] = pickle.load(f)
+            return _model_cache[strategy_id]
         except Exception as e:
-            logger.warning("[ml_scorer] failed to load model: %s", e)
-            _cached_model = _LOAD_FAILED
+            logger.warning("[ml_scorer] failed to load model for strategy %d: %s", strategy_id, e)
+            _model_cache[strategy_id] = _LOAD_FAILED
             return None
 
-    def _extract_features(self, db: Session):
-        """Window-function query: 12 features per signal_outcome row."""
+    def _extract_features(self, db: Session, strategy_id: int):
+        """12 features per signal_outcome row, filtered to one strategy."""
         rows = db.execute(text("""
             SELECT
                 ss.confidence_score,
@@ -269,8 +311,8 @@ class MLSignalScorer:
                 WHERE symbol = ss.symbol AND data_as_of <= so.signal_date
                 ORDER BY data_as_of DESC LIMIT 1
             ) fund ON TRUE
-            WHERE so.is_profitable IS NOT NULL
-        """)).fetchall()
+            WHERE so.is_profitable IS NOT NULL AND ss.strategy_id = :sid
+        """), {"sid": strategy_id}).fetchall()
 
         if not rows:
             return np.array([]).reshape(0, 12), np.array([])

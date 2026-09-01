@@ -275,13 +275,19 @@ def _weekly_fundamentals():
 
 
 def _monthly_ml_retrain():
-    """Retrain ML signal probability model after signal outcomes accumulate."""
+    """Retrain all per-strategy ML models (normal + special) after outcomes accumulate."""
     from database import SessionLocal
     from domains.intelligence.ml_scorer import MLSignalScorer
+    from domains.special_strategies.ml_scorer import SpecialMLScorer
     db = SessionLocal()
     try:
-        n = MLSignalScorer().train(db)
-        logger.info("[ml_retrain] trained on %d signal outcomes", n)
+        normal = MLSignalScorer().train_all(db)
+        n_trained = sum(1 for r in normal.values() if r.get("samples", 0) > 0)
+        logger.info("[ml_retrain] normal: trained %d/%d strategy models", n_trained, len(normal))
+
+        special = SpecialMLScorer().train_all(db)
+        s_trained = sum(1 for r in special.values() if r.get("samples", 0) > 0)
+        logger.info("[ml_retrain] special: trained %d/%d strategy models", s_trained, len(special))
     except Exception:
         logger.exception("[ml_retrain] failed")
     finally:

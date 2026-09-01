@@ -12,12 +12,7 @@ from sqlalchemy.orm import Session
 logger = logging.getLogger(__name__)
 
 MIN_TRAINING_SAMPLES = 50
-MODEL_PATH = os.path.join(
-    os.path.dirname(__file__), "..", "..", "ml_models", "special_signal_scorer.pkl"
-)
-METRICS_PATH = os.path.join(
-    os.path.dirname(__file__), "..", "..", "ml_models", "special_signal_scorer_metrics.json"
-)
+_MODEL_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "ml_models")
 
 _REGIME_MAP = {
     "STRONG_BULL": 5,
@@ -28,9 +23,16 @@ _REGIME_MAP = {
     "HIGH_VOLATILITY": 0,
 }
 
-# Module-level cache — load attempted at most once per process.
 _LOAD_FAILED = object()
-_cached_model: object = None
+_model_cache: dict = {}  # {special_strategy_id: model | _LOAD_FAILED}
+
+
+def _model_path(special_strategy_id: int) -> str:
+    return os.path.join(_MODEL_DIR, f"special_strategy_scorer_{special_strategy_id}.pkl")
+
+
+def _metrics_path(special_strategy_id: int) -> str:
+    return os.path.join(_MODEL_DIR, f"special_strategy_scorer_{special_strategy_id}_metrics.json")
 
 
 def special_regime_to_code(regime: str) -> int:
@@ -39,23 +41,25 @@ def special_regime_to_code(regime: str) -> int:
 
 class SpecialMLScorer:
     """
-    LightGBM classifier trained on special_strategy_trades with isotonic calibration.
+    LightGBM classifier trained per-strategy on special_strategy_trades with isotonic calibration.
     Features: strategy_id, entry_month, entry_dow, regime_code,
               strategy_avg_win_rate, strategy_profit_factor, strategy_avg_pnl_pct,
               pe_ratio, pb_ratio, roe, debt_equity.
+    One model file per special strategy: ml_models/special_strategy_scorer_{id}.pkl
     """
 
-    def train(self, db: Session) -> dict:
-        """Train on special_backtest_trades, calibrate, save model + metrics. Returns metrics dict."""
-        X, y = self._extract_features(db)
+    def train(self, db: Session, special_strategy_id: int) -> dict:
+        """Train on special_strategy_trades for one strategy. Returns metrics dict."""
+        X, y = self._extract_features(db, special_strategy_id)
         if len(X) < MIN_TRAINING_SAMPLES:
             logger.warning(
-                "[special_ml_scorer] insufficient training samples: %d < %d", len(X), MIN_TRAINING_SAMPLES
+                "[special_ml_scorer] strategy %d: insufficient samples: %d < %d",
+                special_strategy_id, len(X), MIN_TRAINING_SAMPLES,
             )
-            return {"samples": 0}
+            return {"samples": 0, "strategy_id": special_strategy_id}
         if len(np.unique(y)) < 2:
-            logger.warning("[special_ml_scorer] training data has only one class — skipping")
-            return {"samples": 0}
+            logger.warning("[special_ml_scorer] strategy %d: only one class — skipping", special_strategy_id)
+            return {"samples": 0, "strategy_id": special_strategy_id}
 
         from lightgbm import LGBMClassifier
         from sklearn.calibration import CalibratedClassifierCV
@@ -97,11 +101,12 @@ class SpecialMLScorer:
         model = CalibratedClassifierCV(LGBMClassifier(**_lgb), cv=5, method=cal_method)
         model.fit(X, y)
 
-        os.makedirs(os.path.dirname(MODEL_PATH), exist_ok=True)
-        with open(MODEL_PATH, "wb") as f:
+        os.makedirs(_MODEL_DIR, exist_ok=True)
+        with open(_model_path(special_strategy_id), "wb") as f:
             pickle.dump(model, f)
 
         metrics = {
+            "strategy_id": special_strategy_id,
             "auc_roc": round(auc_roc, 4),
             "precision_at_60": round(precision_at_60, 4) if precision_at_60 is not None else None,
             "high_conf_signals": int(high_conf_mask.sum()),
@@ -109,21 +114,59 @@ class SpecialMLScorer:
             "samples": len(X),
             "trained_at": datetime.now().isoformat(),
         }
-        with open(METRICS_PATH, "w") as f:
+        with open(_metrics_path(special_strategy_id), "w") as f:
             json.dump(metrics, f)
 
-        global _cached_model
-        _cached_model = model
-        logger.info("[special_ml_scorer] trained on %d samples, auc_roc=%.3f", len(X), auc_roc)
+        _model_cache[special_strategy_id] = model
+        logger.info(
+            "[special_ml_scorer] strategy %d: trained on %d samples, auc_roc=%.3f",
+            special_strategy_id, len(X), auc_roc,
+        )
         return metrics
 
+    def train_all(self, db: Session) -> dict:
+        """Train one model per active special strategy. Returns {strategy_id: metrics}."""
+        ids = [r[0] for r in db.execute(text("SELECT id FROM special_strategies WHERE is_active = true")).fetchall()]
+        results = {}
+        for sid in ids:
+            results[sid] = self.train(db, sid)
+        return results
+
+    def get_aggregate_status(self, db) -> dict:
+        """Aggregate status across all per-special-strategy models."""
+        ids = [r[0] for r in db.execute(text("SELECT id FROM special_strategies WHERE is_active = true")).fetchall()]
+        trained, all_metrics = [], []
+        for sid in ids:
+            if os.path.exists(_model_path(sid)):
+                trained.append(sid)
+                mp = _metrics_path(sid)
+                if os.path.exists(mp):
+                    with open(mp) as f:
+                        all_metrics.append(json.load(f))
+
+        last_trained = max(
+            (m["trained_at"] for m in all_metrics if m.get("trained_at")), default=None
+        )
+        aucs = [m["auc_roc"] for m in all_metrics if m.get("auc_roc") is not None]
+        p60s = [m["precision_at_60"] for m in all_metrics if m.get("precision_at_60") is not None]
+        return {
+            "models_trained": len(trained),
+            "models_total": len(ids),
+            "last_trained": last_trained,
+            "auc_roc": round(float(np.mean(aucs)), 4) if aucs else None,
+            "precision_at_60": round(float(np.mean(p60s)), 4) if p60s else None,
+            "high_conf_signals": sum(m.get("high_conf_signals", 0) for m in all_metrics),
+            "class_balance": None,
+        }
+
     def predict(self, features: dict, db=None, symbol: str = None) -> Optional[float]:
-        """Return calibrated win-probability in [0,1], or None if model not available.
+        """Return calibrated win-probability in [0,1], or None if no model for this strategy.
 
         Expected keys: strategy_id, entry_month, entry_dow, regime_code,
                        strategy_avg_win_rate, strategy_profit_factor, strategy_avg_pnl_pct
         """
-        model = self._load_model()
+        special_strategy_id = int(features["strategy_id"])
+        model = self._load_model(special_strategy_id)
         if model is None:
             return None
 
@@ -141,7 +184,7 @@ class SpecialMLScorer:
                 pe_ratio, pb_ratio, roe, debt_equity = fund_row[0], fund_row[1], fund_row[2], fund_row[3]
 
         X_row = np.array([[
-            features["strategy_id"],
+            special_strategy_id,
             features["entry_month"],
             features["entry_dow"],
             features["regime_code"],
@@ -156,10 +199,10 @@ class SpecialMLScorer:
         try:
             probs = model.predict_proba(X_row)[0]
         except ValueError:
-            global _cached_model
-            _cached_model = None
+            _model_cache[special_strategy_id] = None
             logger.warning(
-                "[special_ml_scorer] feature mismatch — model needs retraining with fundamentals features"
+                "[special_ml_scorer] strategy %d: feature mismatch — needs retraining",
+                special_strategy_id,
             )
             return None
         classes = list(model.classes_)
@@ -168,30 +211,27 @@ class SpecialMLScorer:
         col = classes.index(1)
         return round(float(probs[col]), 4)
 
-    def _load_model(self):
-        global _cached_model
-        if _cached_model is _LOAD_FAILED:
+    def _load_model(self, special_strategy_id: int):
+        cached = _model_cache.get(special_strategy_id)
+        if cached is _LOAD_FAILED:
             return None
-        if _cached_model is not None:
-            return _cached_model
-        if not os.path.exists(MODEL_PATH):
-            _cached_model = _LOAD_FAILED
+        if cached is not None:
+            return cached
+        path = _model_path(special_strategy_id)
+        if not os.path.exists(path):
+            _model_cache[special_strategy_id] = _LOAD_FAILED
             return None
         try:
-            with open(MODEL_PATH, "rb") as f:
-                _cached_model = pickle.load(f)
-            return _cached_model
+            with open(path, "rb") as f:
+                _model_cache[special_strategy_id] = pickle.load(f)
+            return _model_cache[special_strategy_id]
         except Exception as e:
-            logger.warning("[special_ml_scorer] failed to load model: %s", e)
-            _cached_model = _LOAD_FAILED
+            logger.warning("[special_ml_scorer] failed to load model for strategy %d: %s", special_strategy_id, e)
+            _model_cache[special_strategy_id] = _LOAD_FAILED
             return None
 
-    def _extract_features(self, db: Session):
-        """CTE query: 11 features per special_strategy_trades row.
-
-        Label: pnl_pct >= 10 (trade closed at ≥10% profit = success).
-        Source: special_strategy_trades populated by precompute (not manual backtests).
-        """
+    def _extract_features(self, db: Session, special_strategy_id: int):
+        """11 features per special_strategy_trades row, filtered to one strategy."""
         rows = db.execute(text("""
             WITH strategy_stats AS (
                 SELECT special_strategy_id,
@@ -223,8 +263,10 @@ class SpecialMLScorer:
                 WHERE symbol = sst.symbol AND data_as_of <= sst.entry_date
                 ORDER BY data_as_of DESC LIMIT 1
             ) fund ON TRUE
-            WHERE sst.entry_date IS NOT NULL AND sst.pnl_pct IS NOT NULL
-        """)).fetchall()
+            WHERE sst.entry_date IS NOT NULL
+              AND sst.pnl_pct IS NOT NULL
+              AND sst.special_strategy_id = :sid
+        """), {"sid": special_strategy_id}).fetchall()
 
         if not rows:
             return np.array([]).reshape(0, 11), np.array([])

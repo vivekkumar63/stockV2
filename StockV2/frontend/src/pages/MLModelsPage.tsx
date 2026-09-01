@@ -66,7 +66,9 @@ function ModelCard({
               className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${status.exists ? 'bg-green-500' : 'bg-gray-400'}`}
             />
             <span className={status.exists ? 'text-green-700 font-medium' : 'text-gray-500'}>
-              {status.exists ? 'Trained' : 'Not Trained'}
+              {status.models_total != null
+                ? `${status.models_trained ?? 0}/${status.models_total} strategies trained`
+                : status.exists ? 'Trained' : 'Not Trained'}
             </span>
             {status.last_trained && (
               <span className="text-gray-400 text-xs ml-auto">

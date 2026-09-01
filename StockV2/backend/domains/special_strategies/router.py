@@ -14,8 +14,6 @@ from database import get_db, SessionLocal
 from domains.special_strategies import ALL_SPECIAL_STRATEGIES
 from domains.special_strategies.ml_scorer import (
     SpecialMLScorer, special_regime_to_code,
-    MODEL_PATH as SPECIAL_ML_MODEL_PATH,
-    METRICS_PATH as SPECIAL_ML_METRICS_PATH,
     MIN_TRAINING_SAMPLES as SPECIAL_ML_MIN_SAMPLES,
 )
 from domains.special_strategies.scanner import SpecialScanner
@@ -500,15 +498,8 @@ def get_special_scan_results(
 
 @router.get("/special/ml-status")
 def get_special_ml_status(db: Session = Depends(get_db)):
-    """Model file existence, last-trained timestamp, sample count, and quality metrics."""
-    exists = os.path.exists(SPECIAL_ML_MODEL_PATH)
-    last_trained = None
-    metrics: dict = {}
-    if exists:
-        last_trained = datetime.fromtimestamp(os.path.getmtime(SPECIAL_ML_MODEL_PATH)).isoformat()
-        if os.path.exists(SPECIAL_ML_METRICS_PATH):
-            with open(SPECIAL_ML_METRICS_PATH) as f:
-                metrics = json.load(f)
+    """Aggregate status across all per-special-strategy models."""
+    agg = SpecialMLScorer().get_aggregate_status(db)
     samples = db.execute(
         text("""
             SELECT COUNT(*) FROM special_strategy_trades
@@ -516,13 +507,15 @@ def get_special_ml_status(db: Session = Depends(get_db)):
         """)
     ).scalar() or 0
     return {
-        "exists": exists,
-        "last_trained": last_trained,
+        "exists": agg["models_trained"] > 0,
+        "models_trained": agg["models_trained"],
+        "models_total": agg["models_total"],
+        "last_trained": agg["last_trained"],
         "samples_available": int(samples),
-        "auc_roc": metrics.get("auc_roc"),
-        "precision_at_60": metrics.get("precision_at_60"),
-        "high_conf_signals": metrics.get("high_conf_signals"),
-        "class_balance": metrics.get("class_balance"),
+        "auc_roc": agg["auc_roc"],
+        "precision_at_60": agg["precision_at_60"],
+        "high_conf_signals": agg["high_conf_signals"],
+        "class_balance": agg["class_balance"],
     }
 
 
@@ -542,16 +535,24 @@ def get_special_training_data_status(db: Session = Depends(get_db)):
 
 @router.post("/special/ml/train")
 def train_special_ml_model(db: Session = Depends(get_db)):
-    """Train the special-strategy ML model on special_backtest_trades data."""
+    """Train one model per active special strategy on special_strategy_trades data."""
+    import numpy as _np
     scorer = SpecialMLScorer()
-    result = scorer.train(db)
-    if result["samples"] == 0:
+    results = scorer.train_all(db)
+    trained = {sid: r for sid, r in results.items() if r.get("samples", 0) > 0}
+    if not trained:
         return {
             "status": "skipped", "samples": 0,
-            "message": f"Need at least {SPECIAL_ML_MIN_SAMPLES} labelled special_backtest_trades rows",
+            "message": f"No special strategy has >= {SPECIAL_ML_MIN_SAMPLES} labelled trades",
         }
+    total_samples = sum(r["samples"] for r in trained.values())
+    aucs = [r["auc_roc"] for r in trained.values() if r.get("auc_roc") is not None]
+    avg_auc = round(float(_np.mean(aucs)), 4) if aucs else None
     return {
         "status": "ok",
-        "message": f"Trained on {result['samples']} samples",
-        **result,
+        "message": f"Trained {len(trained)}/{len(results)} special strategy models on {total_samples} total samples",
+        "strategies_trained": len(trained),
+        "strategies_total": len(results),
+        "samples": total_samples,
+        "auc_roc": avg_auc,
     }
