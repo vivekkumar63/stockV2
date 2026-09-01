@@ -148,7 +148,7 @@ class FalseSignalDetector:
                     "sdate": str(sig_date_obj),
                     "price": entry, "oprice": round(outcome_price, 4),
                     "odate": str(outcome_date), "pnl": round(pnl_pct, 4),
-                    "prof": 1 if is_profitable else 0, "hdays": actual_days,
+                    "prof": bool(is_profitable), "hdays": actual_days,
                 },
             )
             written += 1
