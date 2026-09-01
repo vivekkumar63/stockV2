@@ -24,6 +24,7 @@ class JobIds:
     COMBINATION_ANALYSIS = "combination_analysis"
     FII_DII_FETCH = "fii_dii_fetch"
     SECTOR_ROTATION = "sector_rotation_daily"
+    EARNINGS_REFRESH = "earnings_calendar_refresh"
 
 
 _IST = "Asia/Kolkata"
@@ -427,6 +428,20 @@ def _fii_dii_fetch():
         db.close()
 
 
+def _earnings_refresh():
+    """Fetch upcoming earnings/results dates from NSE and upsert into earnings_calendar."""
+    from database import SessionLocal
+    from domains.data.earnings_fetcher import EarningsFetcher
+    db = SessionLocal()
+    try:
+        n = EarningsFetcher().refresh(db)
+        logger.info("[earnings_refresh] upserted %d rows", n)
+    except Exception:
+        logger.exception("[earnings_refresh] failed")
+    finally:
+        db.close()
+
+
 def _sector_rotation_daily():
     """Compute sector breadth and signal flow after EOD data and index trends are available."""
     from datetime import timedelta
@@ -553,6 +568,13 @@ def register_jobs():
         _sector_rotation_daily,
         CronTrigger(hour=16, minute=40, day_of_week="mon-fri", timezone=_IST),
         id=JobIds.SECTOR_ROTATION,
+        replace_existing=True,
+    )
+    # 6:15am — fetch upcoming earnings dates before market opens
+    scheduler.add_job(
+        _earnings_refresh,
+        CronTrigger(hour=6, minute=15, timezone=_IST),
+        id=JobIds.EARNINGS_REFRESH,
         replace_existing=True,
     )
     logger.info("APScheduler jobs registered: %s", [j.id for j in scheduler.get_jobs()])

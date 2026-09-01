@@ -108,14 +108,19 @@ class WalkForwardRunner:
                 round_trip_cost_pct=round_trip_cost_pct,
             )
 
-            oos_metrics = compute_metrics(trades, initial_capital, test_start, test_end)
+            m = compute_metrics(trades, initial_capital, test_start, test_end)
             windows.append(WalkForwardWindow(
                 window_index=window_idx,
                 train_from=train_start,
                 train_to=test_start - timedelta(days=1),
                 test_from=test_start,
                 test_to=test_end,
-                oos_metrics=oos_metrics,
+                oos_metrics={
+                    "win_rate": m.get("win_rate"),
+                    "total_trades": m.get("total_trades", 0),
+                    "avg_return_pct": m.get("avg_return_pct"),
+                    "max_drawdown_pct": m.get("max_drawdown"),
+                },
             ))
 
             window_idx += 1
@@ -128,7 +133,9 @@ class WalkForwardRunner:
                 consistency_score=0.0, in_sample_win_rate=None,
             )
 
-        oos_win_rates = [w.oos_metrics["win_rate"] for w in windows if w.oos_metrics["win_rate"] is not None]
+        oos_win_rates = [w.oos_metrics["win_rate"] for w in windows
+                        if w.oos_metrics.get("win_rate") is not None
+                        and (w.oos_metrics.get("total_trades") or 0) > 0]
         oos_win_rate_mean = round(statistics.mean(oos_win_rates), 4) if oos_win_rates else None
         oos_win_rate_std = round(statistics.stdev(oos_win_rates), 4) if len(oos_win_rates) > 1 else None
 

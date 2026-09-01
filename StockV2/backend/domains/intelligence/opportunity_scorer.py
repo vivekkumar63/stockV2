@@ -107,6 +107,7 @@ class OpportunityScorer:
         false_signal_rate: Optional[float] = None,
         ml_probability: Optional[float] = None,
         sector_health_score: Optional[float] = None,   # 0–1; None = unknown sector (treated as 0.5)
+        confluence_count: int = 1,
     ) -> OpportunityScore:
         parts: dict[str, Optional[float]] = {
             "historical_win_rate": historical_win_rate,
@@ -134,6 +135,20 @@ class OpportunityScorer:
             opp.score = round(opp.score * multiplier)
             opp.grade = _grade(opp.score)
             opp.breakdown["false_signal_rate"] = round(rate, 4)
+
+        # Apply confluence bonus: multiple strategies agreeing boosts confidence.
+        if confluence_count >= 4:
+            conf_multiplier = 1.15
+        elif confluence_count == 3:
+            conf_multiplier = 1.10
+        elif confluence_count == 2:
+            conf_multiplier = 1.05
+        else:
+            conf_multiplier = 1.0
+        if conf_multiplier != 1.0:
+            opp.score = min(100, round(opp.score * conf_multiplier))
+            opp.grade = _grade(opp.score)
+        opp.breakdown["confluence_count"] = confluence_count
 
         return opp
 

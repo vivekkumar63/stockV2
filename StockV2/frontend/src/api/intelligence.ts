@@ -46,6 +46,8 @@ export interface TopOpportunity {
   ml_probability: number | null
   false_signal_rate: number | null
   sector_name: string | null
+  confluence_count: number
+  days_to_earnings: number | null
   breakdown: OpportunityBreakdown
 }
 

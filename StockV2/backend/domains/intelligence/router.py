@@ -3,7 +3,7 @@
 import json
 import logging
 import os
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Optional
 
 from ist import ist_today
@@ -171,7 +171,8 @@ def get_top_opportunities(
             SELECT ss.id, ss.symbol, ss.strategy_id, s.name AS strategy_name,
                    ss.signal_date, ss.confidence_score, ss.price_at_signal,
                    ss.suggested_stop_loss, ss.suggested_target, ss.holding_period_days,
-                   ss.reasoning_json
+                   ss.reasoning_json,
+                   COUNT(*) OVER (PARTITION BY ss.symbol, ss.signal_date) AS confluence_count
             FROM strategy_signals ss
             JOIN strategies s ON s.id = ss.strategy_id
             WHERE ss.signal_date = :today AND ss.signal_type = 'BUY'
@@ -180,6 +181,26 @@ def get_top_opportunities(
         """),
         {"today": str(today)},
     ).fetchall()
+
+    # Build confluence map: symbol → number of strategies with BUY today
+    confluence_map: dict[str, int] = {r[1]: int(r[11]) for r in rows}
+
+    # Bulk earnings lookup: symbol → days until next result announcement
+    earnings_map: dict[str, int] = {}
+    try:
+        ec_rows = db.execute(text("""
+            SELECT symbol, MIN(result_date) AS next_result
+            FROM earnings_calendar
+            WHERE result_date BETWEEN :today AND :cutoff
+            GROUP BY symbol
+        """), {"today": str(today), "cutoff": str(today + timedelta(days=30))}).fetchall()
+        for ec in ec_rows:
+            rd = ec[1]
+            if isinstance(rd, str):
+                rd = date.fromisoformat(rd[:10])
+            earnings_map[ec[0]] = (rd - today).days
+    except Exception:
+        logger.warning("[top-opportunities] earnings lookup failed", exc_info=True)
 
     if not rows:
         return []
@@ -256,7 +277,8 @@ def get_top_opportunities(
     for r in rows:
         (signal_id, symbol, strategy_id, strategy_name,
          signal_date, confidence_score, price_at_signal,
-         suggested_stop_loss, suggested_target, holding_period_days, reasoning_json) = r
+         suggested_stop_loss, suggested_target, holding_period_days, reasoning_json,
+         _confluence_raw) = r
 
         pair = (symbol, strategy_id)
         if pair in seen:
@@ -298,6 +320,7 @@ def get_top_opportunities(
             "day_of_week":      today.weekday(),
         }, db=db)
 
+        confluence = confluence_map.get(symbol, 1)
         opp = opp_scorer.full_score(
             symbol=symbol,
             strategy_id=strategy_id,
@@ -311,6 +334,7 @@ def get_top_opportunities(
             false_signal_rate=false_rate,
             ml_probability=ml_prob,
             sector_health_score=sector_health,
+            confluence_count=confluence,
         )
 
         results.append({
@@ -334,8 +358,10 @@ def get_top_opportunities(
             "mtf_alignment":    mtf_score,
             "ml_probability":   ml_prob,
             "false_signal_rate": false_rate,
-            "breakdown":        opp.breakdown,
-            "sector_name":      _sym_sector,
+            "breakdown":          opp.breakdown,
+            "sector_name":        _sym_sector,
+            "confluence_count":   confluence,
+            "days_to_earnings":   earnings_map.get(symbol),
         })
 
     results.sort(key=lambda x: x["score"], reverse=True)

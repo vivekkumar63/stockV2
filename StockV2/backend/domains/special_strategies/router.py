@@ -2,7 +2,7 @@ import json
 import logging
 import os
 import threading
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -388,6 +388,27 @@ def _enrich_with_performance(signals: list[dict], db: Session) -> list[dict]:
     return result
 
 
+def _add_earnings_days(results: list[dict], db: Session, today: date) -> None:
+    """Inject days_to_earnings into each result dict in-place. Silently skips on error."""
+    try:
+        ec_rows = db.execute(text("""
+            SELECT symbol, MIN(result_date) AS next_result
+            FROM earnings_calendar
+            WHERE result_date BETWEEN :today AND :cutoff
+            GROUP BY symbol
+        """), {"today": str(today), "cutoff": str(today + timedelta(days=30))}).fetchall()
+        earnings_map: dict[str, int] = {}
+        for ec in ec_rows:
+            rd = ec[1]
+            if isinstance(rd, str):
+                rd = date.fromisoformat(rd[:10])
+            earnings_map[ec[0]] = (rd - today).days
+    except Exception:
+        earnings_map = {}
+    for r in results:
+        r["days_to_earnings"] = earnings_map.get(r.get("symbol"))
+
+
 def _save_scan_cache(signals: list[dict], scan_date: date, db: Session) -> None:
     db.execute(text("""
         INSERT INTO special_scan_cache (scan_date, results_json, scanned_at)
@@ -415,6 +436,7 @@ def get_special_recommendations(force: bool = False, db: Session = Depends(get_d
         ).fetchone()
         if row:
             cached = json.loads(row[0])
+            _add_earnings_days(cached, db, today)
             return {"scanned_at": str(row[1]), "results": cached}
 
     # Cache miss or force — run live scan
@@ -422,6 +444,7 @@ def get_special_recommendations(force: bool = False, db: Session = Depends(get_d
     signals = scanner.scan()
     result = _enrich_with_performance(signals, db)
     _save_scan_cache(result, today, db)
+    _add_earnings_days(result, db, today)
     scanned_at = db.execute(
         text("SELECT scanned_at FROM special_scan_cache WHERE scan_date = :d"), {"d": str(today)}
     ).scalar()

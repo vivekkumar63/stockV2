@@ -133,9 +133,29 @@ function OpportunityRow({
           </button>
         </td>
         <td className="px-4 py-2">
-          <div className="flex items-center gap-1.5">
+          <div className="flex items-center gap-1.5 flex-wrap">
             <span className="font-semibold">{opp.symbol}</span>
             <SectorBadge sector={opp.sector_name} />
+            {opp.confluence_count >= 2 && (
+              <span
+                className={`px-1.5 py-0.5 rounded text-xs font-medium ${
+                  opp.confluence_count >= 3
+                    ? 'bg-green-100 text-green-700'
+                    : 'bg-amber-100 text-amber-700'
+                }`}
+                title={`${opp.confluence_count} strategies agree on this signal`}
+              >
+                {opp.confluence_count} strats
+              </span>
+            )}
+            {opp.days_to_earnings != null && opp.days_to_earnings <= 5 && (
+              <span
+                className="px-1.5 py-0.5 rounded text-xs font-medium bg-orange-100 text-orange-700"
+                title="Stock reports earnings soon — entering before results is high risk"
+              >
+                ⚠️ Earnings in {opp.days_to_earnings}d
+              </span>
+            )}
           </div>
         </td>
         <td className="px-4 py-2"><GradeBadge score={opp.score} grade={opp.grade} /></td>

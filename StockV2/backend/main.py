@@ -154,6 +154,56 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning("combination tables migration skipped: %s", e)
 
+    # Walk-forward results table
+    try:
+        with engine.connect() as _conn:
+            _conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS walk_forward_results (
+                    id SERIAL PRIMARY KEY,
+                    symbol VARCHAR(20) NOT NULL,
+                    strategy_id INTEGER NOT NULL,
+                    n_windows INTEGER,
+                    oos_win_rate_mean REAL,
+                    oos_win_rate_std REAL,
+                    consistency_score REAL,
+                    in_sample_win_rate REAL,
+                    windows_json TEXT,
+                    computed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE (symbol, strategy_id)
+                )
+            """))
+            _conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS idx_wf_symbol_strategy ON walk_forward_results (symbol, strategy_id)"
+            ))
+            _conn.commit()
+        logger.info("walk_forward_results table verified")
+    except Exception as e:
+        logger.warning("walk_forward_results table migration skipped: %s", e)
+
+    # Earnings calendar table
+    try:
+        with engine.connect() as _conn:
+            _conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS earnings_calendar (
+                    id SERIAL PRIMARY KEY,
+                    symbol VARCHAR(20) NOT NULL,
+                    result_date DATE NOT NULL,
+                    event_type VARCHAR(100),
+                    fetched_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE (symbol, result_date)
+                )
+            """))
+            _conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS idx_earnings_symbol ON earnings_calendar (symbol)"
+            ))
+            _conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS idx_earnings_date ON earnings_calendar (result_date)"
+            ))
+            _conn.commit()
+        logger.info("earnings_calendar table verified")
+    except Exception as e:
+        logger.warning("earnings_calendar table migration skipped: %s", e)
+
     # Index pipeline tables
     try:
         with engine.connect() as _conn:
@@ -524,6 +574,28 @@ async def lifespan(app: FastAPI):
                 db_bg.close()
         threading.Thread(target=_bootstrap_indexes, daemon=True, name="index-bootstrap").start()
 
+    # Initial earnings fetch: populate earnings_calendar if empty
+    _ec_count = None
+    try:
+        with engine.connect() as _ec_conn:
+            _ec_count = _ec_conn.execute(text("SELECT COUNT(*) FROM earnings_calendar")).scalar()
+    except Exception:
+        pass
+    if _ec_count == 0:
+        def _bootstrap_earnings():
+            from database import SessionLocal as _SL
+            from domains.data.earnings_fetcher import EarningsFetcher
+            _db = _SL()
+            try:
+                n = EarningsFetcher().refresh(_db)
+                logger.info("[startup] earnings bootstrap: %d rows", n)
+            except Exception:
+                logger.exception("[startup] earnings bootstrap failed")
+            finally:
+                _db.close()
+        threading.Thread(target=_bootstrap_earnings, daemon=True, name="earnings-bootstrap").start()
+        logger.info("[startup] earnings_calendar empty — background fetch started")
+
     from scheduler import scheduler, register_jobs
     register_jobs()
     scheduler.start()
@@ -562,6 +634,7 @@ _COMPUTED_TABLES = [
     "backtest_results",
     "backtest_trades",
     "walk_forward_results",
+    "earnings_calendar",
     "combination_run_log",
     "combination_results",
     "combination_regime_perf",

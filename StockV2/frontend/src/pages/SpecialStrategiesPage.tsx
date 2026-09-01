@@ -162,7 +162,19 @@ function RecommendationsTab() {
                     <tbody className="divide-y divide-gray-100">
                       {results.map((r, i) => (
                         <tr key={i} className="hover:bg-gray-50">
-                          <td className="px-3 py-2 font-semibold text-gray-800">{r.symbol}</td>
+                          <td className="px-3 py-2">
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <span className="font-semibold text-gray-800">{r.symbol}</span>
+                              {r.days_to_earnings != null && r.days_to_earnings <= 5 && (
+                                <span
+                                  className="px-1.5 py-0.5 rounded text-xs font-medium bg-orange-100 text-orange-700"
+                                  title="Stock reports earnings soon — entering before results is high risk"
+                                >
+                                  ⚠️ Earnings in {r.days_to_earnings}d
+                                </span>
+                              )}
+                            </div>
+                          </td>
                           <td className="px-3 py-2 text-gray-600 whitespace-nowrap">{r.strategy_name}</td>
                           <td className="px-3 py-2">
                             <span className="px-2 py-0.5 bg-purple-50 text-purple-700 rounded text-xs font-medium">
