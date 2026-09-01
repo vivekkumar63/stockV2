@@ -15,6 +15,7 @@ from domains.special_strategies import ALL_SPECIAL_STRATEGIES
 from domains.special_strategies.ml_scorer import (
     SpecialMLScorer, special_regime_to_code,
     MODEL_PATH as SPECIAL_ML_MODEL_PATH,
+    METRICS_PATH as SPECIAL_ML_METRICS_PATH,
     MIN_TRAINING_SAMPLES as SPECIAL_ML_MIN_SAMPLES,
 )
 from domains.special_strategies.scanner import SpecialScanner
@@ -367,6 +368,9 @@ def _enrich_with_performance(signals: list[dict], db: Session) -> list[dict]:
                 "entry_month": today.month,
                 "entry_dow": today.weekday(),
                 "regime_code": regime_code,
+                "strategy_avg_win_rate":  float(p[3]) if p and p[3] is not None else 0.5,
+                "strategy_profit_factor": float(p[7]) if p and p[7] is not None else 1.0,
+                "strategy_avg_pnl_pct":   float(p[9]) if p and p[9] is not None else 0.0,
             })
         result.append({
             **s,
@@ -473,28 +477,44 @@ def get_special_scan_results(
 
 @router.get("/special/ml-status")
 def get_special_ml_status(db: Session = Depends(get_db)):
-    """Model file existence, last-trained timestamp, and available sample count."""
+    """Model file existence, last-trained timestamp, sample count, and quality metrics."""
     exists = os.path.exists(SPECIAL_ML_MODEL_PATH)
     last_trained = None
+    metrics: dict = {}
     if exists:
         last_trained = datetime.fromtimestamp(os.path.getmtime(SPECIAL_ML_MODEL_PATH)).isoformat()
+        if os.path.exists(SPECIAL_ML_METRICS_PATH):
+            with open(SPECIAL_ML_METRICS_PATH) as f:
+                metrics = json.load(f)
     samples = db.execute(
         text("""
             SELECT COUNT(*) FROM special_backtest_trades
             WHERE entry_date IS NOT NULL AND pnl IS NOT NULL
         """)
     ).scalar() or 0
-    return {"exists": exists, "last_trained": last_trained, "samples_available": int(samples)}
+    return {
+        "exists": exists,
+        "last_trained": last_trained,
+        "samples_available": int(samples),
+        "auc_roc": metrics.get("auc_roc"),
+        "precision_at_60": metrics.get("precision_at_60"),
+        "high_conf_signals": metrics.get("high_conf_signals"),
+        "class_balance": metrics.get("class_balance"),
+    }
 
 
 @router.post("/special/ml/train")
 def train_special_ml_model(db: Session = Depends(get_db)):
     """Train the special-strategy ML model on special_backtest_trades data."""
     scorer = SpecialMLScorer()
-    n = scorer.train(db)
-    if n == 0:
+    result = scorer.train(db)
+    if result["samples"] == 0:
         return {
             "status": "skipped", "samples": 0,
             "message": f"Need at least {SPECIAL_ML_MIN_SAMPLES} labelled special_backtest_trades rows",
         }
-    return {"status": "ok", "samples": n, "message": f"Trained on {n} samples"}
+    return {
+        "status": "ok",
+        "message": f"Trained on {result['samples']} samples",
+        **result,
+    }
