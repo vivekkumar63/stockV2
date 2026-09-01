@@ -86,8 +86,14 @@ class SpecialMLScorer:
         high_conf_mask = cal_probs >= 0.6
         precision_at_60 = float(y_cal[high_conf_mask].mean()) if high_conf_mask.sum() > 0 else None
 
-        model = CalibratedClassifierCV(base, cv="prefit", method="sigmoid")
-        model.fit(X_cal, y_cal)
+        model = CalibratedClassifierCV(
+            RandomForestClassifier(
+                n_estimators=300, max_depth=8, min_samples_leaf=5,
+                class_weight="balanced", random_state=42, n_jobs=-1,
+            ),
+            cv=5, method="sigmoid",
+        )
+        model.fit(X, y)
 
         os.makedirs(os.path.dirname(MODEL_PATH), exist_ok=True)
         with open(MODEL_PATH, "wb") as f:
