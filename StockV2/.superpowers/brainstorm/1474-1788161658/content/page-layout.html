@@ -1,0 +1,157 @@
+<h2>Sector Rotation Page — Layout Options</h2>
+<p class="subtitle">Which layout gives you the best read of sector health at a glance?</p>
+
+<div class="cards">
+
+  <!-- Option A -->
+  <div class="card" data-choice="a" onclick="toggleSelect(this)">
+    <div class="card-image" style="background:#0f172a;padding:16px;font-family:monospace;font-size:11px;color:#94a3b8;min-height:220px">
+      <div style="background:#1e293b;border-radius:6px;padding:10px;margin-bottom:8px">
+        <div style="color:#60a5fa;font-size:10px;margin-bottom:4px">CURRENT PHASE</div>
+        <div style="color:#f1f5f9;font-size:16px;font-weight:bold">EXPANSION</div>
+        <div style="color:#94a3b8;font-size:10px">Cyclicals outperform · Defensives lag</div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">
+        <div style="background:#14532d;border-radius:4px;padding:8px">
+          <div style="color:#86efac;font-size:10px">↑ ROTATING IN</div>
+          <div style="color:#f1f5f9;font-size:11px">BANK · IT · AUTO</div>
+        </div>
+        <div style="background:#450a0a;border-radius:4px;padding:8px">
+          <div style="color:#fca5a5;font-size:10px">↓ ROTATING OUT</div>
+          <div style="color:#f1f5f9;font-size:11px">PHARMA · FMCG</div>
+        </div>
+      </div>
+      <div style="margin-top:8px;background:#1e293b;border-radius:4px;padding:8px">
+        <div style="color:#60a5fa;font-size:10px;margin-bottom:4px">SECTOR SCOREBOARD</div>
+        <div style="display:flex;justify-content:space-between;color:#f1f5f9;font-size:10px;border-bottom:1px solid #334155;padding-bottom:3px;margin-bottom:3px">
+          <span>BANK</span><span style="color:#86efac">+8.2% · Score 82</span>
+        </div>
+        <div style="display:flex;justify-content:space-between;color:#f1f5f9;font-size:10px;border-bottom:1px solid #334155;padding-bottom:3px;margin-bottom:3px">
+          <span>IT</span><span style="color:#86efac">+6.1% · Score 74</span>
+        </div>
+        <div style="display:flex;justify-content:space-between;color:#f1f5f9;font-size:10px">
+          <span>PHARMA</span><span style="color:#fca5a5">-2.1% · Score 31</span>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>A — Phase + Scoreboard</h3>
+      <p>Top section shows the economic phase + rotation direction. Below is a ranked table of all 7 sectors by score and recent return. Clear, information-dense.</p>
+    </div>
+  </div>
+
+  <!-- Option B -->
+  <div class="card" data-choice="b" onclick="toggleSelect(this)">
+    <div class="card-image" style="background:#0f172a;padding:16px;font-size:11px;min-height:220px">
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:5px;margin-bottom:8px">
+        <div style="background:#14532d;border-radius:5px;padding:7px;text-align:center">
+          <div style="font-size:9px;color:#86efac">BANK</div>
+          <div style="font-size:14px;font-weight:bold;color:#f1f5f9">82</div>
+          <div style="font-size:9px;color:#86efac">+8.2%</div>
+          <div style="font-size:8px;color:#86efac">↑ Strong</div>
+        </div>
+        <div style="background:#14532d;border-radius:5px;padding:7px;text-align:center">
+          <div style="font-size:9px;color:#86efac">IT</div>
+          <div style="font-size:14px;font-weight:bold;color:#f1f5f9">74</div>
+          <div style="font-size:9px;color:#86efac">+6.1%</div>
+          <div style="font-size:8px;color:#86efac">↑ Rising</div>
+        </div>
+        <div style="background:#1c1917;border-radius:5px;padding:7px;text-align:center">
+          <div style="font-size:9px;color:#a8a29e">METAL</div>
+          <div style="font-size:14px;font-weight:bold;color:#f1f5f9">58</div>
+          <div style="font-size:9px;color:#a8a29e">+1.1%</div>
+          <div style="font-size:8px;color:#a8a29e">→ Neutral</div>
+        </div>
+        <div style="background:#1c1917;border-radius:5px;padding:7px;text-align:center">
+          <div style="font-size:9px;color:#a8a29e">AUTO</div>
+          <div style="font-size:14px;font-weight:bold;color:#f1f5f9">55</div>
+          <div style="font-size:9px;color:#a8a29e">+0.8%</div>
+          <div style="font-size:8px;color:#a8a29e">→ Neutral</div>
+        </div>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:5px">
+        <div style="background:#450a0a;border-radius:5px;padding:7px;text-align:center">
+          <div style="font-size:9px;color:#fca5a5">ENERGY</div>
+          <div style="font-size:14px;font-weight:bold;color:#f1f5f9">38</div>
+          <div style="font-size:9px;color:#fca5a5">-1.8%</div>
+          <div style="font-size:8px;color:#fca5a5">↓ Weak</div>
+        </div>
+        <div style="background:#450a0a;border-radius:5px;padding:7px;text-align:center">
+          <div style="font-size:9px;color:#fca5a5">FMCG</div>
+          <div style="font-size:14px;font-weight:bold;color:#f1f5f9">32</div>
+          <div style="font-size:9px;color:#fca5a5">-2.4%</div>
+          <div style="font-size:8px;color:#fca5a5">↓ Weak</div>
+        </div>
+        <div style="background:#450a0a;border-radius:5px;padding:7px;text-align:center">
+          <div style="font-size:9px;color:#fca5a5">PHARMA</div>
+          <div style="font-size:14px;font-weight:bold;color:#f1f5f9">28</div>
+          <div style="font-size:9px;color:#fca5a5">-3.1%</div>
+          <div style="font-size:8px;color:#fca5a5">↓ Weak</div>
+        </div>
+      </div>
+      <div style="margin-top:8px;background:#1e293b;border-radius:4px;padding:6px;font-size:10px;color:#94a3b8;text-align:center">
+        Phase: EXPANSION &nbsp;·&nbsp; 3 sectors in uptrend &nbsp;·&nbsp; 3 weakening
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>B — Sector Cards Grid</h3>
+      <p>One card per sector, sorted by strength. Green = rotating in, red = rotating out, gray = neutral. Instant visual read of the sector landscape.</p>
+    </div>
+  </div>
+
+  <!-- Option C -->
+  <div class="card" data-choice="c" onclick="toggleSelect(this)">
+    <div class="card-image" style="background:#0f172a;padding:16px;font-size:11px;min-height:220px">
+      <div style="display:grid;grid-template-columns:200px 1fr;gap:8px;height:100%">
+        <div>
+          <div style="background:#1e293b;border-radius:5px;padding:8px;margin-bottom:6px">
+            <div style="color:#60a5fa;font-size:9px">MARKET PHASE</div>
+            <div style="color:#f1f5f9;font-weight:bold">EXPANSION</div>
+          </div>
+          <div style="background:#1e293b;border-radius:5px;padding:8px">
+            <div style="color:#60a5fa;font-size:9px;margin-bottom:4px">ROTATION MAP</div>
+            <div style="font-size:10px;color:#86efac;margin-bottom:2px">🟢 BANK — Leading</div>
+            <div style="font-size:10px;color:#86efac;margin-bottom:2px">🟢 IT — Rising</div>
+            <div style="font-size:10px;color:#86efac;margin-bottom:2px">🟢 AUTO — Rising</div>
+            <div style="font-size:10px;color:#a8a29e;margin-bottom:2px">⚪ METAL — Neutral</div>
+            <div style="font-size:10px;color:#fca5a5;margin-bottom:2px">🔴 ENERGY — Fading</div>
+            <div style="font-size:10px;color:#fca5a5;margin-bottom:2px">🔴 FMCG — Weak</div>
+            <div style="font-size:10px;color:#fca5a5">🔴 PHARMA — Weak</div>
+          </div>
+        </div>
+        <div style="background:#1e293b;border-radius:5px;padding:8px">
+          <div style="color:#60a5fa;font-size:9px;margin-bottom:6px">SECTOR DETAIL — Click to expand</div>
+          <div style="border-bottom:1px solid #334155;padding:4px 0">
+            <div style="display:flex;justify-content:space-between;color:#f1f5f9;font-size:10px">
+              <span style="color:#86efac">▶ BANK</span>
+              <span>Score 82 · +8.2% 1M · 12 signals</span>
+            </div>
+          </div>
+          <div style="border-bottom:1px solid #334155;padding:4px 0;background:#0f172a;border-radius:3px">
+            <div style="color:#94a3b8;font-size:9px;padding:0 4px">Top picks: HDFCBANK · KOTAKBANK · AXISBANK</div>
+            <div style="color:#94a3b8;font-size:9px;padding:0 4px">Avg win rate in sector: 64%</div>
+          </div>
+          <div style="border-bottom:1px solid #334155;padding:4px 0">
+            <div style="display:flex;justify-content:space-between;color:#f1f5f9;font-size:10px">
+              <span style="color:#86efac">▶ IT</span>
+              <span>Score 74 · +6.1% 1M · 8 signals</span>
+            </div>
+          </div>
+          <div style="padding:4px 0">
+            <div style="display:flex;justify-content:space-between;color:#f1f5f9;font-size:10px">
+              <span style="color:#fca5a5">▶ PHARMA</span>
+              <span>Score 28 · -3.1% 1M · 2 signals</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>C — Sidebar + Expandable Detail</h3>
+      <p>Left panel: phase + color-coded rotation list. Right panel: expandable sector rows showing score, 1M return, signal count, and top stock picks per sector.</p>
+    </div>
+  </div>
+
+</div>
+
+<p class="subtitle" style="margin-top:16px">Click a card to select. All options include the same data — this is only about layout.</p>

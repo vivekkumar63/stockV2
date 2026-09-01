@@ -1,0 +1,197 @@
+<h2>Sector Rotation — Full Page Mockup</h2>
+<p class="subtitle">Final layout with both tabs fully fleshed out. Does this match what you want?</p>
+
+<div class="mockup" style="max-width:960px;margin:0 auto">
+  <div class="mockup-header">
+    <span style="color:#94a3b8;font-size:11px">NavBar: Dashboard · Portfolio · Backtest · Scanner · Strategy Match · Combos · Special · </span>
+    <span style="color:#60a5fa;font-size:11px;font-weight:bold">Sectors</span>
+  </div>
+  <div class="mockup-body" style="padding:0;background:#0f172a;font-size:11px;color:#94a3b8;min-height:560px;display:flex;flex-direction:column">
+
+    <!-- Page header -->
+    <div style="padding:14px 16px 0;display:flex;justify-content:space-between;align-items:center">
+      <div>
+        <div style="color:#f1f5f9;font-size:18px;font-weight:bold">Sector Rotation</div>
+        <div style="color:#64748b;font-size:10px;margin-top:2px">Updated daily · Last run: today 06:30 AM</div>
+      </div>
+      <div style="display:flex;align-items:center;gap:10px">
+        <div style="background:#1e293b;border-radius:6px;padding:6px 12px;text-align:center">
+          <div style="color:#60a5fa;font-size:9px">MARKET PHASE</div>
+          <div style="color:#f1f5f9;font-weight:bold;font-size:13px">EXPANSION</div>
+        </div>
+        <button style="background:#1e3a5f;color:#60a5fa;border:1px solid #1d4ed8;border-radius:5px;padding:5px 12px;font-size:11px;cursor:pointer">↻ Refresh</button>
+      </div>
+    </div>
+
+    <!-- Tab bar -->
+    <div style="display:flex;border-bottom:1px solid #1e293b;padding:0 16px;margin-top:10px">
+      <div id="ft-breadth" onclick="ftSwitch('breadth')" style="padding:8px 14px;cursor:pointer;color:#60a5fa;border-bottom:2px solid #60a5fa;margin-bottom:-1px;font-size:11px;font-weight:600">📊 Breadth &amp; Momentum</div>
+      <div id="ft-signals" onclick="ftSwitch('signals')" style="padding:8px 14px;cursor:pointer;color:#64748b;font-size:11px;font-weight:600">🎯 Signal Flow</div>
+    </div>
+
+    <!-- BREADTH TAB -->
+    <div id="ft-content-breadth" style="display:flex;flex:1;padding:12px;gap:10px">
+      <div style="width:190px;flex-shrink:0;display:flex;flex-direction:column;gap:6px">
+        <div style="background:#1e293b;border-radius:6px;padding:10px">
+          <div style="color:#60a5fa;font-size:9px;margin-bottom:6px">ROTATION MAP</div>
+          <div onclick="ftExpand('BANK')" style="font-size:10px;color:#86efac;margin-bottom:5px;cursor:pointer;padding:3px 5px;border-radius:3px;background:#14532d20">🟢 BANK — Leading</div>
+          <div onclick="ftExpand('IT')" style="font-size:10px;color:#86efac;margin-bottom:5px;cursor:pointer;padding:3px 5px;border-radius:3px">🟢 IT — Rising</div>
+          <div onclick="ftExpand('AUTO')" style="font-size:10px;color:#86efac;margin-bottom:5px;cursor:pointer;padding:3px 5px;border-radius:3px">🟢 AUTO — Rising</div>
+          <div onclick="ftExpand('METAL')" style="font-size:10px;color:#a8a29e;margin-bottom:5px;cursor:pointer;padding:3px 5px;border-radius:3px">⚪ METAL — Neutral</div>
+          <div onclick="ftExpand('ENERGY')" style="font-size:10px;color:#fca5a5;margin-bottom:5px;cursor:pointer;padding:3px 5px;border-radius:3px">🔴 ENERGY — Fading</div>
+          <div onclick="ftExpand('FMCG')" style="font-size:10px;color:#fca5a5;margin-bottom:5px;cursor:pointer;padding:3px 5px;border-radius:3px">🔴 FMCG — Weak</div>
+          <div onclick="ftExpand('PHARMA')" style="font-size:10px;color:#fca5a5;cursor:pointer;padding:3px 5px;border-radius:3px">🔴 PHARMA — Weak</div>
+        </div>
+        <div style="background:#1e293b;border-radius:6px;padding:10px">
+          <div style="color:#60a5fa;font-size:9px;margin-bottom:5px">MARKET BREADTH</div>
+          <div style="display:flex;justify-content:space-between;color:#f1f5f9;font-size:10px;margin-bottom:3px"><span>Above SMA50</span><span style="color:#86efac">68%</span></div>
+          <div style="background:#334155;border-radius:2px;height:4px;margin-bottom:6px"><div style="background:#86efac;width:68%;height:4px;border-radius:2px"></div></div>
+          <div style="display:flex;justify-content:space-between;color:#f1f5f9;font-size:10px;margin-bottom:3px"><span>Above SMA20</span><span style="color:#86efac">54%</span></div>
+          <div style="background:#334155;border-radius:2px;height:4px"><div style="background:#60a5fa;width:54%;height:4px;border-radius:2px"></div></div>
+        </div>
+      </div>
+
+      <div style="flex:1;display:flex;flex-direction:column;gap:6px" id="ft-rows-breadth">
+        <!-- Expanded -->
+        <div style="background:#1e293b;border-radius:6px;overflow:hidden">
+          <div style="padding:9px 12px;display:flex;align-items:center;gap:10px;background:#162032;cursor:pointer">
+            <span style="color:#86efac;font-weight:bold">▼ NIFTY BANK</span>
+            <span style="background:#14532d;color:#86efac;padding:1px 6px;border-radius:3px;font-size:9px">LEADING</span>
+            <span style="color:#86efac">+8.2% 1M</span>
+            <span style="color:#94a3b8;font-size:10px">· 82% above SMA50</span>
+            <span style="color:#86efac;margin-left:auto;font-size:10px">↑ ROTATING IN</span>
+          </div>
+          <div style="padding:10px 12px;background:#0d1b2a">
+            <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:8px">
+              <div style="background:#1e293b;border-radius:4px;padding:6px;text-align:center">
+                <div style="color:#60a5fa;font-size:9px">Stocks above SMA50</div>
+                <div style="color:#86efac;font-size:18px;font-weight:bold">82%</div>
+                <div style="color:#86efac;font-size:9px">18/22 stocks</div>
+              </div>
+              <div style="background:#1e293b;border-radius:4px;padding:6px;text-align:center">
+                <div style="color:#60a5fa;font-size:9px">1M Return</div>
+                <div style="color:#86efac;font-size:18px;font-weight:bold">+8.2%</div>
+              </div>
+              <div style="background:#1e293b;border-radius:4px;padding:6px;text-align:center">
+                <div style="color:#60a5fa;font-size:9px">3M Return</div>
+                <div style="color:#86efac;font-size:18px;font-weight:bold">+18.4%</div>
+              </div>
+              <div style="background:#1e293b;border-radius:4px;padding:6px;text-align:center">
+                <div style="color:#60a5fa;font-size:9px">Sector Health Score</div>
+                <div style="color:#86efac;font-size:18px;font-weight:bold">100</div>
+                <div style="color:#94a3b8;font-size:9px">Opp scorer weight</div>
+              </div>
+            </div>
+            <div style="font-size:10px;color:#60a5fa;margin-bottom:3px">Stocks in sector above SMA50:</div>
+            <div style="color:#f1f5f9;font-size:10px">HDFCBANK · ICICIBANK · KOTAKBANK · AXISBANK · SBIN · BANDHANBNK · FEDERALBNK</div>
+          </div>
+        </div>
+        <!-- Collapsed rows -->
+        <div style="background:#1e293b;border-radius:6px;padding:9px 12px;display:flex;align-items:center;gap:10px;cursor:pointer">
+          <span style="color:#86efac;font-weight:bold">▶ NIFTY IT</span>
+          <span style="background:#14532d;color:#86efac;padding:1px 6px;border-radius:3px;font-size:9px">RISING</span>
+          <span style="color:#86efac">+6.1% 1M</span>
+          <span style="color:#94a3b8;font-size:10px">· 76% above SMA50</span>
+          <span style="color:#86efac;margin-left:auto;font-size:10px">↑ ROTATING IN</span>
+        </div>
+        <div style="background:#1e293b;border-radius:6px;padding:9px 12px;display:flex;align-items:center;gap:10px;cursor:pointer">
+          <span style="color:#a8a29e;font-weight:bold">▶ NIFTY METAL</span>
+          <span style="background:#292524;color:#a8a29e;padding:1px 6px;border-radius:3px;font-size:9px">NEUTRAL</span>
+          <span style="color:#a8a29e">+1.1% 1M</span>
+          <span style="color:#94a3b8;font-size:10px">· 52% above SMA50</span>
+          <span style="color:#a8a29e;margin-left:auto;font-size:10px">→ SIDEWAYS</span>
+        </div>
+        <div style="background:#1e293b;border-radius:6px;padding:9px 12px;display:flex;align-items:center;gap:10px;cursor:pointer">
+          <span style="color:#fca5a5;font-weight:bold">▶ NIFTY PHARMA</span>
+          <span style="background:#450a0a;color:#fca5a5;padding:1px 6px;border-radius:3px;font-size:9px">WEAK</span>
+          <span style="color:#fca5a5">-3.1% 1M</span>
+          <span style="color:#94a3b8;font-size:10px">· 24% above SMA50</span>
+          <span style="color:#fca5a5;margin-left:auto;font-size:10px">↓ ROTATING OUT</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- SIGNAL FLOW TAB -->
+    <div id="ft-content-signals" style="display:none;flex:1;padding:12px;gap:10px">
+      <div style="display:flex;gap:10px;flex:1">
+        <div style="width:190px;flex-shrink:0;display:flex;flex-direction:column;gap:6px">
+          <div style="background:#1e293b;border-radius:6px;padding:10px">
+            <div style="color:#60a5fa;font-size:9px;margin-bottom:5px">THIS WEEK vs LAST</div>
+            <div style="color:#f1f5f9;font-weight:bold;font-size:14px">64 signals</div>
+            <div style="color:#86efac;font-size:10px">↑ +18 from last week</div>
+          </div>
+          <div style="background:#1e293b;border-radius:6px;padding:10px;flex:1">
+            <div style="color:#60a5fa;font-size:9px;margin-bottom:6px">SIGNAL HEAT</div>
+            <div style="font-size:10px;color:#86efac;margin-bottom:5px">🔥 BANK — 18 (+8)</div>
+            <div style="font-size:10px;color:#86efac;margin-bottom:5px">🔥 IT — 14 (+5)</div>
+            <div style="font-size:10px;color:#86efac;margin-bottom:5px">📈 AUTO — 9 (+3)</div>
+            <div style="font-size:10px;color:#a8a29e;margin-bottom:5px">➡️ METAL — 7 (=)</div>
+            <div style="font-size:10px;color:#fca5a5;margin-bottom:5px">📉 ENERGY — 5 (-2)</div>
+            <div style="font-size:10px;color:#fca5a5;margin-bottom:5px">📉 FMCG — 7 (-4)</div>
+            <div style="font-size:10px;color:#fca5a5">📉 PHARMA — 4 (-8)</div>
+          </div>
+        </div>
+        <div style="flex:1;display:flex;flex-direction:column;gap:6px">
+          <div style="background:#1e293b;border-radius:6px;overflow:hidden">
+            <div style="padding:9px 12px;display:flex;align-items:center;gap:10px;background:#162032;cursor:pointer">
+              <span style="color:#86efac;font-weight:bold">▼ NIFTY BANK</span>
+              <span style="color:#86efac">18 signals</span>
+              <span style="background:#14532d;color:#86efac;padding:1px 6px;border-radius:3px;font-size:9px">+8 vs last week</span>
+              <span style="color:#86efac;margin-left:auto">🔥 HEATING UP</span>
+            </div>
+            <div style="padding:10px 12px;background:#0d1b2a">
+              <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:8px">
+                <div style="background:#1e293b;border-radius:4px;padding:6px;text-align:center">
+                  <div style="color:#60a5fa;font-size:9px">This week</div>
+                  <div style="color:#86efac;font-size:18px;font-weight:bold">18</div>
+                </div>
+                <div style="background:#1e293b;border-radius:4px;padding:6px;text-align:center">
+                  <div style="color:#60a5fa;font-size:9px">Last week</div>
+                  <div style="color:#f1f5f9;font-size:18px;font-weight:bold">10</div>
+                </div>
+                <div style="background:#1e293b;border-radius:4px;padding:6px;text-align:center">
+                  <div style="color:#60a5fa;font-size:9px">Avg win rate</div>
+                  <div style="color:#86efac;font-size:18px;font-weight:bold">64%</div>
+                </div>
+                <div style="background:#1e293b;border-radius:4px;padding:6px;text-align:center">
+                  <div style="color:#60a5fa;font-size:9px">Top strategy</div>
+                  <div style="color:#f1f5f9;font-size:10px;font-weight:bold;padding-top:4px">EMA Cross</div>
+                </div>
+              </div>
+              <div style="font-size:10px;color:#60a5fa;margin-bottom:3px">Stocks with signals this week:</div>
+              <div style="color:#f1f5f9;font-size:10px">HDFCBANK · ICICIBANK · KOTAKBANK · AXISBANK · SBIN · BANDHANBNK</div>
+            </div>
+          </div>
+          <div style="background:#1e293b;border-radius:6px;padding:9px 12px;display:flex;align-items:center;gap:10px;cursor:pointer">
+            <span style="color:#86efac;font-weight:bold">▶ NIFTY IT</span>
+            <span style="color:#86efac">14 signals</span>
+            <span style="background:#14532d;color:#86efac;padding:1px 6px;border-radius:3px;font-size:9px">+5 vs last week</span>
+            <span style="color:#86efac;margin-left:auto">📈 RISING</span>
+          </div>
+          <div style="background:#1e293b;border-radius:6px;padding:9px 12px;display:flex;align-items:center;gap:10px;cursor:pointer">
+            <span style="color:#fca5a5;font-weight:bold">▶ NIFTY PHARMA</span>
+            <span style="color:#fca5a5">4 signals</span>
+            <span style="background:#450a0a;color:#fca5a5;padding:1px 6px;border-radius:3px;font-size:9px">-8 vs last week</span>
+            <span style="color:#fca5a5;margin-left:auto">📉 COOLING</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+function ftSwitch(tab) {
+  ['breadth','signals'].forEach(t => {
+    document.getElementById('ft-content-'+t).style.display = t===tab ? 'flex' : 'none';
+    var el = document.getElementById('ft-'+t);
+    el.style.color = t===tab ? '#60a5fa' : '#64748b';
+    el.style.borderBottom = t===tab ? '2px solid #60a5fa' : 'none';
+    el.style.marginBottom = t===tab ? '-1px' : '0';
+  });
+}
+function ftExpand(s) {}
+</script>
+
+<p class="subtitle" style="margin-top:12px;text-align:center">Tabs are interactive. Does the final page look right?</p>
