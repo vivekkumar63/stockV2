@@ -23,9 +23,10 @@ from sqlalchemy.orm import Session
 
 logger = logging.getLogger(__name__)
 
-HOLDING_DAYS    = 15   # default holding period used to judge outcome
+HOLDING_DAYS     = 15   # max days to wait for outcome
+PROFIT_TARGET_PCT = 10.0  # 10% gain = profitable signal
 LOOKBACK_SIGNALS = 30  # evaluate last N signals per strategy for the rolling rate
-MIN_SIGNALS     = 5    # need at least this many evaluated signals to report a rate
+MIN_SIGNALS      = 5    # need at least this many evaluated signals to report a rate
 
 
 @dataclass
@@ -54,11 +55,11 @@ class FalseSignalDetector:
 
     def compute_outcomes(self, db: Session) -> int:
         """
-        For every BUY signal that:
-        - has no entry in signal_outcomes yet
-        - was generated at least HOLDING_DAYS ago (outcome is observable)
-
-        look up the close price HOLDING_DAYS after the signal date and record the outcome.
+        For every BUY signal ≥ HOLDING_DAYS old with no recorded outcome:
+        scan daily OHLC from signal_date+1 to signal_date+holding_days.
+          - Profitable  : high reaches entry * 1.10 (10% gain) before stop is hit
+          - Not profitable: low hits suggested_stop_loss OR holding period ends
+            without the 10% target being reached
         Returns number of new outcome records written.
         """
         cutoff = date.today() - timedelta(days=HOLDING_DAYS)
@@ -66,14 +67,15 @@ class FalseSignalDetector:
         rows = db.execute(
             text("""
                 SELECT ss.id, ss.symbol, ss.strategy_id, ss.signal_date,
-                       ss.price_at_signal, ss.holding_period_days
+                       ss.price_at_signal, ss.holding_period_days,
+                       ss.suggested_stop_loss
                 FROM strategy_signals ss
                 WHERE ss.signal_type = 'BUY'
                   AND ss.signal_date <= :cutoff
                   AND ss.price_at_signal IS NOT NULL
                   AND ss.id NOT IN (SELECT signal_id FROM signal_outcomes)
                 ORDER BY ss.signal_date DESC
-                LIMIT 500
+                LIMIT 5000
             """),
             {"cutoff": str(cutoff)},
         ).fetchall()
@@ -82,38 +84,53 @@ class FalseSignalDetector:
             return 0
 
         written = 0
-        for sig_id, symbol, strategy_id, sig_date, price_at_signal, holding_days in rows:
-            hp = int(holding_days) if holding_days else HOLDING_DAYS
-            target_date = (
-                date.fromisoformat(str(sig_date)[:10]) + timedelta(days=hp)
-            )
+        for sig_id, symbol, strategy_id, sig_date, price_at_signal, holding_days, stop_loss in rows:
+            entry       = float(price_at_signal)
+            target_price = entry * (1 + PROFIT_TARGET_PCT / 100)
+            stop_price  = float(stop_loss) if stop_loss is not None else None
+            hp          = int(holding_days) if holding_days else HOLDING_DAYS
+            sig_date_obj = date.fromisoformat(str(sig_date)[:10])
+            max_date     = sig_date_obj + timedelta(days=hp)
 
-            # Find the closest trading day on or after target_date (up to 7 extra days)
-            price_row = db.execute(
+            # Scan each trading day inside the holding window
+            price_rows = db.execute(
                 text("""
-                    SELECT date, close
+                    SELECT date, high, low, close
                     FROM stock_prices_daily
                     WHERE symbol = :sym
-                      AND date >= :target
+                      AND date > :entry_date
                       AND date <= :max_date
                     ORDER BY date ASC
-                    LIMIT 1
                 """),
-                {
-                    "sym": symbol,
-                    "target": str(target_date),
-                    "max_date": str(target_date + timedelta(days=7)),
-                },
-            ).fetchone()
+                {"sym": symbol, "entry_date": str(sig_date_obj), "max_date": str(max_date)},
+            ).fetchall()
 
-            if not price_row:
+            if not price_rows:
                 continue
 
-            outcome_date  = date.fromisoformat(str(price_row[0])[:10])
-            outcome_price = float(price_row[1])
-            pnl_pct       = (outcome_price - float(price_at_signal)) / float(price_at_signal) * 100
-            is_profitable = pnl_pct > 0
-            actual_days   = (outcome_date - date.fromisoformat(str(sig_date)[:10])).days
+            is_profitable = False
+            outcome_date  = date.fromisoformat(str(price_rows[-1][0])[:10])
+            outcome_price = float(price_rows[-1][3])  # final close as default
+
+            for pr in price_rows:
+                high  = float(pr[1])
+                low   = float(pr[2])
+                close = float(pr[3])
+                d     = date.fromisoformat(str(pr[0])[:10])
+
+                if high >= target_price:          # 10% profit target hit
+                    is_profitable = True
+                    outcome_date  = d
+                    outcome_price = target_price
+                    break
+                if stop_price is not None and low <= stop_price:  # stop-loss hit
+                    is_profitable = False
+                    outcome_date  = d
+                    outcome_price = stop_price
+                    break
+
+            pnl_pct     = (outcome_price - entry) / entry * 100
+            actual_days = (outcome_date - sig_date_obj).days
 
             db.execute(
                 text("""
@@ -128,8 +145,8 @@ class FalseSignalDetector:
                 """),
                 {
                     "sid": sig_id, "sym": symbol, "strat": strategy_id,
-                    "sdate": str(date.fromisoformat(str(sig_date)[:10])),
-                    "price": float(price_at_signal), "oprice": outcome_price,
+                    "sdate": str(sig_date_obj),
+                    "price": entry, "oprice": round(outcome_price, 4),
                     "odate": str(outcome_date), "pnl": round(pnl_pct, 4),
                     "prof": 1 if is_profitable else 0, "hdays": actual_days,
                 },

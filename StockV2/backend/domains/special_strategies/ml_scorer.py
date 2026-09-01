@@ -153,7 +153,11 @@ class SpecialMLScorer:
             return None
 
     def _extract_features(self, db: Session):
-        """CTE query: 7 features per special_backtest_trades row."""
+        """CTE query: 7 features per special_strategy_trades row.
+
+        Label: pnl_pct >= 10 (trade closed at ≥10% profit = success).
+        Source: special_strategy_trades populated by precompute (not manual backtests).
+        """
         rows = db.execute(text("""
             WITH strategy_stats AS (
                 SELECT special_strategy_id,
@@ -165,18 +169,17 @@ class SpecialMLScorer:
                 GROUP BY special_strategy_id
             )
             SELECT
-                sbr.special_strategy_id,
-                sbt.entry_date,
+                sst.special_strategy_id,
+                sst.entry_date,
                 mr.regime,
-                sbt.pnl,
+                sst.pnl_pct,
                 COALESCE(ss.avg_win_rate, 0.5)      AS strategy_avg_win_rate,
                 COALESCE(ss.avg_profit_factor, 1.0) AS strategy_profit_factor,
                 COALESCE(ss.avg_pnl_pct_stat, 0.0)  AS strategy_avg_pnl_pct
-            FROM special_backtest_trades sbt
-            JOIN special_backtest_results sbr ON sbr.id = sbt.backtest_result_id
-            LEFT JOIN market_regime mr ON mr.date = sbt.entry_date
-            LEFT JOIN strategy_stats ss ON ss.special_strategy_id = sbr.special_strategy_id
-            WHERE sbt.entry_date IS NOT NULL AND sbt.pnl IS NOT NULL
+            FROM special_strategy_trades sst
+            LEFT JOIN market_regime mr ON mr.date = sst.entry_date
+            LEFT JOIN strategy_stats ss ON ss.special_strategy_id = sst.special_strategy_id
+            WHERE sst.entry_date IS NOT NULL AND sst.pnl_pct IS NOT NULL
         """)).fetchall()
 
         if not rows:
@@ -184,13 +187,13 @@ class SpecialMLScorer:
 
         X_list, y_list = [], []
         for r in rows:
-            strategy_id = int(r[0])
-            entry_date = r[1]
-            regime = r[2]
-            pnl = float(r[3])
-            avg_win_rate = float(r[4]) if r[4] is not None else 0.5
+            strategy_id   = int(r[0])
+            entry_date    = r[1]
+            regime        = r[2]
+            pnl_pct       = float(r[3])
+            avg_win_rate  = float(r[4]) if r[4] is not None else 0.5
             profit_factor = float(r[5]) if r[5] is not None else 1.0
-            avg_pnl_pct = float(r[6]) if r[6] is not None else 0.0
+            avg_pnl_pct   = float(r[6]) if r[6] is not None else 0.0
 
             if isinstance(entry_date, str):
                 from datetime import datetime as dt
@@ -201,6 +204,6 @@ class SpecialMLScorer:
                 strategy_id, entry_date.month, entry_date.weekday(),
                 regime_code, avg_win_rate, profit_factor, avg_pnl_pct,
             ])
-            y_list.append(1 if pnl > 0 else 0)
+            y_list.append(1 if pnl_pct >= 10.0 else 0)
 
         return np.array(X_list), np.array(y_list)

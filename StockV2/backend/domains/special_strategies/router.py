@@ -511,8 +511,8 @@ def get_special_ml_status(db: Session = Depends(get_db)):
                 metrics = json.load(f)
     samples = db.execute(
         text("""
-            SELECT COUNT(*) FROM special_backtest_trades
-            WHERE entry_date IS NOT NULL AND pnl IS NOT NULL
+            SELECT COUNT(*) FROM special_strategy_trades
+            WHERE entry_date IS NOT NULL AND pnl_pct IS NOT NULL
         """)
     ).scalar() or 0
     return {
@@ -531,7 +531,7 @@ def get_special_training_data_status(db: Session = Depends(get_db)):
     """Return count of labelled special backtest trades and whether enough exist to train."""
     from domains.special_strategies.ml_scorer import MIN_TRAINING_SAMPLES as SPECIAL_ML_MIN
     total = db.execute(
-        text("SELECT COUNT(*) FROM special_backtest_trades WHERE entry_date IS NOT NULL AND pnl IS NOT NULL")
+        text("SELECT COUNT(*) FROM special_strategy_trades WHERE entry_date IS NOT NULL AND pnl_pct IS NOT NULL")
     ).scalar() or 0
     return {
         "total_labelled_trades": int(total),
