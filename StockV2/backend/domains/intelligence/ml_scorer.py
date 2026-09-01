@@ -35,10 +35,10 @@ def regime_to_code(regime: str) -> int:
 
 class MLSignalScorer:
     """
-    ML-based signal profitability predictor.
-    Calibrated RandomForest trained on signal_outcomes.
+    LightGBM classifier trained on signal_outcomes with isotonic calibration.
     Features: confidence_score, regime_code, strategy_id, month, day_of_week,
-              strategy_win_rate, log_total_trades, strategy_recent_win_rate.
+              strategy_win_rate, log_total_trades, strategy_recent_win_rate,
+              pe_ratio, pb_ratio, roe, debt_equity.
     """
 
     def train(self, db: Session) -> dict:
@@ -51,8 +51,8 @@ class MLSignalScorer:
             logger.warning("[ml_scorer] training data has only one class — skipping")
             return {"samples": 0}
 
+        from lightgbm import LGBMClassifier
         from sklearn.calibration import CalibratedClassifierCV
-        from sklearn.ensemble import RandomForestClassifier
         from sklearn.metrics import roc_auc_score
         from sklearn.model_selection import train_test_split
 
@@ -60,37 +60,37 @@ class MLSignalScorer:
             X, y, test_size=0.2, random_state=42, stratify=y
         )
 
-        base = RandomForestClassifier(
-            n_estimators=300,
-            max_depth=8,
-            min_samples_leaf=5,
+        _lgb = dict(
+            n_estimators=500,
+            learning_rate=0.05,
+            num_leaves=31,
+            min_child_samples=20,
             class_weight="balanced",
+            subsample=0.8,
+            subsample_freq=1,
+            colsample_bytree=0.8,
+            reg_alpha=0.1,
+            reg_lambda=1.0,
             random_state=42,
             n_jobs=-1,
+            verbose=-1,
         )
+
+        # Evaluate on holdout split for honest metrics
+        base = LGBMClassifier(**_lgb)
         base.fit(X_train, y_train)
 
-        # Evaluation on calibration split (before calibration fitting)
         classes = list(base.classes_)
-        if 1 in classes:
-            col = classes.index(1)
-            cal_probs = base.predict_proba(X_cal)[:, col]
-        else:
-            cal_probs = np.zeros(len(X_cal))
+        col = classes.index(1) if 1 in classes else None
+        cal_probs = base.predict_proba(X_cal)[:, col] if col is not None else np.zeros(len(X_cal))
 
         auc_roc = float(roc_auc_score(y_cal, cal_probs)) if len(np.unique(y_cal)) > 1 else 0.5
         high_conf_mask = cal_probs >= 0.6
         precision_at_60 = float(y_cal[high_conf_mask].mean()) if high_conf_mask.sum() > 0 else None
 
-        # Train production model with cross-validation calibration on full data.
-        # (cv="prefit" was removed in sklearn 1.5; cv=5 is equivalent and works across versions.)
-        model = CalibratedClassifierCV(
-            RandomForestClassifier(
-                n_estimators=300, max_depth=8, min_samples_leaf=5,
-                class_weight="balanced", random_state=42, n_jobs=-1,
-            ),
-            cv=5, method="sigmoid",
-        )
+        # Production model: isotonic calibration on full data (better than sigmoid for LGBM)
+        cal_method = "isotonic" if len(X) >= 500 else "sigmoid"
+        model = CalibratedClassifierCV(LGBMClassifier(**_lgb), cv=5, method=cal_method)
         model.fit(X, y)
 
         os.makedirs(os.path.dirname(MODEL_PATH), exist_ok=True)
@@ -163,10 +163,10 @@ class MLSignalScorer:
             strategy_win_rate,
             log_total_trades,
             strategy_recent_win_rate,
-            float(pe_ratio) if pe_ratio is not None else 25.0,
-            float(pb_ratio) if pb_ratio is not None else 3.0,
-            float(roe) if roe is not None else 0.15,
-            float(debt_equity) if debt_equity is not None else 0.5,
+            float(pe_ratio) if pe_ratio is not None else np.nan,
+            float(pb_ratio) if pb_ratio is not None else np.nan,
+            float(roe) if roe is not None else np.nan,
+            float(debt_equity) if debt_equity is not None else np.nan,
         ]])
 
         try:
@@ -285,10 +285,10 @@ class MLSignalScorer:
             strategy_win_rate = float(r[5]) if r[5] is not None else 0.5
             log_total_trades = float(np.log1p(int(r[6]))) if r[6] is not None else 2.0
             recent_win_rate = float(r[7]) if r[7] is not None else strategy_win_rate
-            pe_ratio = float(r[8]) if r[8] is not None else 25.0
-            pb_ratio = float(r[9]) if r[9] is not None else 3.0
-            roe = float(r[10]) if r[10] is not None else 0.15
-            debt_equity = float(r[11]) if r[11] is not None else 0.5
+            pe_ratio = float(r[8]) if r[8] is not None else np.nan
+            pb_ratio = float(r[9]) if r[9] is not None else np.nan
+            roe = float(r[10]) if r[10] is not None else np.nan
+            debt_equity = float(r[11]) if r[11] is not None else np.nan
 
             if isinstance(sig_date, str):
                 from datetime import datetime as dt
