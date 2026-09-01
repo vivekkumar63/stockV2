@@ -190,3 +190,62 @@ class AlertService:
                 f"   💡 <i>{why}</i>"
             )
         return self.send("\n".join(lines))
+
+    def send_combined_digest(
+        self,
+        normal_top: list[dict],
+        special_top: list[dict],
+        scan_date: Optional[date] = None,
+        period: str = "",
+    ) -> bool:
+        """Single combined message: top 5 normal + top 5 special strategies."""
+        today = scan_date or ist_today()
+        period_str = f" — {period}" if period else ""
+        lines = [
+            f"<b>📊 StockV2{period_str}  {today.strftime('%d %b %Y')}</b>",
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+        ]
+
+        # Normal strategies block
+        lines.append(f"\n<b>🔵 Normal Strategies</b>  (top {len(normal_top)})")
+        if not normal_top:
+            lines.append("  No qualifying signals today.")
+        for i, sig in enumerate(normal_top, 1):
+            sym   = html.escape(sig.get("symbol", ""))
+            conf  = int((sig.get("confidence_score") or 0) * 100)
+            strat = html.escape(sig.get("strategy_name", ""))
+            price = sig.get("price_at_signal")
+            sl    = sig.get("suggested_stop_loss")
+            tgt   = sig.get("suggested_target")
+            wr    = sig.get("historical_win_rate")
+            price_str = f"₹{price:,.0f}" if price else "—"
+            sl_str    = f"₹{sl:,.0f}"    if sl    else "—"
+            tgt_str   = f"₹{tgt:,.0f}"   if tgt   else "—"
+            wr_str    = f"{int(wr * 100)}%" if wr is not None else "—"
+            lines.append(
+                f"\n{i}. 🟢 <b>{sym}</b>  {conf}% · {price_str}\n"
+                f"   {strat}\n"
+                f"   Win {wr_str} · SL {sl_str} → Tgt {tgt_str}"
+            )
+
+        # Special strategies block
+        lines.append(f"\n\n<b>⭐ Special Strategies</b>  (top {len(special_top)})")
+        if not special_top:
+            lines.append("  No qualifying signals today.")
+        for i, sig in enumerate(special_top, 1):
+            sym   = html.escape(sig.get("symbol", ""))
+            conf  = int((sig.get("confidence") or 0) * 100)
+            strat = html.escape(sig.get("strategy_name", ""))
+            price = sig.get("price")
+            wr    = sig.get("win_rate")
+            ml    = sig.get("ml_probability")
+            price_str = f"₹{price:,.2f}" if price else "—"
+            wr_str    = f"{int(wr * 100)}%" if wr is not None else "—"
+            ml_str    = f" · ML {int(ml * 100)}%" if ml is not None else ""
+            lines.append(
+                f"\n{i}. 🟢 <b>{sym}</b>  {conf}% · {price_str}\n"
+                f"   {strat}\n"
+                f"   Win {wr_str}{ml_str}"
+            )
+
+        return self.send("\n".join(lines))

@@ -123,40 +123,17 @@ def _intraday_scan():
                 if exits:
                     logger.info("[scheduler] intraday_scan: %d positions exited", len(exits))
 
-        # Phase 3: entry-window alerts for pre-qualified BUY signals
+        # Phase 3: entry-window checking (no per-signal alerts — digest handles recommendations)
         today_str = ist_today().strftime("%Y-%m-%d")
         signals = StrategyService(db).get_today_signals(signal_date=today_str)
         buy_signals = [s for s in signals if s.get("signal_type") == "BUY"]
-
         if buy_signals:
             symbols_with_signals = list({s["symbol"] for s in buy_signals})
             live_prices = fetch_live_prices(symbols_with_signals)
-
             if live_prices:
-                fii_dii_row = get_latest_fii_dii(db)
                 in_window = get_signals_in_entry_window(db, buy_signals, live_prices)
-                alert_svc = AlertService()
-                for signal in in_window:
-                    sym = signal["symbol"]
-                    alert_svc.send_entry_alert(signal, live_prices[sym], fii_dii_row)
-                    db.execute(
-                        text("""
-                            INSERT INTO intraday_alerts_sent
-                                (symbol, strategy_id, signal_date)
-                            VALUES (:sym, :sid, :date)
-                            ON CONFLICT (symbol, strategy_id, signal_date) DO NOTHING
-                        """),
-                        {
-                            "sym":  sym,
-                            "sid":  signal["strategy_id"],
-                            "date": str(signal.get("signal_date", today_str)),
-                        },
-                    )
-                db.commit()
                 if in_window:
-                    logger.info("[scheduler] intraday_scan: %d entry-window alerts sent", len(in_window))
-            else:
-                logger.warning("[scheduler] intraday_scan: live price fetch returned no data")
+                    logger.info("[scheduler] intraday_scan: %d signals in entry window", len(in_window))
 
     except Exception:
         logger.exception("[scheduler] intraday_scan failed")
@@ -333,51 +310,55 @@ def _eod_precompute():
 
 
 def _intraday_digest():
-    """Read today's stored BUY signals and send top 10 to Telegram.
+    """Send one combined Telegram message: top 5 normal + top 5 special strategies.
 
-    Does NOT re-run scan_all — signals are already in strategy_signals from
-    _intraday_scan which fires at the same 15-min cadence. Reading from DB
-    avoids 353 × 77 redundant strategy computations per digest.
+    Fires twice a day (9:15 morning, 15:15 pre-close). Does NOT re-run scan_all —
+    signals already stored by _intraday_scan every 15 min.
     """
     from database import SessionLocal
     from domains.strategies.service import StrategyService
     from domains.alerts.telegram import AlertService
     from domains.special_strategies.scanner import SpecialScanner
+    from domains.special_strategies.router import _enrich_with_performance, _save_scan_cache
 
     today = ist_today()
     today_str = today.strftime("%Y-%m-%d")
+    period = "Morning" if ist_now().hour < 12 else "Pre-Close"
     db = SessionLocal()
     try:
+        # Normal strategies: top 5 qualified BUY signals by confidence
         signals = StrategyService(db).get_today_signals(signal_date=today_str)
         buy_signals = [s for s in signals if s["signal_type"] == "BUY"]
-        # Only suggest stocks where historical win rate >= 40% (skip if no history yet)
         qualified = [
             s for s in buy_signals
             if s.get("historical_win_rate") is None or (s["historical_win_rate"] or 0) >= 0.40
         ]
-        top_10 = sorted(qualified, key=lambda x: x.get("confidence_score") or 0, reverse=True)[:10]
+        normal_top5 = sorted(
+            qualified,
+            key=lambda x: x.get("opportunity_score") or x.get("confidence_score") or 0,
+            reverse=True,
+        )[:5]
+
+        # Special strategies: top 5 by ML probability then confidence
+        special_signals = SpecialScanner(db).scan()
+        enriched = _enrich_with_performance(special_signals, db)
+        _save_scan_cache(enriched, today, db)
+        special_top5 = sorted(
+            enriched,
+            key=lambda x: x.get("ml_probability") or x.get("confidence") or 0,
+            reverse=True,
+        )[:5]
+
+        # One combined message
         alert_svc = AlertService()
-        alert_svc.send_daily_digest(top_10, scan_date=today)
-        logger.info("[scheduler] intraday_digest sent: %d buy signals from %d stored",
-                    len(top_10), len(buy_signals))
+        ok = alert_svc.send_combined_digest(normal_top5, special_top5, scan_date=today, period=period)
+        if ok:
+            logger.info("[scheduler] digest(%s) sent: %d normal, %d special",
+                        period, len(normal_top5), len(special_top5))
+        else:
+            logger.error("[scheduler] digest(%s) Telegram send failed", period)
 
-        # Special Strategies scan — persist to cache, then send Telegram
-        try:
-            from domains.special_strategies.router import _enrich_with_performance, _save_scan_cache
-            special_signals = SpecialScanner(db).scan()
-            enriched = _enrich_with_performance(special_signals, db)
-            _save_scan_cache(enriched, today, db)
-            logger.info("[scheduler] special_digest: %d signals cached for %s", len(enriched), today)
-            if enriched:
-                ok = alert_svc.send_special_scan_alerts(enriched, scan_date=today)
-                if ok:
-                    logger.info("[scheduler] special_digest: Telegram sent")
-                else:
-                    logger.error("[scheduler] special_digest: Telegram send failed")
-        except Exception:
-            logger.exception("[scheduler] special strategy scan failed")
-
-        # Also fire sell alerts for any held positions
+        # Sell alerts for held positions (kept separate — always important)
         _send_sell_alerts_for_holdings(db)
     except Exception:
         logger.exception("[scheduler] intraday_digest failed")
@@ -543,12 +524,10 @@ def register_jobs():
         id="strategy_correlation_compute",
         replace_existing=True,
     )
+    # Two digests per day: morning open + pre-close. Each is one combined message.
     for job_id, hour, minute in [
-        (JobIds.DIGEST_0915,  9, 15),   # market open
-        (JobIds.DIGEST_1030, 10, 30),   # mid-morning
-        (JobIds.DIGEST_1200, 12,  0),   # midday
-        (JobIds.DIGEST_1400, 14,  0),   # afternoon
-        (JobIds.DIGEST_1515, 15, 15),   # pre-close (15 min before 3:30)
+        (JobIds.DIGEST_0915,  9, 15),   # morning — right after market opens
+        (JobIds.DIGEST_1515, 15, 15),   # pre-close — 15 min before 3:30
     ]:
         scheduler.add_job(
             _intraday_digest,
