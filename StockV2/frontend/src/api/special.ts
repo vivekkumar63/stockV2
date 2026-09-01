@@ -117,6 +117,7 @@ export interface SpecialRecommendation extends SpecialScanResult {
   profit_factor: number | null
   total_pnl: number | null
   avg_pnl_pct: number | null
+  ml_probability: number | null
 }
 
 export interface SpecialRecommendationsResponse {
