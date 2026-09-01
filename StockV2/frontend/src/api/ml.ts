@@ -43,3 +43,9 @@ export const getBackfillStatus     = () => apiFetch<BackfillStatus>('/intelligen
 
 export const getSpecialMLStatus = () => apiFetch<MLModelStatus>('/special/ml-status')
 export const trainSpecialModel  = () => apiFetch<MLTrainResult>('/special/ml/train', { method: 'POST' })
+
+export const refreshFundamentals = () =>
+  apiFetch<{ status: string; symbols: number }>('/data/fundamentals/refresh', { method: 'POST' })
+
+export const getFundamentalsCount = () =>
+  apiFetch<{ count: number }>('/data/fundamentals/count')

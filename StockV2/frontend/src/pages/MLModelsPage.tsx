@@ -9,6 +9,8 @@ import {
   computeSignalOutcomes,
   triggerBackfill,
   getBackfillStatus,
+  refreshFundamentals,
+  getFundamentalsCount,
 } from '../api/ml'
 import { triggerSpecialPrecompute, getSpecialPrecomputeStatus, getSpecialTrainingDataStatus } from '../api/special'
 
@@ -342,6 +344,49 @@ function SpecialModelCard() {
   )
 }
 
+function FundamentalsPanel() {
+  const qc = useQueryClient()
+  const { data: countData, isLoading } = useQuery({
+    queryKey: ['fundamentals-count'],
+    queryFn: getFundamentalsCount,
+  })
+  const { mutate: refresh, isPending, isSuccess } = useMutation({
+    mutationFn: refreshFundamentals,
+    onSuccess: () => setTimeout(() => qc.invalidateQueries({ queryKey: ['fundamentals-count'] }), 3000),
+  })
+
+  const count = countData?.count ?? 0
+
+  return (
+    <div className={`rounded-lg border p-4 flex items-center justify-between gap-4 ${count === 0 ? 'bg-amber-50 border-amber-200' : 'bg-white border-gray-200'}`}>
+      <div>
+        <p className="text-sm font-medium text-gray-800">Fundamentals Data</p>
+        <p className="text-xs text-gray-500 mt-0.5">
+          P/E, ROE, debt/equity, revenue — used as ML features once collected.
+          Fetched from yfinance (~500 symbols, takes 5–10 min).
+        </p>
+        {!isLoading && (
+          <p className={`text-xs mt-1 font-medium ${count === 0 ? 'text-amber-700' : 'text-green-700'}`}>
+            {count === 0
+              ? 'No data yet — run a refresh to populate'
+              : `${count} symbols have fundamentals data`}
+          </p>
+        )}
+        {isSuccess && (
+          <p className="text-xs mt-1 text-blue-600">Refresh started in background — count will update shortly</p>
+        )}
+      </div>
+      <button
+        onClick={() => refresh()}
+        disabled={isPending}
+        className="flex-shrink-0 bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-300 text-white text-sm font-medium px-4 py-2 rounded transition-colors"
+      >
+        {isPending ? 'Starting…' : 'Refresh Fundamentals'}
+      </button>
+    </div>
+  )
+}
+
 export function MLModelsPage() {
   return (
     <div className="space-y-6">
@@ -351,6 +396,8 @@ export function MLModelsPage() {
           Train models on historical trade outcomes to improve recommendation scoring.
         </p>
       </div>
+
+      <FundamentalsPanel />
 
       <div className="flex gap-6 flex-col sm:flex-row">
         <NormalModelCard />

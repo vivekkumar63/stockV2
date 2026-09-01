@@ -37,6 +37,13 @@ def get_prices(
     return DataService(db).get_prices(symbol, from_date=from_date, to_date=to_date, limit=limit)
 
 
+@router.get("/data/fundamentals/count")
+def get_fundamentals_count(db: Session = Depends(get_db)):
+    from sqlalchemy import text
+    count = db.execute(text("SELECT COUNT(*) FROM fundamentals")).scalar() or 0
+    return {"count": int(count)}
+
+
 @router.post("/data/fundamentals/refresh")
 def trigger_fundamentals_refresh(db: Session = Depends(get_db)):
     import threading
