@@ -1,5 +1,6 @@
 """Intelligence API endpoints — opportunity scores, strategy ranking, regime backfill."""
 
+import json
 import logging
 import os
 from datetime import date, datetime
@@ -17,6 +18,7 @@ from domains.intelligence.false_signal_detector import FalseSignalDetector
 from domains.intelligence.ml_scorer import (
     MLSignalScorer, regime_to_code,
     MODEL_PATH as NORMAL_ML_MODEL_PATH,
+    METRICS_PATH as NORMAL_ML_METRICS_PATH,
     MIN_TRAINING_SAMPLES as NORMAL_ML_MIN_SAMPLES,
 )
 from domains.intelligence.opportunity_scorer import OpportunityScorer
@@ -116,7 +118,7 @@ def get_opportunity_score(
             "strategy_id": strategy_id,
             "month": date.today().month,
             "day_of_week": date.today().weekday(),
-        })
+        }, db=db)
 
     # Sector health from latest sector_breadth_daily
     _sector = SYMBOL_TO_SECTOR.get(sym)
@@ -294,7 +296,7 @@ def get_top_opportunities(
             "strategy_id":      strategy_id,
             "month":            today.month,
             "day_of_week":      today.weekday(),
-        })
+        }, db=db)
 
         opp = opp_scorer.full_score(
             symbol=symbol,
@@ -519,25 +521,41 @@ def _compute_sr_score(sr) -> Optional[float]:
 
 @router.get("/intelligence/ml-status")
 def get_normal_ml_status(db: Session = Depends(get_db)):
-    """Model file existence, last-trained timestamp, and available sample count."""
+    """Model file existence, last-trained timestamp, sample count, and quality metrics."""
     exists = os.path.exists(NORMAL_ML_MODEL_PATH)
     last_trained = None
+    metrics: dict = {}
     if exists:
         last_trained = datetime.fromtimestamp(os.path.getmtime(NORMAL_ML_MODEL_PATH)).isoformat()
+        if os.path.exists(NORMAL_ML_METRICS_PATH):
+            with open(NORMAL_ML_METRICS_PATH) as f:
+                metrics = json.load(f)
     samples = db.execute(
         text("SELECT COUNT(*) FROM signal_outcomes WHERE is_profitable IS NOT NULL")
     ).scalar() or 0
-    return {"exists": exists, "last_trained": last_trained, "samples_available": int(samples)}
+    return {
+        "exists": exists,
+        "last_trained": last_trained,
+        "samples_available": int(samples),
+        "auc_roc": metrics.get("auc_roc"),
+        "precision_at_60": metrics.get("precision_at_60"),
+        "high_conf_signals": metrics.get("high_conf_signals"),
+        "class_balance": metrics.get("class_balance"),
+    }
 
 
 @router.post("/intelligence/train")
 def train_normal_ml_model(db: Session = Depends(get_db)):
     """Train the normal-strategy ML model on signal_outcomes data."""
     scorer = MLSignalScorer()
-    n = scorer.train(db)
-    if n == 0:
+    result = scorer.train(db)
+    if result["samples"] == 0:
         return {
             "status": "skipped", "samples": 0,
             "message": f"Need at least {NORMAL_ML_MIN_SAMPLES} labelled signal_outcomes rows",
         }
-    return {"status": "ok", "samples": n, "message": f"Trained on {n} samples"}
+    return {
+        "status": "ok",
+        "message": f"Trained on {result['samples']} samples",
+        **result,
+    }
