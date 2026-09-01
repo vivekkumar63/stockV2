@@ -481,12 +481,13 @@ class CombinationEngine:
         return first_id
 
     def _create_run_log(self) -> int:
-        result = self.db.execute(text("""
+        row = self.db.execute(text("""
             INSERT INTO combination_run_log (started_at, status, config_json)
             VALUES (:now, 'running', :cfg)
-        """), {"now": ist_now(), "cfg": json.dumps(asdict(self.config))})
+            RETURNING id
+        """), {"now": ist_now(), "cfg": json.dumps(asdict(self.config))}).fetchone()
         self.db.commit()
-        return result.lastrowid
+        return row[0]
 
     def _complete_run(
         self, run_id: int, symbols: int, candidates: int, combos: int,

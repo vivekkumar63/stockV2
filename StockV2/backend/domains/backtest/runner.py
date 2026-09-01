@@ -653,7 +653,7 @@ class BacktestRunner:
         strategy_id: Optional[int], metrics: dict, trades: list[SimTrade],
     ) -> int:
         # sortino_ratio stored as NULL — compute_metrics does not compute it yet
-        result = self.db.execute(
+        result_row = self.db.execute(
             text("""
                 INSERT INTO backtest_results
                     (strategy_id, symbol, from_date, to_date,
@@ -663,6 +663,7 @@ class BacktestRunner:
                 VALUES (:sid, :sym, :fd, :td,
                         :tt, :wr, :cagr, :sharpe,
                         NULL, :dd, :pf, :ar, :fmj, CURRENT_TIMESTAMP)
+                RETURNING id
             """),
             {
                 "sid": strategy_id,
@@ -678,8 +679,8 @@ class BacktestRunner:
                 "ar": metrics["avg_return_pct"],
                 "fmj": json.dumps(metrics),
             },
-        )
-        result_id = result.lastrowid
+        ).fetchone()
+        result_id = result_row[0]
 
         for t in trades:
             self.db.execute(

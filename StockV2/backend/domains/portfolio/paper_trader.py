@@ -107,18 +107,19 @@ class PaperTrader:
                       strategy_id: Optional[int] = None,
                       signal_id: Optional[int] = None,
                       notes: Optional[str] = None) -> int:
-        result = self.db.execute(
+        row = self.db.execute(
             text("""
                 INSERT INTO trades
                     (symbol, trade_type, quantity, price, total_value, brokerage,
                      mode, strategy_id, signal_id, notes, trade_date)
                 VALUES (:sym, :tt, :qty, :price, :tv, 0, 'paper',
                         :sid, :sigid, :notes, CURRENT_TIMESTAMP)
+                RETURNING id
             """),
             {"sym": symbol, "tt": trade_type, "qty": quantity, "price": price,
              "tv": total_value, "sid": strategy_id, "sigid": signal_id, "notes": notes},
-        )
-        return result.lastrowid
+        ).fetchone()
+        return row[0]
 
     def _upsert_holding(self, symbol: str, quantity: int, price: float):
         existing = self.db.execute(
