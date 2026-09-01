@@ -8,6 +8,16 @@ import {
   trainSpecialModel,
 } from '../api/ml'
 
+function MetricsRow({ label, value, note }: { label: string; value: string; note: string }) {
+  return (
+    <div className="flex items-baseline justify-between text-sm">
+      <span className="text-gray-500">{label}</span>
+      <span className="font-mono text-gray-900 font-medium">{value}</span>
+      <span className="text-xs text-gray-400 ml-2">{note}</span>
+    </div>
+  )
+}
+
 function ModelCard({
   title,
   description,
@@ -32,6 +42,8 @@ function ModelCard({
     onSuccess: () => qc.invalidateQueries({ queryKey: [queryKey] }),
   })
 
+  const metrics = trainResult?.status === 'ok' ? trainResult : status
+
   return (
     <div className="bg-white rounded-lg shadow p-6 flex flex-col gap-4 flex-1">
       <div>
@@ -42,29 +54,57 @@ function ModelCard({
       {statusLoading ? (
         <p className="text-sm text-gray-400">Loading status…</p>
       ) : status ? (
-        <div className="space-y-2 text-sm">
+        <div className="space-y-1.5 text-sm">
           <div className="flex items-center gap-2">
             <span
-              className={`w-2.5 h-2.5 rounded-full ${status.exists ? 'bg-green-500' : 'bg-gray-400'}`}
+              className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${status.exists ? 'bg-green-500' : 'bg-gray-400'}`}
             />
             <span className={status.exists ? 'text-green-700 font-medium' : 'text-gray-500'}>
               {status.exists ? 'Trained' : 'Not Trained'}
             </span>
+            {status.last_trained && (
+              <span className="text-gray-400 text-xs ml-auto">
+                {new Date(status.last_trained).toLocaleString()}
+              </span>
+            )}
           </div>
-          <div className="text-gray-600">
-            Last trained:{' '}
-            <span className="font-mono text-gray-800">
-              {status.last_trained
-                ? new Date(status.last_trained).toLocaleString()
-                : '—'}
-            </span>
-          </div>
-          <div className="text-gray-600">
+          <div className="text-gray-500 text-xs">
             Samples available:{' '}
-            <span className="font-mono text-gray-800">{status.samples_available}</span>
+            <span className="font-mono text-gray-700">{status.samples_available}</span>
           </div>
         </div>
       ) : null}
+
+      {metrics && metrics.auc_roc != null && (
+        <div className="border border-gray-100 rounded-md p-3 space-y-1.5 bg-gray-50">
+          <MetricsRow
+            label="AUC-ROC"
+            value={metrics.auc_roc.toFixed(3)}
+            note="random=0.50, perfect=1.00"
+          />
+          {metrics.precision_at_60 != null && (
+            <MetricsRow
+              label="Precision @60%"
+              value={`${(metrics.precision_at_60 * 100).toFixed(1)}%`}
+              note="win rate on high-conf calls"
+            />
+          )}
+          {metrics.high_conf_signals != null && (
+            <MetricsRow
+              label="High-conf signals"
+              value={String(metrics.high_conf_signals)}
+              note="predicted ≥60% in cal set"
+            />
+          )}
+          {metrics.class_balance != null && (
+            <MetricsRow
+              label="Class balance"
+              value={`${(metrics.class_balance * 100).toFixed(1)}%`}
+              note="profitable in training data"
+            />
+          )}
+        </div>
+      )}
 
       {trainResult && (
         <div
