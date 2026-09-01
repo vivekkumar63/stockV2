@@ -1,7 +1,8 @@
 """Intelligence API endpoints — opportunity scores, strategy ranking, regime backfill."""
 
 import logging
-from datetime import date
+import os
+from datetime import date, datetime
 from typing import Optional
 
 from ist import ist_today
@@ -13,7 +14,11 @@ from sqlalchemy.orm import Session
 
 from database import get_db
 from domains.intelligence.false_signal_detector import FalseSignalDetector
-from domains.intelligence.ml_scorer import MLSignalScorer, regime_to_code
+from domains.intelligence.ml_scorer import (
+    MLSignalScorer, regime_to_code,
+    MODEL_PATH as NORMAL_ML_MODEL_PATH,
+    MIN_TRAINING_SAMPLES as NORMAL_ML_MIN_SAMPLES,
+)
 from domains.intelligence.opportunity_scorer import OpportunityScorer
 from domains.intelligence.regime_performance import RegimePerformanceEngine
 from domains.intelligence.strategy_correlation import StrategyCorrelationEngine
@@ -508,3 +513,31 @@ def _compute_sr_score(sr) -> Optional[float]:
     resist_score  = min(1.0, resist_dist / 5.0)
 
     return round((support_score + resist_score) / 2.0, 4)
+
+
+# ── ML Model management ───────────────────────────────────────────────────────
+
+@router.get("/intelligence/ml-status")
+def get_normal_ml_status(db: Session = Depends(get_db)):
+    """Model file existence, last-trained timestamp, and available sample count."""
+    exists = os.path.exists(NORMAL_ML_MODEL_PATH)
+    last_trained = None
+    if exists:
+        last_trained = datetime.fromtimestamp(os.path.getmtime(NORMAL_ML_MODEL_PATH)).isoformat()
+    samples = db.execute(
+        text("SELECT COUNT(*) FROM signal_outcomes WHERE is_profitable IS NOT NULL")
+    ).scalar() or 0
+    return {"exists": exists, "last_trained": last_trained, "samples_available": int(samples)}
+
+
+@router.post("/intelligence/train")
+def train_normal_ml_model(db: Session = Depends(get_db)):
+    """Train the normal-strategy ML model on signal_outcomes data."""
+    scorer = MLSignalScorer()
+    n = scorer.train(db)
+    if n == 0:
+        return {
+            "status": "skipped", "samples": 0,
+            "message": f"Need at least {NORMAL_ML_MIN_SAMPLES} labelled signal_outcomes rows",
+        }
+    return {"status": "ok", "samples": n, "message": f"Trained on {n} samples"}
