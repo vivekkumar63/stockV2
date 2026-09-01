@@ -109,7 +109,7 @@ class SpecialMLScorer:
         logger.info("[special_ml_scorer] trained on %d samples, auc_roc=%.3f", len(X), auc_roc)
         return metrics
 
-    def predict(self, features: dict) -> Optional[float]:
+    def predict(self, features: dict, db=None, symbol: str = None) -> Optional[float]:
         """Return calibrated win-probability in [0,1], or None if model not available.
 
         Expected keys: strategy_id, entry_month, entry_dow, regime_code,
@@ -118,6 +118,20 @@ class SpecialMLScorer:
         model = self._load_model()
         if model is None:
             return None
+
+        pe_ratio = pb_ratio = roe = debt_equity = None
+        if db is not None and symbol:
+            fund_row = db.execute(
+                text("""
+                    SELECT pe_ratio, pb_ratio, roe, debt_equity
+                    FROM fundamentals WHERE symbol = :sym
+                    ORDER BY data_as_of DESC LIMIT 1
+                """),
+                {"sym": symbol},
+            ).fetchone()
+            if fund_row:
+                pe_ratio, pb_ratio, roe, debt_equity = fund_row[0], fund_row[1], fund_row[2], fund_row[3]
+
         X_row = np.array([[
             features["strategy_id"],
             features["entry_month"],
@@ -126,6 +140,10 @@ class SpecialMLScorer:
             features.get("strategy_avg_win_rate", 0.5),
             features.get("strategy_profit_factor", 1.0),
             features.get("strategy_avg_pnl_pct", 0.0),
+            float(pe_ratio) if pe_ratio is not None else 25.0,
+            float(pb_ratio) if pb_ratio is not None else 3.0,
+            float(roe) if roe is not None else 0.15,
+            float(debt_equity) if debt_equity is not None else 0.5,
         ]])
         probs = model.predict_proba(X_row)[0]
         classes = list(model.classes_)
@@ -153,7 +171,7 @@ class SpecialMLScorer:
             return None
 
     def _extract_features(self, db: Session):
-        """CTE query: 7 features per special_strategy_trades row.
+        """CTE query: 11 features per special_strategy_trades row.
 
         Label: pnl_pct >= 10 (trade closed at ≥10% profit = success).
         Source: special_strategy_trades populated by precompute (not manual backtests).
@@ -175,15 +193,25 @@ class SpecialMLScorer:
                 sst.pnl_pct,
                 COALESCE(ss.avg_win_rate, 0.5)      AS strategy_avg_win_rate,
                 COALESCE(ss.avg_profit_factor, 1.0) AS strategy_profit_factor,
-                COALESCE(ss.avg_pnl_pct_stat, 0.0)  AS strategy_avg_pnl_pct
+                COALESCE(ss.avg_pnl_pct_stat, 0.0)  AS strategy_avg_pnl_pct,
+                fund.pe_ratio,
+                fund.pb_ratio,
+                fund.roe,
+                fund.debt_equity
             FROM special_strategy_trades sst
             LEFT JOIN market_regime mr ON mr.date = sst.entry_date
             LEFT JOIN strategy_stats ss ON ss.special_strategy_id = sst.special_strategy_id
+            LEFT JOIN LATERAL (
+                SELECT pe_ratio, pb_ratio, roe, debt_equity
+                FROM fundamentals
+                WHERE symbol = sst.symbol AND data_as_of <= sst.entry_date
+                ORDER BY data_as_of DESC LIMIT 1
+            ) fund ON TRUE
             WHERE sst.entry_date IS NOT NULL AND sst.pnl_pct IS NOT NULL
         """)).fetchall()
 
         if not rows:
-            return np.array([]).reshape(0, 7), np.array([])
+            return np.array([]).reshape(0, 11), np.array([])
 
         X_list, y_list = [], []
         for r in rows:
@@ -194,6 +222,10 @@ class SpecialMLScorer:
             avg_win_rate  = float(r[4]) if r[4] is not None else 0.5
             profit_factor = float(r[5]) if r[5] is not None else 1.0
             avg_pnl_pct   = float(r[6]) if r[6] is not None else 0.0
+            pe_ratio      = float(r[7]) if r[7] is not None else 25.0
+            pb_ratio      = float(r[8]) if r[8] is not None else 3.0
+            roe           = float(r[9]) if r[9] is not None else 0.15
+            debt_equity   = float(r[10]) if r[10] is not None else 0.5
 
             if isinstance(entry_date, str):
                 from datetime import datetime as dt
@@ -203,6 +235,7 @@ class SpecialMLScorer:
             X_list.append([
                 strategy_id, entry_date.month, entry_date.weekday(),
                 regime_code, avg_win_rate, profit_factor, avg_pnl_pct,
+                pe_ratio, pb_ratio, roe, debt_equity,
             ])
             y_list.append(1 if pnl_pct >= 10.0 else 0)
 

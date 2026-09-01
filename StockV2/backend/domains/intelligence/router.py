@@ -129,7 +129,7 @@ def get_opportunity_score(
             "strategy_id": strategy_id,
             "month": date.today().month,
             "day_of_week": date.today().weekday(),
-        }, db=db)
+        }, db=db, symbol=sym)
 
     # Sector health from latest sector_breadth_daily
     _sector = SYMBOL_TO_SECTOR.get(sym)
@@ -329,7 +329,7 @@ def get_top_opportunities(
             "strategy_id":      strategy_id,
             "month":            today.month,
             "day_of_week":      today.weekday(),
-        }, db=db)
+        }, db=db, symbol=symbol)
 
         confluence = confluence_map.get(symbol, 1)
         opp = opp_scorer.full_score(

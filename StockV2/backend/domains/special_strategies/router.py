@@ -371,7 +371,7 @@ def _enrich_with_performance(signals: list[dict], db: Session) -> list[dict]:
                 "strategy_avg_win_rate":  float(p[3]) if p and p[3] is not None else 0.5,
                 "strategy_profit_factor": float(p[7]) if p and p[7] is not None else 1.0,
                 "strategy_avg_pnl_pct":   float(p[9]) if p and p[9] is not None else 0.0,
-            })
+            }, db=db, symbol=s["symbol"])
         result.append({
             **s,
             "total_trades":   p[2] if p else None,

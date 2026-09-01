@@ -106,7 +106,7 @@ class MLSignalScorer:
         logger.info("[ml_scorer] trained on %d samples, auc_roc=%.3f", len(X), auc_roc)
         return metrics
 
-    def predict(self, features: dict, db=None) -> Optional[float]:
+    def predict(self, features: dict, db=None, symbol: str = None) -> Optional[float]:
         """Return calibrated win-probability in [0,1], or None if model not available.
 
         Required keys: confidence_score, regime_code, strategy_id, month, day_of_week
@@ -134,6 +134,19 @@ class MLSignalScorer:
         if strategy_recent_win_rate is None:
             strategy_recent_win_rate = strategy_win_rate
 
+        pe_ratio = pb_ratio = roe = debt_equity = None
+        if db is not None and symbol:
+            fund_row = db.execute(
+                text("""
+                    SELECT pe_ratio, pb_ratio, roe, debt_equity
+                    FROM fundamentals WHERE symbol = :sym
+                    ORDER BY data_as_of DESC LIMIT 1
+                """),
+                {"sym": symbol},
+            ).fetchone()
+            if fund_row:
+                pe_ratio, pb_ratio, roe, debt_equity = fund_row[0], fund_row[1], fund_row[2], fund_row[3]
+
         X_row = np.array([[
             features["confidence_score"],
             features["regime_code"],
@@ -143,6 +156,10 @@ class MLSignalScorer:
             strategy_win_rate,
             log_total_trades,
             strategy_recent_win_rate,
+            float(pe_ratio) if pe_ratio is not None else 25.0,
+            float(pb_ratio) if pb_ratio is not None else 3.0,
+            float(roe) if roe is not None else 0.15,
+            float(debt_equity) if debt_equity is not None else 0.5,
         ]])
 
         probs = model.predict_proba(X_row)[0]
@@ -200,7 +217,7 @@ class MLSignalScorer:
             return None
 
     def _extract_features(self, db: Session):
-        """Window-function query: 8 features per signal_outcome row."""
+        """Window-function query: 12 features per signal_outcome row."""
         rows = db.execute(text("""
             SELECT
                 ss.confidence_score,
@@ -221,15 +238,25 @@ class MLSignalScorer:
                         ROWS BETWEEN 20 PRECEDING AND 1 PRECEDING
                     ),
                     AVG((so.is_profitable)::int::float) OVER (PARTITION BY ss.strategy_id)
-                ) AS strategy_recent_win_rate
+                ) AS strategy_recent_win_rate,
+                fund.pe_ratio,
+                fund.pb_ratio,
+                fund.roe,
+                fund.debt_equity
             FROM signal_outcomes so
             JOIN strategy_signals ss ON ss.id = so.signal_id
             LEFT JOIN market_regime mr ON mr.date = so.signal_date
+            LEFT JOIN LATERAL (
+                SELECT pe_ratio, pb_ratio, roe, debt_equity
+                FROM fundamentals
+                WHERE symbol = ss.symbol AND data_as_of <= so.signal_date
+                ORDER BY data_as_of DESC LIMIT 1
+            ) fund ON TRUE
             WHERE so.is_profitable IS NOT NULL
         """)).fetchall()
 
         if not rows:
-            return np.array([]).reshape(0, 8), np.array([])
+            return np.array([]).reshape(0, 12), np.array([])
 
         X_list, y_list = [], []
         for r in rows:
@@ -241,6 +268,10 @@ class MLSignalScorer:
             strategy_win_rate = float(r[5]) if r[5] is not None else 0.5
             log_total_trades = float(np.log1p(int(r[6]))) if r[6] is not None else 2.0
             recent_win_rate = float(r[7]) if r[7] is not None else strategy_win_rate
+            pe_ratio = float(r[8]) if r[8] is not None else 25.0
+            pb_ratio = float(r[9]) if r[9] is not None else 3.0
+            roe = float(r[10]) if r[10] is not None else 0.15
+            debt_equity = float(r[11]) if r[11] is not None else 0.5
 
             if isinstance(sig_date, str):
                 from datetime import datetime as dt
@@ -250,6 +281,7 @@ class MLSignalScorer:
                 conf_score, regime_code, strat_id,
                 sig_date.month, sig_date.weekday(),
                 strategy_win_rate, log_total_trades, recent_win_rate,
+                pe_ratio, pb_ratio, roe, debt_equity,
             ])
             y_list.append(1 if is_prof else 0)
 

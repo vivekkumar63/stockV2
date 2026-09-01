@@ -59,16 +59,22 @@ class FundamentalsService:
                 de = float(raw_de) / 100 if float(raw_de) > 2 else float(raw_de)
 
             self.db.execute(
-                text("DELETE FROM fundamentals WHERE symbol = :sym"),
-                {"sym": symbol},
-            )
-            self.db.execute(
                 text("""
                     INSERT INTO fundamentals
                         (symbol, pe_ratio, pb_ratio, eps, revenue, net_profit,
                          debt_equity, roe, dividend_yield, data_as_of, updated_at)
                     VALUES (:sym, :pe, :pb, :eps, :rev, :np,
                             :de, :roe, :dy, :asof, CURRENT_TIMESTAMP)
+                    ON CONFLICT (symbol, data_as_of) DO UPDATE SET
+                        pe_ratio      = EXCLUDED.pe_ratio,
+                        pb_ratio      = EXCLUDED.pb_ratio,
+                        eps           = EXCLUDED.eps,
+                        revenue       = EXCLUDED.revenue,
+                        net_profit    = EXCLUDED.net_profit,
+                        debt_equity   = EXCLUDED.debt_equity,
+                        roe           = EXCLUDED.roe,
+                        dividend_yield = EXCLUDED.dividend_yield,
+                        updated_at    = CURRENT_TIMESTAMP
                 """),
                 {
                     "sym": symbol, "pe": pe, "pb": pb, "eps": eps,

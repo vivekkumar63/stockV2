@@ -88,6 +88,22 @@ async def lifespan(app: FastAPI):
             else:
                 logger.error("[migration] Phase H failed: %s", e)
 
+    # Phase I: add UNIQUE(symbol, data_as_of) on fundamentals — required for ON CONFLICT upsert
+    with engine.connect() as _conn:
+        try:
+            _conn.execute(text("""
+                ALTER TABLE fundamentals
+                ADD CONSTRAINT fundamentals_symbol_date_unique UNIQUE (symbol, data_as_of)
+            """))
+            _conn.commit()
+            logger.info("[migration] fundamentals_symbol_date_unique constraint added")
+        except Exception as e:
+            _conn.rollback()
+            if "already exists" in str(e) or "fundamentals_symbol_date_unique" in str(e):
+                logger.debug("[migration] fundamentals_symbol_date_unique already exists — skipping")
+            else:
+                logger.error("[migration] Phase I failed: %s", e)
+
     # Strategy Combination Engine tables
     try:
         with engine.connect() as _conn:
