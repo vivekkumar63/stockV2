@@ -145,7 +145,15 @@ class SpecialMLScorer:
             float(roe) if roe is not None else 0.15,
             float(debt_equity) if debt_equity is not None else 0.5,
         ]])
-        probs = model.predict_proba(X_row)[0]
+        try:
+            probs = model.predict_proba(X_row)[0]
+        except ValueError:
+            global _cached_model
+            _cached_model = None
+            logger.warning(
+                "[special_ml_scorer] feature mismatch — model needs retraining with fundamentals features"
+            )
+            return None
         classes = list(model.classes_)
         if 1 not in classes:
             return 0.0
