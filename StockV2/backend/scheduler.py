@@ -360,15 +360,19 @@ def _intraday_digest():
         logger.info("[scheduler] intraday_digest sent: %d buy signals from %d stored",
                     len(top_10), len(buy_signals))
 
-        # Special Strategies scan — send BUY signals separately
+        # Special Strategies scan — persist to cache, then send Telegram
         try:
+            from domains.special_strategies.router import _enrich_with_performance, _save_scan_cache
             special_signals = SpecialScanner(db).scan()
-            if special_signals:
-                ok = alert_svc.send_special_scan_alerts(special_signals, scan_date=today)
+            enriched = _enrich_with_performance(special_signals, db)
+            _save_scan_cache(enriched, today, db)
+            logger.info("[scheduler] special_digest: %d signals cached for %s", len(enriched), today)
+            if enriched:
+                ok = alert_svc.send_special_scan_alerts(enriched, scan_date=today)
                 if ok:
-                    logger.info("[scheduler] special_digest: %d special buy signals sent", len(special_signals))
+                    logger.info("[scheduler] special_digest: Telegram sent")
                 else:
-                    logger.error("[scheduler] special_digest: Telegram send failed for %d signals", len(special_signals))
+                    logger.error("[scheduler] special_digest: Telegram send failed")
         except Exception:
             logger.exception("[scheduler] special strategy scan failed")
 

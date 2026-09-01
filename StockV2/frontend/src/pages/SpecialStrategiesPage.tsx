@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState } from 'react'
 import { useMutation, useQuery } from '@tanstack/react-query'
 import {
   getSpecialStrategies,
@@ -14,7 +14,7 @@ import {
   type SpecialScanResult,
   type SpecialTrade,
   type SpecialPerformanceRow,
-  type SpecialRecommendation,
+  type SpecialRecommendationsResponse,
 } from '../api/special'
 import { inr } from '../utils/format'
 
@@ -89,32 +89,24 @@ export function SpecialStrategiesPage() {
 // ── Recommendations Tab ───────────────────────────────────────────────────────
 
 function RecommendationsTab() {
-  const [results, setResults] = useState<SpecialRecommendation[] | null>(null)
+  const [resp, setResp] = useState<SpecialRecommendationsResponse | null>(null)
 
-  const recsMut = useMutation({ mutationFn: getSpecialRecommendations, onSuccess: setResults })
-
-  const { data: status, refetch: refetchStatus } = useQuery({
-    queryKey: ['special-precompute-status-recs'],
-    queryFn: getSpecialPrecomputeStatus,
-    refetchInterval: (query) => query.state.data?.is_running ? 2000 : false,
+  // Auto-load on mount from cache (no force)
+  const recsQuery = useQuery({
+    queryKey: ['special-recommendations'],
+    queryFn: () => getSpecialRecommendations(false),
+    staleTime: 60 * 60 * 1000,
   })
 
-  const refreshMut = useMutation({
-    mutationFn: () => triggerSpecialPrecompute(true),
-    onSuccess: () => refetchStatus(),
+  // Force refresh bypasses cache
+  const forceMut = useMutation({
+    mutationFn: () => getSpecialRecommendations(true),
+    onSuccess: (data) => setResp(data),
   })
 
-  const isRunning = status?.is_running ?? false
-  const pct = status?.pct_done ?? 0
-
-  // Auto-fetch recommendations once a force-refresh precompute finishes
-  const wasRunningRef = useRef(false)
-  useEffect(() => {
-    if (wasRunningRef.current && !isRunning) {
-      recsMut.mutate()
-    }
-    wasRunningRef.current = isRunning
-  }, [isRunning])  // eslint-disable-line react-hooks/exhaustive-deps
+  const results = resp?.results ?? recsQuery.data?.results ?? null
+  const scannedAt = resp?.scanned_at ?? recsQuery.data?.scanned_at ?? null
+  const isPending = recsQuery.isLoading || forceMut.isPending
 
   return (
     <div className="space-y-4">
@@ -124,46 +116,29 @@ function RecommendationsTab() {
             <p className="text-sm text-gray-600">
               Stocks with a live BUY signal today, ranked by historical success rate.
             </p>
-            {status && !isRunning && (
+            {scannedAt && (
               <p className="text-xs text-gray-400 mt-0.5">
-                Performance cache: {status.symbol_strategy_pairs} pairs
-                {status.last_updated && ` · updated ${new Date(status.last_updated).toLocaleString('en-IN', { dateStyle: 'short', timeStyle: 'short' })}`}
+                as of {new Date(scannedAt).toLocaleString('en-IN', { dateStyle: 'short', timeStyle: 'short' })}
               </p>
             )}
           </div>
-          <div className="flex gap-2">
-            <button onClick={() => { setResults(null); recsMut.mutate() }}
-              disabled={recsMut.isPending || isRunning}
-              className="px-4 py-2 bg-purple-600 text-white text-sm font-medium rounded hover:bg-purple-700 disabled:opacity-50 whitespace-nowrap">
-              {recsMut.isPending ? 'Scanning…' : 'Get Recommendations'}
-            </button>
-            <button
-              onClick={() => refreshMut.mutate()}
-              disabled={isRunning || refreshMut.isPending}
-              title="Re-run backtests for all stocks across all strategies, then refresh recommendations"
-              className="px-3 py-2 border border-gray-300 text-gray-600 text-sm rounded hover:bg-gray-50 disabled:opacity-50 whitespace-nowrap">
-              {isRunning ? 'Refreshing…' : 'Force Refresh All'}
-            </button>
-          </div>
+          <button
+            onClick={() => forceMut.mutate()}
+            disabled={isPending}
+            title="Re-scan all stocks and update today's cache"
+            className="px-3 py-2 border border-gray-300 text-gray-600 text-sm rounded hover:bg-gray-50 disabled:opacity-50 whitespace-nowrap">
+            {forceMut.isPending ? 'Scanning…' : '↺ Force Refresh'}
+          </button>
         </div>
 
-        {isRunning && (
-          <div className="space-y-1">
-            <div className="flex justify-between text-xs text-gray-600">
-              <span>{status?.phase ?? 'running'} — {status?.message}</span>
-              <span>{pct.toFixed(1)}%</span>
-            </div>
-            <div className="w-full bg-gray-200 rounded-full h-2">
-              <div className="bg-purple-500 h-2 rounded-full transition-all" style={{ width: `${pct}%` }} />
-            </div>
-            <div className="text-xs text-gray-500">{status?.done} / {status?.total} pairs computed</div>
-          </div>
+        {(recsQuery.isError || forceMut.isError) && (
+          <ErrBox msg={((recsQuery.error || forceMut.error) as Error).message} />
         )}
-
-        {status?.error && <ErrBox msg={status.error} />}
       </div>
 
-      {recsMut.isError && <ErrBox msg={(recsMut.error as Error).message} />}
+      {isPending && !results && (
+        <p className="text-sm text-gray-500 p-4">Loading recommendations…</p>
+      )}
 
       {results !== null && (
         <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">

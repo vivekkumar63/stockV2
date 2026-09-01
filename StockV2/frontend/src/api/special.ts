@@ -119,8 +119,13 @@ export interface SpecialRecommendation extends SpecialScanResult {
   avg_pnl_pct: number | null
 }
 
-export const getSpecialRecommendations = () =>
-  apiFetch<SpecialRecommendation[]>('/special/recommendations')
+export interface SpecialRecommendationsResponse {
+  scanned_at: string
+  results: SpecialRecommendation[]
+}
+
+export const getSpecialRecommendations = (force = false) =>
+  apiFetch<SpecialRecommendationsResponse>(`/special/recommendations${force ? '?force=true' : ''}`)
 
 export const getSpecialStrategyTrades = (strategyId: number, symbol: string) =>
   apiFetch<SpecialTrade[]>(`/special/performance/trades?strategy_id=${strategyId}&symbol=${encodeURIComponent(symbol)}`)

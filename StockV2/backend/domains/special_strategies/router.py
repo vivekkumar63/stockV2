@@ -1,3 +1,4 @@
+import json
 import logging
 import threading
 from datetime import date
@@ -326,14 +327,10 @@ def get_special_performance_trades(strategy_id: int, symbol: str, db: Session = 
     ]
 
 
-@router.get("/special/recommendations")
-def get_special_recommendations(db: Session = Depends(get_db)):
-    """Live buy signals enriched with historical performance metrics."""
-    scanner = SpecialScanner(db)
-    signals = scanner.scan()
+def _enrich_with_performance(signals: list[dict], db: Session) -> list[dict]:
+    """Join scan signals with precomputed performance metrics."""
     if not signals:
         return []
-
     strategy_ids = list({s["strategy_id"] for s in signals if s["strategy_id"] is not None})
     perf_rows = db.execute(
         text("""
@@ -345,24 +342,62 @@ def get_special_recommendations(db: Session = Depends(get_db)):
         {"sids": strategy_ids},
     ).fetchall()
     perf_map: dict[tuple, tuple] = {(r[0], r[1]): r for r in perf_rows}
-
     result = []
     for s in signals:
         p = perf_map.get((s["symbol"], s["strategy_id"]))
         result.append({
             **s,
-            "total_trades": p[2] if p else None,
-            "win_rate":     p[3] if p else None,
-            "cagr":         p[4] if p else None,
-            "sharpe_ratio": p[5] if p else None,
-            "max_drawdown": p[6] if p else None,
-            "profit_factor":p[7] if p else None,
-            "total_pnl":    p[8] if p else None,
-            "avg_pnl_pct":  p[9] if p else None,
+            "total_trades":  p[2] if p else None,
+            "win_rate":      p[3] if p else None,
+            "cagr":          p[4] if p else None,
+            "sharpe_ratio":  p[5] if p else None,
+            "max_drawdown":  p[6] if p else None,
+            "profit_factor": p[7] if p else None,
+            "total_pnl":     p[8] if p else None,
+            "avg_pnl_pct":   p[9] if p else None,
         })
-
     result.sort(key=lambda r: (r["win_rate"] or 0, r["confidence"]), reverse=True)
     return result
+
+
+def _save_scan_cache(signals: list[dict], scan_date: date, db: Session) -> None:
+    db.execute(text("""
+        INSERT INTO special_scan_cache (scan_date, results_json, scanned_at)
+        VALUES (:d, :j, CURRENT_TIMESTAMP)
+        ON CONFLICT (scan_date) DO UPDATE SET
+            results_json = EXCLUDED.results_json,
+            scanned_at   = CURRENT_TIMESTAMP
+    """), {"d": str(scan_date), "j": json.dumps(signals)})
+    db.commit()
+
+
+@router.get("/special/recommendations")
+def get_special_recommendations(force: bool = False, db: Session = Depends(get_db)):
+    """Return today's BUY signals enriched with historical performance.
+
+    Results are cached per calendar day. Pass ?force=true to bypass the cache
+    and re-run the live scan (also updates the cache).
+    """
+    today = date.today()
+
+    if not force:
+        row = db.execute(
+            text("SELECT results_json, scanned_at FROM special_scan_cache WHERE scan_date = :d"),
+            {"d": str(today)},
+        ).fetchone()
+        if row:
+            cached = json.loads(row[0])
+            return {"scanned_at": str(row[1]), "results": cached}
+
+    # Cache miss or force — run live scan
+    scanner = SpecialScanner(db)
+    signals = scanner.scan()
+    result = _enrich_with_performance(signals, db)
+    _save_scan_cache(result, today, db)
+    scanned_at = db.execute(
+        text("SELECT scanned_at FROM special_scan_cache WHERE scan_date = :d"), {"d": str(today)}
+    ).scalar()
+    return {"scanned_at": str(scanned_at), "results": result}
 
 
 @router.get("/special/scan/results")

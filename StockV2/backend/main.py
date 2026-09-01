@@ -310,6 +310,13 @@ async def lifespan(app: FastAPI):
             _conn.execute(text(
                 "CREATE INDEX IF NOT EXISTS idx_sst_sid_sym ON special_strategy_trades (special_strategy_id, symbol)"
             ))
+            _conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS special_scan_cache (
+                    scan_date   DATE PRIMARY KEY,
+                    results_json TEXT NOT NULL,
+                    scanned_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """))
             _conn.commit()
         logger.info("Special Strategies tables verified")
     except Exception as e:
