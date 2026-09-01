@@ -1,7 +1,8 @@
 import json
 import logging
+import os
 import threading
-from datetime import date
+from datetime import date, datetime
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -11,6 +12,11 @@ from sqlalchemy.orm import Session
 
 from database import get_db, SessionLocal
 from domains.special_strategies import ALL_SPECIAL_STRATEGIES
+from domains.special_strategies.ml_scorer import (
+    SpecialMLScorer, special_regime_to_code,
+    MODEL_PATH as SPECIAL_ML_MODEL_PATH,
+    MIN_TRAINING_SAMPLES as SPECIAL_ML_MIN_SAMPLES,
+)
 from domains.special_strategies.scanner import SpecialScanner
 from domains.special_strategies.simulator import SpecialSimulator
 
@@ -328,7 +334,7 @@ def get_special_performance_trades(strategy_id: int, symbol: str, db: Session = 
 
 
 def _enrich_with_performance(signals: list[dict], db: Session) -> list[dict]:
-    """Join scan signals with precomputed performance metrics."""
+    """Join scan signals with precomputed performance metrics and ML probability."""
     if not signals:
         return []
     strategy_ids = list({s["strategy_id"] for s in signals if s["strategy_id"] is not None})
@@ -342,19 +348,37 @@ def _enrich_with_performance(signals: list[dict], db: Session) -> list[dict]:
         {"sids": strategy_ids},
     ).fetchall()
     perf_map: dict[tuple, tuple] = {(r[0], r[1]): r for r in perf_rows}
+
+    regime_row = db.execute(
+        text("SELECT regime FROM market_regime ORDER BY date DESC LIMIT 1")
+    ).fetchone()
+    regime_code = special_regime_to_code(regime_row[0]) if regime_row else 3
+
+    scorer = SpecialMLScorer()
+    today = date.today()
+
     result = []
     for s in signals:
         p = perf_map.get((s["symbol"], s["strategy_id"]))
+        ml_prob = None
+        if s["strategy_id"] is not None:
+            ml_prob = scorer.predict({
+                "strategy_id": s["strategy_id"],
+                "entry_month": today.month,
+                "entry_dow": today.weekday(),
+                "regime_code": regime_code,
+            })
         result.append({
             **s,
-            "total_trades":  p[2] if p else None,
-            "win_rate":      p[3] if p else None,
-            "cagr":          p[4] if p else None,
-            "sharpe_ratio":  p[5] if p else None,
-            "max_drawdown":  p[6] if p else None,
-            "profit_factor": p[7] if p else None,
-            "total_pnl":     p[8] if p else None,
-            "avg_pnl_pct":   p[9] if p else None,
+            "total_trades":   p[2] if p else None,
+            "win_rate":       p[3] if p else None,
+            "cagr":           p[4] if p else None,
+            "sharpe_ratio":   p[5] if p else None,
+            "max_drawdown":   p[6] if p else None,
+            "profit_factor":  p[7] if p else None,
+            "total_pnl":      p[8] if p else None,
+            "avg_pnl_pct":    p[9] if p else None,
+            "ml_probability": ml_prob,
         })
     result.sort(key=lambda r: (r["win_rate"] or 0, r["confidence"]), reverse=True)
     return result
@@ -443,3 +467,34 @@ def get_special_scan_results(
         }
         for r in rows
     ]
+
+
+# ── ML Model management ───────────────────────────────────────────────────────
+
+@router.get("/special/ml-status")
+def get_special_ml_status(db: Session = Depends(get_db)):
+    """Model file existence, last-trained timestamp, and available sample count."""
+    exists = os.path.exists(SPECIAL_ML_MODEL_PATH)
+    last_trained = None
+    if exists:
+        last_trained = datetime.fromtimestamp(os.path.getmtime(SPECIAL_ML_MODEL_PATH)).isoformat()
+    samples = db.execute(
+        text("""
+            SELECT COUNT(*) FROM special_backtest_trades
+            WHERE entry_date IS NOT NULL AND pnl IS NOT NULL
+        """)
+    ).scalar() or 0
+    return {"exists": exists, "last_trained": last_trained, "samples_available": int(samples)}
+
+
+@router.post("/special/ml/train")
+def train_special_ml_model(db: Session = Depends(get_db)):
+    """Train the special-strategy ML model on special_backtest_trades data."""
+    scorer = SpecialMLScorer()
+    n = scorer.train(db)
+    if n == 0:
+        return {
+            "status": "skipped", "samples": 0,
+            "message": f"Need at least {SPECIAL_ML_MIN_SAMPLES} labelled special_backtest_trades rows",
+        }
+    return {"status": "ok", "samples": n, "message": f"Trained on {n} samples"}
