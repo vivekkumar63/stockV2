@@ -4,12 +4,20 @@ export interface MLModelStatus {
   exists: boolean
   last_trained: string | null
   samples_available: number
+  auc_roc: number | null
+  precision_at_60: number | null
+  high_conf_signals: number | null
+  class_balance: number | null
 }
 
 export interface MLTrainResult {
   status: 'ok' | 'skipped'
   samples: number
   message: string
+  auc_roc?: number
+  precision_at_60?: number
+  high_conf_signals?: number
+  class_balance?: number
 }
 
 export const getNormalMLStatus  = () => apiFetch<MLModelStatus>('/intelligence/ml-status')
