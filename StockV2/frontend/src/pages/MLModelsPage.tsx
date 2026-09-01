@@ -1,11 +1,16 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import type { MLModelStatus, MLTrainResult } from '../api/ml'
+import type { MLModelStatus, MLTrainResult, ComputeOutcomesResult, BackfillStatus } from '../api/ml'
+import type { SpecialPrecomputeStatus } from '../api/special'
 import {
   getNormalMLStatus,
   getSpecialMLStatus,
   trainNormalModel,
   trainSpecialModel,
+  computeSignalOutcomes,
+  triggerBackfill,
+  getBackfillStatus,
 } from '../api/ml'
+import { triggerSpecialPrecompute, getSpecialPrecomputeStatus, getSpecialTrainingDataStatus } from '../api/special'
 
 function MetricsRow({ label, value, note }: { label: string; value: string; note: string }) {
   return (
@@ -138,6 +143,205 @@ function ModelCard({
   )
 }
 
+function NormalModelCard() {
+  const qc = useQueryClient()
+
+  const { mutate: startBackfill, isPending: isStarting } = useMutation({
+    mutationFn: () => triggerBackfill(90),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['backfill-status'] }),
+  })
+
+  const { data: bfStatus } = useQuery<BackfillStatus>({
+    queryKey: ['backfill-status'],
+    queryFn: getBackfillStatus,
+    refetchInterval: (query) => query.state.data?.is_running ? 3000 : false,
+  })
+
+  const { mutate: computeOutcomes, isPending: isComputing, data: computeResult } =
+    useMutation<ComputeOutcomesResult>({
+      mutationFn: computeSignalOutcomes,
+      onSuccess: () => qc.invalidateQueries({ queryKey: ['normal-ml-status'] }),
+    })
+
+  const isRunning = bfStatus?.is_running ?? false
+  const hasBackfillDone = (bfStatus?.signals_saved ?? 0) > 0 && !isRunning
+
+  return (
+    <div className="flex flex-col gap-3 flex-1">
+      {/* Step 1 — Backfill */}
+      <div className="bg-white rounded-lg shadow p-4 space-y-2">
+        <p className="text-sm font-medium text-gray-700">Step 1 — Backfill Historical Signals</p>
+        <p className="text-xs text-gray-400">
+          Replays all strategies over 90 days of price history to seed the signal database.
+          Only needed once on a fresh deployment.
+        </p>
+        {isRunning && bfStatus && (
+          <div className="space-y-1">
+            <div className="flex justify-between text-xs text-blue-700">
+              <span>Processing symbols…</span>
+              <span>{bfStatus.done} / {bfStatus.total}</span>
+            </div>
+            <div className="w-full bg-gray-200 rounded-full h-1.5">
+              <div
+                className="bg-blue-500 h-1.5 rounded-full transition-all"
+                style={{ width: bfStatus.total ? `${(bfStatus.done / bfStatus.total) * 100}%` : '0%' }}
+              />
+            </div>
+            <p className="text-xs text-gray-400">{bfStatus.signals_saved} signals saved so far</p>
+          </div>
+        )}
+        {hasBackfillDone && (
+          <p className="text-xs text-green-700">
+            Done — {bfStatus!.signals_saved} signals saved, {bfStatus!.outcomes_labelled} outcomes labelled
+          </p>
+        )}
+        {bfStatus?.error && (
+          <p className="text-xs text-red-600">{bfStatus.error}</p>
+        )}
+        <button
+          onClick={() => startBackfill()}
+          disabled={isStarting || isRunning}
+          className="bg-gray-700 hover:bg-gray-800 disabled:bg-gray-400 text-white text-xs font-medium px-3 py-1.5 rounded transition-colors"
+        >
+          {isRunning ? 'Running…' : 'Backfill Signals'}
+        </button>
+      </div>
+
+      {/* Step 2 — Compute Outcomes */}
+      <div className="bg-white rounded-lg shadow p-4 flex items-center justify-between gap-4">
+        <div>
+          <p className="text-sm font-medium text-gray-700">Step 2 — Compute Outcomes</p>
+          <p className="text-xs text-gray-400 mt-0.5">
+            Labels signals ≥15 days old as profitable/not. Run after backfill or daily.
+          </p>
+          {computeResult && (
+            <p className="text-xs mt-1 text-green-700">
+              +{computeResult.new_outcomes_recorded} new &nbsp;·&nbsp; {computeResult.total_labelled_outcomes} total
+              {computeResult.ready_to_train ? ' — ready to train ✓' : ' — need 50 to train'}
+            </p>
+          )}
+        </div>
+        <button
+          onClick={() => computeOutcomes()}
+          disabled={isComputing || isRunning}
+          className="flex-shrink-0 bg-gray-600 hover:bg-gray-700 disabled:bg-gray-400 text-white text-sm font-medium px-4 py-2 rounded transition-colors"
+        >
+          {isComputing ? 'Computing…' : 'Compute Outcomes'}
+        </button>
+      </div>
+
+      {/* Step 3 — Train */}
+      <ModelCard
+        title="Normal Strategies Model"
+        description="Step 3 — Train on labelled outcomes to predict win probability for strategy signals."
+        queryKey="normal-ml-status"
+        fetchStatus={getNormalMLStatus}
+        triggerTrain={trainNormalModel}
+      />
+    </div>
+  )
+}
+
+function SpecialModelCard() {
+  const qc = useQueryClient()
+
+  const { mutate: startPrecompute, isPending: isStarting } = useMutation({
+    mutationFn: () => triggerSpecialPrecompute(false),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['special-precompute-status'] }),
+  })
+
+  const { data: pcStatus } = useQuery<SpecialPrecomputeStatus>({
+    queryKey: ['special-precompute-status'],
+    queryFn: getSpecialPrecomputeStatus,
+    refetchInterval: (query) => query.state.data?.is_running ? 3000 : false,
+  })
+
+  const { data: tdStatus, refetch: recheckTd, isFetching: isFetchingTd } = useQuery({
+    queryKey: ['special-training-data-status'],
+    queryFn: getSpecialTrainingDataStatus,
+  })
+
+  const isRunning = pcStatus?.is_running ?? false
+  const hasDone = (pcStatus?.symbols_computed ?? 0) > 0 && !isRunning
+
+  return (
+    <div className="flex flex-col gap-3 flex-1">
+      {/* Step 1 — Precompute */}
+      <div className="bg-white rounded-lg shadow p-4 space-y-2">
+        <p className="text-sm font-medium text-gray-700">Step 1 — Run Precompute</p>
+        <p className="text-xs text-gray-400">
+          Runs backtests for all special strategies across all symbols to populate trade history.
+          Only needed once on a fresh deployment.
+        </p>
+        {isRunning && pcStatus && (
+          <div className="space-y-1">
+            <div className="flex justify-between text-xs text-blue-700">
+              <span>{pcStatus.phase || 'Processing…'}</span>
+              <span>{pcStatus.done} / {pcStatus.total}</span>
+            </div>
+            <div className="w-full bg-gray-200 rounded-full h-1.5">
+              <div
+                className="bg-blue-500 h-1.5 rounded-full transition-all"
+                style={{ width: `${pcStatus.pct_done ?? 0}%` }}
+              />
+            </div>
+            <p className="text-xs text-gray-400">{pcStatus.symbols_computed} symbols computed</p>
+          </div>
+        )}
+        {hasDone && (
+          <p className="text-xs text-green-700">
+            Done — {pcStatus!.symbols_computed} symbols computed
+          </p>
+        )}
+        {pcStatus?.error && (
+          <p className="text-xs text-red-600">{pcStatus.error}</p>
+        )}
+        <button
+          onClick={() => startPrecompute()}
+          disabled={isStarting || isRunning}
+          className="bg-gray-700 hover:bg-gray-800 disabled:bg-gray-400 text-white text-xs font-medium px-3 py-1.5 rounded transition-colors"
+        >
+          {isRunning ? 'Running…' : 'Run Precompute'}
+        </button>
+      </div>
+
+      {/* Step 2 — Check training data */}
+      <div className="bg-white rounded-lg shadow p-4 flex items-center justify-between gap-4">
+        <div>
+          <p className="text-sm font-medium text-gray-700">Step 2 — Check Training Data</p>
+          <p className="text-xs text-gray-400 mt-0.5">
+            Counts labelled backtest trades available for training.
+          </p>
+          {tdStatus && (
+            <p className="text-xs mt-1 text-green-700">
+              {tdStatus.total_labelled_trades} trades available
+              {tdStatus.ready_to_train
+                ? ' — ready to train ✓'
+                : ` — need ${tdStatus.min_required} to train`}
+            </p>
+          )}
+        </div>
+        <button
+          onClick={() => recheckTd()}
+          disabled={isFetchingTd || isRunning}
+          className="flex-shrink-0 bg-gray-600 hover:bg-gray-700 disabled:bg-gray-400 text-white text-sm font-medium px-4 py-2 rounded transition-colors"
+        >
+          {isFetchingTd ? 'Checking…' : 'Check'}
+        </button>
+      </div>
+
+      {/* Step 3 — Train */}
+      <ModelCard
+        title="Special Strategies Model"
+        description="Step 3 — Train on backtest trades to predict win probability for special strategy signals."
+        queryKey="special-ml-status"
+        fetchStatus={getSpecialMLStatus}
+        triggerTrain={trainSpecialModel}
+      />
+    </div>
+  )
+}
+
 export function MLModelsPage() {
   return (
     <div className="space-y-6">
@@ -149,20 +353,8 @@ export function MLModelsPage() {
       </div>
 
       <div className="flex gap-6 flex-col sm:flex-row">
-        <ModelCard
-          title="Normal Strategies Model"
-          description="Trained on signal_outcomes — predicts win probability for regular strategy signals."
-          queryKey="normal-ml-status"
-          fetchStatus={getNormalMLStatus}
-          triggerTrain={trainNormalModel}
-        />
-        <ModelCard
-          title="Special Strategies Model"
-          description="Trained on special_backtest_trades — predicts win probability for special strategy signals."
-          queryKey="special-ml-status"
-          fetchStatus={getSpecialMLStatus}
-          triggerTrain={trainSpecialModel}
-        />
+        <NormalModelCard />
+        <SpecialModelCard />
       </div>
     </div>
   )

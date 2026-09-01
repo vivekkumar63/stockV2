@@ -155,7 +155,7 @@ class MLSignalScorer:
     def _get_strategy_stats(self, db, strategy_id: int) -> dict:
         """Query win rate, trade count, and recent win rate for a strategy."""
         row = db.execute(text("""
-            SELECT COUNT(*), AVG(so.is_profitable::float)
+            SELECT COUNT(*), AVG(so.is_profitable::int::float)
             FROM signal_outcomes so
             JOIN strategy_signals ss ON ss.id = so.signal_id
             WHERE ss.strategy_id = :sid AND so.is_profitable IS NOT NULL
@@ -208,19 +208,19 @@ class MLSignalScorer:
                 ss.strategy_id,
                 so.signal_date,
                 so.is_profitable,
-                AVG((so.is_profitable)::float) OVER (
+                AVG((so.is_profitable)::int::float) OVER (
                     PARTITION BY ss.strategy_id
                 ) AS strategy_win_rate,
                 COUNT(*) OVER (
                     PARTITION BY ss.strategy_id
                 ) AS strategy_total_trades,
                 COALESCE(
-                    AVG((so.is_profitable)::float) OVER (
+                    AVG((so.is_profitable)::int::float) OVER (
                         PARTITION BY ss.strategy_id
                         ORDER BY so.signal_date
                         ROWS BETWEEN 20 PRECEDING AND 1 PRECEDING
                     ),
-                    AVG((so.is_profitable)::float) OVER (PARTITION BY ss.strategy_id)
+                    AVG((so.is_profitable)::int::float) OVER (PARTITION BY ss.strategy_id)
                 ) AS strategy_recent_win_rate
             FROM signal_outcomes so
             JOIN strategy_signals ss ON ss.id = so.signal_id

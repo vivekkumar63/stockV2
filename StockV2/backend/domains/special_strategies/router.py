@@ -526,6 +526,20 @@ def get_special_ml_status(db: Session = Depends(get_db)):
     }
 
 
+@router.get("/special/ml/training-data-status")
+def get_special_training_data_status(db: Session = Depends(get_db)):
+    """Return count of labelled special backtest trades and whether enough exist to train."""
+    from domains.special_strategies.ml_scorer import MIN_TRAINING_SAMPLES as SPECIAL_ML_MIN
+    total = db.execute(
+        text("SELECT COUNT(*) FROM special_backtest_trades WHERE entry_date IS NOT NULL AND pnl IS NOT NULL")
+    ).scalar() or 0
+    return {
+        "total_labelled_trades": int(total),
+        "ready_to_train": int(total) >= SPECIAL_ML_MIN,
+        "min_required": SPECIAL_ML_MIN,
+    }
+
+
 @router.post("/special/ml/train")
 def train_special_ml_model(db: Session = Depends(get_db)):
     """Train the special-strategy ML model on special_backtest_trades data."""

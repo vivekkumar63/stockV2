@@ -17,14 +17,36 @@ logger = logging.getLogger(__name__)
 
 _NSE_HOME = "https://www.nseindia.com/"
 _NSE_EVENTS = "https://www.nseindia.com/api/event-calendar"
-_HEADERS = {
+
+# Headers for the initial page load (HTML, triggers cookie issuance)
+_PAGE_HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
         "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
     ),
-    "Accept": "application/json, text/plain, */*",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
     "Accept-Language": "en-US,en;q=0.9",
+    "Accept-Encoding": "gzip, deflate",
+    "Connection": "keep-alive",
+    "Upgrade-Insecure-Requests": "1",
+    "Sec-Fetch-Dest": "document",
+    "Sec-Fetch-Mode": "navigate",
+    "Sec-Fetch-Site": "none",
+    "Sec-Fetch-User": "?1",
+    "sec-ch-ua": '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
+    "sec-ch-ua-mobile": "?0",
+    "sec-ch-ua-platform": '"Windows"',
+    "Cache-Control": "max-age=0",
+}
+
+# Headers for the JSON API call (XHR-like)
+_API_HEADERS = {
+    **_PAGE_HEADERS,
+    "Accept": "application/json, text/plain, */*",
     "Referer": "https://www.nseindia.com/",
+    "Sec-Fetch-Dest": "empty",
+    "Sec-Fetch-Mode": "cors",
+    "Sec-Fetch-Site": "same-origin",
 }
 
 
@@ -36,14 +58,17 @@ class EarningsFetcher:
         Returns empty list on any error.
         """
         try:
-            with httpx.Client(headers=_HEADERS, follow_redirects=True, timeout=15.0) as client:
-                client.get(_NSE_HOME)  # obtain session cookies
-                resp = client.get(_NSE_EVENTS)
+            with httpx.Client(follow_redirects=True, timeout=15.0) as client:
+                home_r = client.get(_NSE_HOME, headers=_PAGE_HEADERS)
+                logger.debug("[EarningsFetcher] home status=%d cookies=%d", home_r.status_code, len(client.cookies))
+                resp = client.get(_NSE_EVENTS, headers=_API_HEADERS)
                 resp.raise_for_status()
                 events = resp.json()
         except Exception:
             logger.warning("[EarningsFetcher] NSE fetch failed", exc_info=True)
             return []
+
+        logger.debug("[EarningsFetcher] raw event-calendar items=%d", len(events) if isinstance(events, list) else -1)
 
         if not isinstance(events, list):
             logger.warning("[EarningsFetcher] unexpected response shape: %s", type(events))

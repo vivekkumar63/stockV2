@@ -11,14 +11,34 @@ logger = logging.getLogger(__name__)
 
 _NSE_HOME = "https://www.nseindia.com"
 _NSE_FII_DII_URL = "https://www.nseindia.com/api/fiidiiTradeReact"
-_HEADERS = {
+
+_PAGE_HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
         "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
     ),
-    "Accept": "application/json, text/plain, */*",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
     "Accept-Language": "en-US,en;q=0.9",
+    "Accept-Encoding": "gzip, deflate",
+    "Connection": "keep-alive",
+    "Upgrade-Insecure-Requests": "1",
+    "Sec-Fetch-Dest": "document",
+    "Sec-Fetch-Mode": "navigate",
+    "Sec-Fetch-Site": "none",
+    "Sec-Fetch-User": "?1",
+    "sec-ch-ua": '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
+    "sec-ch-ua-mobile": "?0",
+    "sec-ch-ua-platform": '"Windows"',
+    "Cache-Control": "max-age=0",
+}
+
+_API_HEADERS = {
+    **_PAGE_HEADERS,
+    "Accept": "application/json, text/plain, */*",
     "Referer": "https://www.nseindia.com/",
+    "Sec-Fetch-Dest": "empty",
+    "Sec-Fetch-Mode": "cors",
+    "Sec-Fetch-Site": "same-origin",
 }
 
 
@@ -62,9 +82,9 @@ def fetch_and_store_fii_dii(db: Session) -> None:
     """
     today = str(date.today())
     try:
-        with httpx.Client(headers=_HEADERS, follow_redirects=True, timeout=15.0) as client:
-            client.get(_NSE_HOME)  # establish session cookie
-            r = client.get(_NSE_FII_DII_URL)
+        with httpx.Client(follow_redirects=True, timeout=15.0) as client:
+            client.get(_NSE_HOME, headers=_PAGE_HEADERS)  # establish session cookie
+            r = client.get(_NSE_FII_DII_URL, headers=_API_HEADERS)
             r.raise_for_status()
             raw = r.json()
     except Exception:

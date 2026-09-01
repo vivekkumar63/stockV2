@@ -34,6 +34,17 @@ from domains.market.volume_analysis import VolumeAnalysisEngine
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["intelligence"])
 
+# ── Signal backfill state ─────────────────────────────────────────────────────
+
+_backfill_state: dict = {
+    "is_running": False,
+    "done": 0,
+    "total": 0,
+    "signals_saved": 0,
+    "outcomes_labelled": 0,
+    "error": None,
+}
+
 
 # ── Strategy ranking ──────────────────────────────────────────────────────────
 
@@ -567,6 +578,175 @@ def get_normal_ml_status(db: Session = Depends(get_db)):
         "precision_at_60": metrics.get("precision_at_60"),
         "high_conf_signals": metrics.get("high_conf_signals"),
         "class_balance": metrics.get("class_balance"),
+    }
+
+
+@router.get("/intelligence/backfill-status")
+def get_backfill_status():
+    return dict(_backfill_state)
+
+
+@router.post("/intelligence/backfill-signals")
+def trigger_signal_backfill(
+    background_tasks: BackgroundTasks,
+    days_back: int = Query(default=90, ge=30, le=365),
+    db: Session = Depends(get_db),
+):
+    """Replay all strategies over historical price data to seed strategy_signals.
+
+    Loads each symbol's price history once, then slices per trading date —
+    no repeated DB queries. Safe to re-run (ON CONFLICT DO NOTHING on signals).
+    After signals are written, compute_outcomes runs automatically.
+    """
+    if _backfill_state["is_running"]:
+        return {"status": "already_running", **_backfill_state}
+
+    # Collect symbols and trading dates up front (in the request thread, uses the injected db)
+    cutoff = date.today() - timedelta(days=days_back)
+    outcome_cutoff = date.today() - timedelta(days=15)
+
+    symbols: list[str] = [
+        r[0] for r in db.execute(text(
+            "SELECT DISTINCT symbol FROM stock_prices_daily WHERE date >= :c ORDER BY symbol"
+        ), {"c": str(cutoff)}).fetchall()
+    ]
+    trading_dates: list[date] = [
+        r[0] for r in db.execute(text(
+            """SELECT DISTINCT date FROM stock_prices_daily
+               WHERE date >= :c AND date <= :oc ORDER BY date"""
+        ), {"c": str(cutoff), "oc": str(outcome_cutoff)}).fetchall()
+    ]
+
+    if not symbols or not trading_dates:
+        return {"status": "no_data", "message": "No price data found in range"}
+
+    _backfill_state.update(
+        is_running=True, done=0, total=len(symbols),
+        signals_saved=0, outcomes_labelled=0, error=None,
+    )
+    logger.info("[backfill] starting: %d symbols × %d dates", len(symbols), len(trading_dates))
+
+    background_tasks.add_task(_run_backfill, symbols, trading_dates)
+    return {
+        "status": "started",
+        "symbols": len(symbols),
+        "dates": len(trading_dates),
+    }
+
+
+def _run_backfill(symbols: list[str], trading_dates: list[date]):
+    import json as _json
+    import numpy as np
+    from database import SessionLocal
+    from domains.strategies.engine import ALL_STRATEGIES, IndicatorEngine
+    from domains.data.fundamentals import FundamentalsService
+
+    db = SessionLocal()
+    try:
+        # Cache strategy id map
+        rows = db.execute(text("SELECT name, id FROM strategies")).fetchall()
+        strat_id_map = {r[0]: r[1] for r in rows}
+
+        total_saved = 0
+
+        for i, symbol in enumerate(symbols):
+            _backfill_state["done"] = i
+
+            # Load full price history for this symbol once
+            price_rows = db.execute(text("""
+                SELECT date, open, high, low, close, volume
+                FROM stock_prices_daily WHERE symbol = :s ORDER BY date ASC
+            """), {"s": symbol}).fetchall()
+            if len(price_rows) < 30:
+                continue
+
+            df_full = pd.DataFrame(price_rows, columns=["date", "open", "high", "low", "close", "volume"])
+            for col in ["open", "high", "low", "close", "volume"]:
+                df_full[col] = df_full[col].astype(float)
+            df_full["date"] = pd.to_datetime(df_full["date"]).dt.date
+
+            fundamentals = FundamentalsService(db).get_latest(symbol)
+
+            for hist_date in trading_dates:
+                mask = df_full["date"] <= hist_date
+                df_slice = df_full[mask].tail(200).copy()
+                if len(df_slice) < 30:
+                    continue
+                try:
+                    df_ind = IndicatorEngine.compute(df_slice)
+                except Exception:
+                    continue
+
+                close_price = float(df_ind["close"].iloc[-1])
+
+                for strategy in ALL_STRATEGIES:
+                    sid = strat_id_map.get(strategy.name)
+                    if sid is None:
+                        continue
+                    try:
+                        signal = strategy.generate_signal(df_ind, fundamentals=fundamentals)
+                    except Exception:
+                        continue
+                    if signal.signal_type == "NONE":
+                        continue
+
+                    stop_loss = close_price * (1 - signal.stop_loss_pct / 100) if signal.stop_loss_pct > 0 else None
+                    target = close_price * (1 + signal.target_pct / 100) if signal.target_pct > 0 else None
+                    db.execute(text("""
+                        INSERT INTO strategy_signals
+                        (symbol, strategy_id, signal_date, signal_type, price_at_signal,
+                         confidence_score, risk_score, expected_upside_pct,
+                         suggested_stop_loss, suggested_target, holding_period_days,
+                         reasoning_json, indicators_json, created_at)
+                        VALUES (:sym, :sid, :sdate, :stype, :price, :conf, :risk, :upside,
+                                :sl, :tgt, :hdays, :reasoning, :indicators, CURRENT_TIMESTAMP)
+                        ON CONFLICT (symbol, strategy_id, signal_date) DO NOTHING
+                    """), {
+                        "sym": symbol, "sid": sid, "sdate": str(hist_date),
+                        "stype": signal.signal_type, "price": close_price,
+                        "conf": signal.confidence, "risk": signal.risk_score,
+                        "upside": signal.expected_upside_pct,
+                        "sl": stop_loss, "tgt": target, "hdays": signal.holding_days,
+                        "reasoning": _json.dumps({"conditions_met": signal.conditions_met, "conditions_failed": signal.conditions_failed}),
+                        "indicators": None,
+                    })
+                    total_saved += 1
+
+            if i % 50 == 0:
+                db.commit()
+                _backfill_state["signals_saved"] = total_saved
+
+        db.commit()
+        _backfill_state["signals_saved"] = total_saved
+        logger.info("[backfill] wrote %d signals — now computing outcomes", total_saved)
+
+        n = FalseSignalDetector().compute_outcomes(db)
+        _backfill_state["outcomes_labelled"] = n
+        logger.info("[backfill] labelled %d outcomes", n)
+
+    except Exception as e:
+        logger.exception("[backfill] failed")
+        _backfill_state["error"] = str(e)
+    finally:
+        _backfill_state["is_running"] = False
+        db.close()
+
+
+@router.post("/intelligence/compute-outcomes")
+def compute_signal_outcomes(db: Session = Depends(get_db)):
+    """Evaluate BUY signal outcomes for signals ≥15 days old and write to signal_outcomes.
+
+    Safe to call multiple times — skips signals already recorded.
+    Returns number of new rows written.
+    """
+    n = FalseSignalDetector().compute_outcomes(db)
+    total = db.execute(
+        text("SELECT COUNT(*) FROM signal_outcomes WHERE is_profitable IS NOT NULL")
+    ).scalar() or 0
+    return {
+        "new_outcomes_recorded": n,
+        "total_labelled_outcomes": int(total),
+        "ready_to_train": int(total) >= NORMAL_ML_MIN_SAMPLES,
     }
 
 

@@ -135,6 +135,9 @@ export const getSpecialStrategyTrades = (strategyId: number, symbol: string) =>
 export const triggerSpecialPrecompute = (force = false) =>
   apiFetch<{ status: string; message: string; strategies_queued: number }>(`/special/precompute?force=${force}`, { method: 'POST' })
 
+export const getSpecialTrainingDataStatus = () =>
+  apiFetch<{ total_labelled_trades: number; ready_to_train: boolean; min_required: number }>('/special/ml/training-data-status')
+
 export const getSpecialPrecomputeStatus = () =>
   apiFetch<SpecialPrecomputeStatus>('/special/precompute/status')
 
