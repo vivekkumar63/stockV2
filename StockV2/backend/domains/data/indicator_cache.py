@@ -62,7 +62,8 @@ _SEL = f"SELECT date, {', '.join(IND_COLS)} FROM stock_indicators_daily WHERE sy
 _INS = (
     f"INSERT INTO stock_indicators_daily (symbol, date, {', '.join(IND_COLS)}) "
     f"VALUES (:sym, :d, {', '.join(f':{c}' for c in IND_COLS)}) "
-    f"ON CONFLICT (symbol, date) DO NOTHING"
+    f"ON CONFLICT (symbol, date) DO UPDATE SET " +
+    ", ".join(f"{col} = EXCLUDED.{col}" for col in IND_COLS)
 )
 
 
@@ -79,11 +80,26 @@ class IndicatorCache:
         ).scalar()
 
         if cached_max is not None and str(cached_max) >= latest_date:
-            return self._load(symbol)
+            df = self._load(symbol)
+            if self._is_schema_stale(df):
+                logger.info("[IndicatorCache] %s: schema stale — recomputing all rows", symbol)
+                df_ind = IndicatorEngine.compute(prices_df)
+                self._store(symbol, df_ind, cached_max=None)
+                return df_ind
+            return df
 
         df_ind = IndicatorEngine.compute(prices_df)
         self._store(symbol, df_ind, cached_max)
         return df_ind
+
+    def _is_schema_stale(self, df: pd.DataFrame) -> bool:
+        """Return True if ≥1 IND_COLS beyond OHLCV are all-NaN in the most recent 10 rows."""
+        non_price = [c for c in IND_COLS if c not in ("open", "high", "low", "close", "volume")]
+        if not non_price or df.empty:
+            return False
+        tail = df.tail(10)
+        null_cols = sum(1 for c in non_price if c in tail.columns and tail[c].isna().all())
+        return null_cols > 0
 
     # ── private ──────────────────────────────────────────────────────────────
 
