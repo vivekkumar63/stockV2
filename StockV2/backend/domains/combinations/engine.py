@@ -46,14 +46,21 @@ def _combo_worker_init(symbols_data, indicators_data, regime_map, wf_map, benchm
 
 def _combo_worker_eval(combination: list) -> Optional[dict]:
     """Evaluate one combination in a worker process. No DB calls."""
+    import traceback
     from domains.backtest.simulator import BacktestSimulator
     from domains.combinations.metrics import compute_extended_metrics
+
+    if not _W_SYMBOLS:
+        return {"_diagnostic": "W_SYMBOLS_EMPTY"}
+    if not _W_INDICATORS:
+        return {"_diagnostic": "W_INDICATORS_EMPTY"}
 
     train_ratio, val_ratio, initial_capital, round_trip_cost_pct = _W_CFG
     simulator = BacktestSimulator()
     all_train, all_val, all_oos = [], [], []
     train_from = val_from = oos_from = None
     train_to = val_to = oos_to = None
+    _first_exc: str = ""
 
     for symbol, prices_df in _W_SYMBOLS.items():
         if len(prices_df) < 50:
@@ -82,11 +89,16 @@ def _combo_worker_eval(combination: list) -> Optional[dict]:
             all_oos.extend(simulator.run(symbol, prices_df, o_from, o_to, combination,
                 initial_capital=initial_capital, round_trip_cost_pct=round_trip_cost_pct,
                 _df_ind_precomputed=df_ind))
-        except Exception:
+        except Exception as _e:
+            if not _first_exc:
+                _first_exc = f"{symbol}: {traceback.format_exc(limit=3)}"
             continue
 
     if not all_oos or oos_from is None:
-        return None
+        combo_name = "_".join(s.name[:6] for s in combination) if combination else "?"
+        syms_with_ind = sum(1 for s in _W_SYMBOLS if _W_INDICATORS.get(s) is not None)
+        return {"_diagnostic": f"empty_oos|combo={combo_name}|syms={len(_W_SYMBOLS)}|syms_with_ind={syms_with_ind}|oos_from={oos_from}|first_exc={_first_exc[:200]}"}
+
 
     wf = sum(_W_WF.get(s.name, 0.0) for s in combination) / len(combination)
     train_m = compute_extended_metrics(all_train, initial_capital, train_from, train_to,
@@ -170,8 +182,12 @@ class CombinationEngine:
             indicators_data = self._load_indicators_data(symbols_data)
 
             # Steps 5-6: Backtest + extended metrics per combo (parallelized)
-            logger.info("[engine] Steps 5-6: Backtesting combinations (workers=%d, symbols=%d)",
-                        self.config.max_workers, len(symbols_data))
+            syms_with_ind = sum(1 for s in symbols_data if s in indicators_data and indicators_data[s] is not None)
+            logger.info("[engine] Steps 5-6: Backtesting combinations (workers=%d, symbols=%d, syms_with_ind=%d)",
+                        self.config.max_workers, len(symbols_data), syms_with_ind)
+            if syms_with_ind == 0:
+                self._fail_run(run_id, "No indicator data available — rerun precompute or check indicator cache")
+                return run_id
             regime_map = self._load_regime_map()
             wf_map = self._load_wf_map()
             benchmarks = self._compute_benchmarks_once(symbols_data, indicators_data)
@@ -188,13 +204,18 @@ class CombinationEngine:
                 initargs=(symbols_data, indicators_data, regime_map, wf_map, benchmarks, cfg_tuple),
             ) as executor:
                 futures = {executor.submit(_combo_worker_eval, combo): combo for combo in combos}
+                _diag_logged = False
                 for future in as_completed(futures):
                     completed += 1
                     if completed % log_interval == 0 or completed == total:
                         logger.info("[engine] Progress: %d/%d combinations", completed, total)
                     try:
                         result = future.result()
-                        if result:
+                        if result and "_diagnostic" in result:
+                            if not _diag_logged:
+                                logger.warning("[engine] worker diagnostic: %s", result["_diagnostic"])
+                                _diag_logged = True
+                        elif result:
                             combo_results.append(result)
                     except Exception:
                         logger.exception("[engine] combo evaluation raised exception")
