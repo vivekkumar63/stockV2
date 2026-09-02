@@ -60,6 +60,9 @@ class MLSignalScorer:
         if len(np.unique(y)) < 2:
             logger.warning("[ml_scorer] strategy %d: only one class — skipping", strategy_id)
             return {"samples": 0, "strategy_id": strategy_id}
+        if np.bincount(y).min() < 2:
+            logger.warning("[ml_scorer] strategy %d: minority class has only 1 sample — skipping", strategy_id)
+            return {"samples": 0, "strategy_id": strategy_id}
 
         from lightgbm import LGBMClassifier
         from sklearn.calibration import CalibratedClassifierCV
