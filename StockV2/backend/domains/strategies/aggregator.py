@@ -26,7 +26,8 @@ class SignalAggregator:
         consensus_score = weighted_confidence / total_weight if total_weight > 0 else 0.0
         buy_count = len(buy_pairs)
 
-        if consensus_score > 0.65 and buy_count >= 3:
+        min_buy = min(3, len(signals))
+        if consensus_score > 0.65 and buy_count >= min_buy:
             signal_type = "BUY"
         elif consensus_score > 0.45 and buy_count >= 2:
             signal_type = "WATCH"
