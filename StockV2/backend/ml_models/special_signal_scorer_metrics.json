@@ -1,0 +1,1 @@
+{"auc_roc": 0.6345, "precision_at_60": 0.4155, "high_conf_signals": 2183, "class_balance": 0.256, "samples": 107782, "trained_at": "2026-09-02T00:06:29.767478"}

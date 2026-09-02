@@ -1,0 +1,1 @@
+{"strategy_id": 49, "auc_roc": 0.5756, "precision_at_60": 0.2283, "high_conf_signals": 92, "class_balance": 0.1948, "samples": 6186, "trained_at": "2026-09-02T00:28:19.142848"}
