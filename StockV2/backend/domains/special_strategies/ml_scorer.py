@@ -100,8 +100,9 @@ class SpecialMLScorer:
         high_conf_mask = cal_probs >= 0.6
         precision_at_60 = float(y_cal[high_conf_mask].mean()) if high_conf_mask.sum() > 0 else None
 
+        cv = min(5, int(np.bincount(y).min()))
         cal_method = "isotonic" if len(X) >= 500 else "sigmoid"
-        model = CalibratedClassifierCV(LGBMClassifier(**_lgb), cv=5, method=cal_method)
+        model = CalibratedClassifierCV(LGBMClassifier(**_lgb), cv=cv, method=cal_method)
         model.fit(X, y)
 
         os.makedirs(_MODEL_DIR, exist_ok=True)
