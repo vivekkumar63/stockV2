@@ -227,7 +227,8 @@ def get_chart_data(
 
     result: dict = {"ohlcv": ohlcv}
     if zone_row:
-        rj = json.loads(zone_row[0])
+        raw = zone_row[0]
+        rj = raw if isinstance(raw, dict) else json.loads(raw)
         result["demand_bands"] = [
             {"low": z["low"], "high": z["high"], "strength": z.get("score", 0), "zone_type": "demand", "source": z.get("source", "daily")}
             for z in rj.get("demand_zones", [])
