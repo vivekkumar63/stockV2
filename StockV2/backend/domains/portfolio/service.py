@@ -17,9 +17,12 @@ class PortfolioService:
                 SELECT ph.id, ph.symbol, ph.quantity, ph.avg_buy_price,
                        ph.first_buy_date, ph.last_buy_date,
                        ROUND(CAST(ph.quantity * ph.avg_buy_price AS NUMERIC), 2) AS invested_value,
-                       er.stop_loss_price, er.target_1_price, er.max_exit_date
+                       er.stop_loss_price, er.target_1_price, er.max_exit_date,
+                       ph.special_strategy_id, ph.entry_source,
+                       ss.name AS special_strategy_name
                 FROM portfolio_holdings ph
                 LEFT JOIN exit_rules er ON er.symbol = ph.symbol
+                LEFT JOIN special_strategies ss ON ss.id = ph.special_strategy_id
                 WHERE ph.is_active = true
                 ORDER BY ph.symbol
             """)

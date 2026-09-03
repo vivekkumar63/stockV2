@@ -505,6 +505,18 @@ async def lifespan(app: FastAPI):
     except Exception as _e:
         logger.warning("[migration] volume BIGINT upgrade skipped: %s", _e)
 
+    # Add manual-entry columns to portfolio_holdings
+    with engine.connect() as _conn:
+        for _col_sql in (
+            "ALTER TABLE portfolio_holdings ADD COLUMN IF NOT EXISTS special_strategy_id INTEGER",
+            "ALTER TABLE portfolio_holdings ADD COLUMN IF NOT EXISTS entry_source VARCHAR(10) DEFAULT 'signal'",
+        ):
+            try:
+                _conn.execute(text(_col_sql))
+                _conn.commit()
+            except Exception:
+                _conn.rollback()
+
     # Remove rows where close is NULL or NaN — yfinance sometimes returns partial bars
     # (e.g. for the current day when market hasn't closed) that pass old validate_row checks.
     # These rows cause non-finite price errors in the scanner and precompute.

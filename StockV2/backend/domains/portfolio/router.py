@@ -26,6 +26,16 @@ class WatchlistBody(BaseModel):
     reason: Optional[str] = None
 
 
+class ManualEntryBody(BaseModel):
+    symbol: str
+    quantity: int
+    price: float
+    stop_loss: float
+    target: float
+    strategy_id: Optional[int] = None
+    special_strategy_id: Optional[int] = None
+
+
 @router.get("/portfolio/summary")
 def portfolio_summary(db: Session = Depends(get_db)):
     return PortfolioService(db).get_portfolio_summary()
@@ -95,6 +105,100 @@ def paper_exit(symbol: str, body: ExitBody, db: Session = Depends(get_db)):
     if trade is None:
         raise HTTPException(status_code=404, detail=f"No active position for {symbol}")
     return trade
+
+
+@router.post("/portfolio/manual-entry")
+def manual_entry(body: ManualEntryBody, db: Session = Depends(get_db)):
+    """Add a manually-bought position without requiring a scanner signal."""
+    symbol = body.symbol.upper().strip()
+    trader = PaperTrader(db)
+
+    # Use PaperTrader internal helpers directly — no signal required
+    total_value = round(body.quantity * body.price, 2)
+    trade_id = trader._insert_trade(
+        symbol=symbol,
+        trade_type="BUY",
+        quantity=body.quantity,
+        price=body.price,
+        total_value=total_value,
+        strategy_id=body.strategy_id,
+        signal_id=None,
+    )
+    trader._upsert_holding(symbol, body.quantity, body.price)
+
+    # Update the holding with manual-entry metadata
+    db.execute(text("""
+        UPDATE portfolio_holdings
+        SET special_strategy_id = :ssid, entry_source = 'manual'
+        WHERE symbol = :sym AND is_active = true
+    """), {"ssid": body.special_strategy_id, "sym": symbol})
+
+    trader._insert_exit_rule(
+        trade_id=trade_id,
+        symbol=symbol,
+        entry_price=body.price,
+        stop_loss_price=body.stop_loss,
+        target_price=body.target,
+        holding_days=365,  # no expiry for manual entries
+    )
+    db.commit()
+    return trader._load_trade(trade_id)
+
+
+@router.get("/portfolio/special-sell-alerts")
+def special_sell_alerts(db: Session = Depends(get_db)):
+    """Return special strategy sell signals for currently-held positions."""
+    import logging
+    import pandas as pd
+    from domains.special_strategies import ALL_SPECIAL_STRATEGIES
+    from domains.data.indicators import IndicatorEngine
+
+    _log = logging.getLogger(__name__)
+
+    # Load holdings linked to a special strategy
+    rows = db.execute(text("""
+        SELECT ph.symbol, ph.avg_buy_price, ph.special_strategy_id,
+               ss.name AS strategy_name
+        FROM portfolio_holdings ph
+        JOIN special_strategies ss ON ss.id = ph.special_strategy_id
+        WHERE ph.is_active = true AND ph.special_strategy_id IS NOT NULL
+    """)).fetchall()
+
+    strategy_map = {s.name: s for s in ALL_SPECIAL_STRATEGIES}
+    alerts = []
+
+    for row in rows:
+        symbol, avg_buy, _, strategy_name = row[0], row[1], row[2], row[3]
+        strategy = strategy_map.get(strategy_name)
+        if strategy is None:
+            continue
+
+        try:
+            price_rows = db.execute(text("""
+                SELECT date, open, high, low, close, volume FROM (
+                    SELECT date, open, high, low, close, volume
+                    FROM stock_prices_daily WHERE symbol = :s
+                    ORDER BY date DESC LIMIT 250
+                ) ORDER BY date ASC
+            """), {"s": symbol}).fetchall()
+            if len(price_rows) < 3:
+                continue
+            df = pd.DataFrame(price_rows, columns=["date", "open", "high", "low", "close", "volume"])
+            for col in ("open", "high", "low", "close", "volume"):
+                df[col] = df[col].astype(float)
+            df_ind = IndicatorEngine.compute(df)
+            if strategy.sell_signal(df_ind):
+                current_price = float(df_ind["close"].iloc[-1])
+                alerts.append({
+                    "symbol": symbol,
+                    "strategy_name": strategy_name,
+                    "avg_buy_price": float(avg_buy),
+                    "current_price": current_price,
+                })
+        except Exception:
+            _log.exception("[special-sell-alerts] error checking %s", symbol)
+
+    return alerts
 
 
 @router.get("/watchlist")

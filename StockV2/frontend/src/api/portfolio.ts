@@ -19,6 +19,9 @@ export interface Holding {
   stop_loss_price: number | null
   target_1_price: number | null
   max_exit_date: string | null
+  special_strategy_id: number | null
+  special_strategy_name: string | null
+  entry_source: string | null
 }
 
 export interface ClosedPnl {
@@ -75,3 +78,28 @@ export interface SellAlert {
 }
 
 export const getSellAlerts = () => apiFetch<SellAlert[]>('/portfolio/sell-alerts')
+
+export interface ManualEntryRequest {
+  symbol: string
+  quantity: number
+  price: number
+  stop_loss: number
+  target: number
+  strategy_id?: number
+  special_strategy_id?: number
+}
+
+export const manualEntry = (req: ManualEntryRequest) =>
+  apiFetch<TradeRecord>('/portfolio/manual-entry', {
+    method: 'POST',
+    body: JSON.stringify(req),
+  })
+
+export interface SpecialSellAlert {
+  symbol: string
+  strategy_name: string
+  avg_buy_price: number
+  current_price: number | null
+}
+
+export const getSpecialSellAlerts = () => apiFetch<SpecialSellAlert[]>('/portfolio/special-sell-alerts')

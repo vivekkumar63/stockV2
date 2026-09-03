@@ -31,6 +31,65 @@ _IST = "Asia/Kolkata"
 scheduler = BackgroundScheduler(timezone=_IST)
 
 
+def _check_special_sell_alerts(db) -> None:
+    """Check special-strategy sell signals for manually-held positions and fire Telegram alerts."""
+    import logging as _log
+    import pandas as _pd
+    from domains.alerts.telegram import AlertService
+    from domains.special_strategies import ALL_SPECIAL_STRATEGIES
+    from domains.data.indicators import IndicatorEngine
+    _logger = _log.getLogger(__name__)
+
+    try:
+        rows = db.execute(sa_text("""
+            SELECT ph.symbol, ph.avg_buy_price, ph.special_strategy_id,
+                   ss.name AS strategy_name
+            FROM portfolio_holdings ph
+            JOIN special_strategies ss ON ss.id = ph.special_strategy_id
+            WHERE ph.is_active = true AND ph.special_strategy_id IS NOT NULL
+        """)).fetchall()
+        if not rows:
+            return
+
+        strategy_map = {s.name: s for s in ALL_SPECIAL_STRATEGIES}
+        alerts = []
+        for row in rows:
+            symbol, avg_buy, _, strategy_name = row[0], row[1], row[2], row[3]
+            strategy = strategy_map.get(strategy_name)
+            if strategy is None:
+                continue
+            try:
+                price_rows = db.execute(sa_text("""
+                    SELECT date, open, high, low, close, volume FROM (
+                        SELECT date, open, high, low, close, volume
+                        FROM stock_prices_daily WHERE symbol = :s
+                        ORDER BY date DESC LIMIT 250
+                    ) ORDER BY date ASC
+                """), {"s": symbol}).fetchall()
+                if len(price_rows) < 3:
+                    continue
+                df = _pd.DataFrame(price_rows, columns=["date", "open", "high", "low", "close", "volume"])
+                for col in ("open", "high", "low", "close", "volume"):
+                    df[col] = df[col].astype(float)
+                df_ind = IndicatorEngine.compute(df)
+                if strategy.sell_signal(df_ind):
+                    current_price = float(df_ind["close"].iloc[-1])
+                    alerts.append({
+                        "symbol": symbol,
+                        "strategy_name": strategy_name,
+                        "avg_buy_price": float(avg_buy),
+                        "current_price": current_price,
+                    })
+            except Exception:
+                _logger.exception("[scheduler] special sell check failed for %s", symbol)
+
+        if alerts:
+            _logger.info("[scheduler] special strategy sell alerts: %d positions", len(alerts))
+            AlertService().send_special_portfolio_sell_alerts(alerts)
+    except Exception:
+        _logger.exception("[scheduler] _check_special_sell_alerts failed")
+
+
 def _send_sell_alerts_for_holdings(db) -> None:
     """Query SELL signals for held stocks from the latest scan and fire Telegram alerts."""
     from domains.alerts.telegram import AlertService
@@ -73,6 +132,7 @@ def _daily_eod_update():
         results = engine.scan_all(NSE_SYMBOLS, ist_today())
         logger.info("[scheduler] daily_eod_update: %d signals generated", len(results))
         _send_sell_alerts_for_holdings(db)
+        _check_special_sell_alerts(db)
     except Exception:
         logger.exception("[scheduler] daily_eod_update failed")
     finally:
@@ -366,6 +426,7 @@ def _intraday_digest():
 
         # Sell alerts for held positions (kept separate — always important)
         _send_sell_alerts_for_holdings(db)
+        _check_special_sell_alerts(db)
     except Exception:
         logger.exception("[scheduler] intraday_digest failed")
     finally:

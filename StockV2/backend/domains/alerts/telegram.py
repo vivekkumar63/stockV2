@@ -191,6 +191,32 @@ class AlertService:
             )
         return self.send("\n".join(lines))
 
+    def send_special_portfolio_sell_alerts(self, alerts: list[dict]) -> bool:
+        """Notify about special-strategy sell signals for manually-held positions."""
+        if not alerts:
+            return True
+        lines = [
+            f"<b>⚡ Special Strategy SELL Alert — {len(alerts)} position{'s' if len(alerts) > 1 else ''}</b>",
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+        ]
+        for a in alerts:
+            sym = html.escape(a.get("symbol", ""))
+            strategy = html.escape(a.get("strategy_name", ""))
+            avg = a.get("avg_buy_price")
+            price = a.get("current_price")
+            pnl_str = ""
+            if price and avg:
+                pnl_pct = (price - avg) / avg * 100
+                pnl_str = f"  |  P&L est: {pnl_pct:+.1f}%"
+            price_str = f"₹{price:,.2f}" if price else "—"
+            lines.append(
+                f"\n🔴 <b>{sym}</b>{pnl_str}\n"
+                f"   📌 {strategy}\n"
+                f"   💰 Current: {price_str}  |  Avg buy: ₹{avg:,.2f}"
+            )
+        lines.append("\n⚠️ Strategy sell signal fired — consider exiting this position.")
+        return self.send("\n".join(lines))
+
     def send_combined_digest(
         self,
         normal_top: list[dict],
