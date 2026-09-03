@@ -183,3 +183,63 @@ def recompute_status():
         "started_at": state.get("started_at"),
         "error":      state.get("error"),
     }
+
+
+@router.get("/zones/chart-data/{symbol}")
+def get_chart_data(
+    symbol: str,
+    bars: int = Query(120, ge=20, le=500),
+    db: Session = Depends(get_db),
+):
+    """OHLCV bars + zone bands from latest stored result for the chart overlay."""
+    rows = db.execute(
+        text("""
+            SELECT date, open, high, low, close, volume FROM (
+                SELECT date, open, high, low, close, volume
+                FROM stock_prices_daily
+                WHERE symbol = :s
+                ORDER BY date DESC LIMIT :b
+            ) sub ORDER BY date ASC
+        """),
+        {"s": symbol.upper(), "b": bars},
+    ).fetchall()
+    if not rows:
+        raise HTTPException(status_code=404, detail=f"No price data for {symbol}")
+
+    ohlcv = [
+        {
+            "date":   str(r[0]),
+            "open":   float(r[1]),
+            "high":   float(r[2]),
+            "low":    float(r[3]),
+            "close":  float(r[4]),
+            "volume": int(r[5]) if r[5] is not None else 0,
+        }
+        for r in rows
+    ]
+
+    # Load latest zone result (optional — chart still renders without zones)
+    zone_row = db.execute(
+        text("SELECT result_json FROM zone_analysis_results WHERE symbol = :s ORDER BY computed_date DESC LIMIT 1"),
+        {"s": symbol.upper()},
+    ).fetchone()
+
+    result: dict = {"ohlcv": ohlcv}
+    if zone_row:
+        rj = json.loads(zone_row[0])
+        result["demand_bands"] = [
+            {"low": z["low"], "high": z["high"], "strength": z.get("score", 0), "zone_type": "demand", "source": z.get("source", "daily")}
+            for z in rj.get("demand_zones", [])
+        ]
+        result["supply_bands"] = [
+            {"low": z["low"], "high": z["high"], "strength": z.get("score", 0), "zone_type": "supply", "source": z.get("source", "daily")}
+            for z in rj.get("supply_zones", [])
+        ]
+        ls = rj.get("long_setup")
+        ss = rj.get("short_setup")
+        if ls:
+            result["long_setup"]  = {"entry": ls["ideal_entry"], "stop_loss": ls["stop_loss"], "target": ls["t2"]}
+        if ss:
+            result["short_setup"] = {"entry": ss["ideal_entry"], "stop_loss": ss["stop_loss"], "target": ss["t2"]}
+
+    return result
