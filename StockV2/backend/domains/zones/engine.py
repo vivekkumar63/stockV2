@@ -93,7 +93,7 @@ def _position_tag(price: float, demand_zones: list[Zone], supply_zones: list[Zon
     return "neutral"
 
 
-def _zone_to_dict(z: Zone) -> dict:
+def zone_to_dict(z: Zone) -> dict:
     return {
         "low": z.low, "high": z.high, "score": z.score,
         "freshness": z.freshness, "touch_count": z.touch_count,
@@ -102,7 +102,7 @@ def _zone_to_dict(z: Zone) -> dict:
     }
 
 
-def _setup_to_dict(s) -> dict | None:
+def setup_to_dict(s) -> dict | None:
     if s is None:
         return None
     return {
@@ -146,12 +146,13 @@ class ZoneEngine:
         # Cluster
         all_zones = ZoneClusterer().cluster(levels, atr)
 
-        # Score (ZoneScorer.score() returns new Zone copies)
-        demand_zones = ZoneScorer().score_all(
+        # Score (ZoneScorer.score() returns new Zone copies; single instance is stateless)
+        scorer = ZoneScorer()
+        demand_zones = scorer.score_all(
             [z for z in all_zones if z.zone_type == "demand"],
             atr=atr, n_bars=n, price=price,
         )
-        supply_zones = ZoneScorer().score_all(
+        supply_zones = scorer.score_all(
             [z for z in all_zones if z.zone_type == "supply"],
             atr=atr, n_bars=n, price=price,
         )
@@ -192,10 +193,10 @@ class ZoneEngine:
 
         # Upsert to DB
         result_json = {
-            "demand_zones": [_zone_to_dict(z) for z in result.demand_zones],
-            "supply_zones":  [_zone_to_dict(z) for z in result.supply_zones],
-            "long_setup":    _setup_to_dict(long_setup),
-            "short_setup":   _setup_to_dict(short_setup),
+            "demand_zones": [zone_to_dict(z) for z in result.demand_zones],
+            "supply_zones":  [zone_to_dict(z) for z in result.supply_zones],
+            "long_setup":    setup_to_dict(long_setup),
+            "short_setup":   setup_to_dict(short_setup),
             "market_structure": structure,
             "atr": result.atr, "rvol": result.rvol,
         }

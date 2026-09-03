@@ -1,4 +1,5 @@
 from __future__ import annotations
+import datetime
 import logging
 from sqlalchemy import text
 from sqlalchemy.orm import Session
@@ -23,7 +24,6 @@ def get_precompute_state() -> dict:
 
 class ZonePrecomputer:
     def run_all(self, db: Session) -> None:
-        global _precompute_state
         rows = db.execute(
             text("""
                 SELECT DISTINCT symbol FROM stock_prices_daily
@@ -33,8 +33,10 @@ class ZonePrecomputer:
         ).fetchall()
         symbols = [r[0] for r in rows]
         total = len(symbols)
-        _precompute_state.update(is_running=True, done=0, total=total,
-                                  finished=False, error=None)
+        _precompute_state.update(
+            is_running=True, done=0, total=total, finished=False, error=None,
+            started_at=str(datetime.datetime.now()),
+        )
         logger.info("[zone_precompute] starting — %d symbols", total)
         engine = ZoneEngine()
         for i, symbol in enumerate(symbols):

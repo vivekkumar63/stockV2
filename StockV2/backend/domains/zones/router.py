@@ -1,4 +1,5 @@
 from __future__ import annotations
+import datetime
 import json
 import logging
 import threading
@@ -9,7 +10,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from database import get_db, SessionLocal
-from .engine import ZoneEngine, _zone_to_dict, _setup_to_dict
+from .engine import ZoneEngine, zone_to_dict, setup_to_dict
 from .precompute import ZonePrecomputer, get_precompute_state
 
 router = APIRouter(tags=["zones"])
@@ -21,10 +22,10 @@ _recompute_lock = threading.Lock()
 def _serialize_result(r) -> dict:
     return {
         "symbol":           r.symbol,
-        "demand_zones":     [_zone_to_dict(z) for z in r.demand_zones],
-        "supply_zones":     [_zone_to_dict(z) for z in r.supply_zones],
-        "long_setup":       _setup_to_dict(r.long_setup),
-        "short_setup":      _setup_to_dict(r.short_setup),
+        "demand_zones":     [zone_to_dict(z) for z in r.demand_zones],
+        "supply_zones":     [zone_to_dict(z) for z in r.supply_zones],
+        "long_setup":       setup_to_dict(r.long_setup),
+        "short_setup":      setup_to_dict(r.short_setup),
         "market_structure": r.market_structure,
         "atr":              r.atr,
         "rvol":             r.rvol,
@@ -88,10 +89,10 @@ _FILTER_TAGS = {"in_demand", "near_supply", "breakout", "in_supply", "near_deman
 
 @router.get("/zones/rankings")
 def get_rankings(
-    sort_by: str = Query("long_score"),
-    filter: str  = Query(None),
-    limit: int   = Query(200, ge=1, le=500),
-    db: Session  = Depends(get_db),
+    sort_by: str   = Query("long_score"),
+    tag_filter: str = Query(None),
+    limit: int     = Query(200, ge=1, le=500),
+    db: Session    = Depends(get_db),
 ):
     """All stocks with today's pre-computed results, sorted and optionally filtered."""
     col = _SORT_MAP.get(sort_by, "long_setup_score")
@@ -100,13 +101,13 @@ def get_rankings(
     where = "computed_date = :dt"
     params: dict = {"dt": str(today), "lim": limit}
 
-    if filter == "long":
+    if tag_filter == "long":
         where += " AND long_setup_score >= 50"
-    elif filter == "short":
+    elif tag_filter == "short":
         where += " AND short_setup_score >= 50"
-    elif filter in _FILTER_TAGS:
+    elif tag_filter in _FILTER_TAGS:
         where += " AND position_tag = :pt"
-        params["pt"] = filter
+        params["pt"] = tag_filter
 
     rows = db.execute(
         text(f"""
@@ -144,9 +145,7 @@ def get_rankings(
 
 
 def _run_recompute_bg() -> None:
-    import datetime
     state = get_precompute_state()
-    state["started_at"] = str(datetime.datetime.now())
     db = SessionLocal()
     try:
         ZonePrecomputer().run_all(db)
