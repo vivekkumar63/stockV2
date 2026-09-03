@@ -94,3 +94,23 @@ def test_freshness_weakened():
     zone = ZoneClusterer().cluster(levels, atr)[0]
     assert zone.touch_count == 4
     assert zone.freshness == "weakened"
+
+
+def test_empty_levels_returns_empty():
+    assert ZoneClusterer().cluster([], atr=20.0) == []
+
+
+def test_chained_merge_does_not_span_beyond_threshold():
+    """Three levels at 1000, 1008, 1016 with ATR=20 (threshold=10):
+    1008-1000=8 (merge), but 1016-1000=16 > threshold → 1016 must stay separate."""
+    levels = [
+        _level(1000.0, "demand"),
+        _level(1008.0, "demand"),
+        _level(1016.0, "demand"),
+    ]
+    atr = 20.0  # threshold = 10
+    zones = ZoneClusterer().cluster(levels, atr)
+    assert len(zones) == 2, (
+        "Expected 2 zones: [1000, 1008] merged, [1016] separate. "
+        f"Got {len(zones)} zones."
+    )

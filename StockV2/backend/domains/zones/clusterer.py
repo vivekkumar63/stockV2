@@ -21,7 +21,7 @@ class ZoneClusterer:
         current_group = [sorted_levels[0]]
 
         for lvl in sorted_levels[1:]:
-            if lvl.price - current_group[-1].price <= threshold:
+            if lvl.price - current_group[0].price <= threshold:
                 current_group.append(lvl)
             else:
                 groups.append(current_group)
@@ -46,7 +46,7 @@ class ZoneClusterer:
             else:
                 freshness = "weakened"
 
-            # last_reaction_pct: best strength_hint * 10 as proxy
+            # last_reaction_pct: average strength_hint * 10 as a reaction proxy (0–10 range)
             last_reaction_pct = round(avg_strength * 10, 2)
 
             zones.append(Zone(
