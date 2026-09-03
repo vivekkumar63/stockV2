@@ -31,7 +31,7 @@ class PortfolioService:
 
     def get_portfolio_summary(self) -> dict:
         holdings = self.get_holdings()
-        total_invested = sum(h["invested_value"] or 0 for h in holdings)
+        total_invested = sum(float(h["invested_value"] or 0) for h in holdings)
         return {
             "paper_capital": settings.paper_capital,
             "total_invested": round(total_invested, 2),
