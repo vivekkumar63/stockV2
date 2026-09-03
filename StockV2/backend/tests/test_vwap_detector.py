@@ -63,3 +63,27 @@ def test_vwap_band_width_is_0_3_atr():
     expected_high = 100.0 + 0.3 * atr  # 103.0
     assert abs(z.low - expected_low) < 0.01
     assert abs(z.high - expected_high) < 0.01
+
+
+def test_vwap_supply_when_price_equals_vwap():
+    """price == vwap → supply (boundary: > means demand, not >=)."""
+    db = MagicMock()
+    db.execute.return_value.fetchall.return_value = _make_intraday_rows(12, vwap_price=100.0)
+    detector = VWAPZoneDetector()
+    zones = detector.detect("RELIANCE", db, atr=5.0, current_price=100.0)
+    assert len(zones) == 1
+    assert zones[0].zone_type == "supply"
+
+
+def test_vwap_handles_zero_volume_rows():
+    """Rows with zero volume should not cause division errors."""
+    from datetime import timedelta as _td
+    rows = []
+    base = datetime(2024, 1, 2, 9, 30)
+    for i in range(12):
+        rows.append((base + _td(minutes=i * 5), 100.5, 99.5, 100.0, 0))  # volume=0
+    db = MagicMock()
+    db.execute.return_value.fetchall.return_value = rows
+    detector = VWAPZoneDetector()
+    zones = detector.detect("RELIANCE", db, atr=5.0, current_price=105.0)
+    assert len(zones) == 1  # max(0, 1.0) floors to 1.0 → VWAP computes normally

@@ -317,10 +317,15 @@ class VWAPZoneDetector:
         if len(rows) < 6:
             return []
 
-        highs   = [float(r[1]) for r in rows]
-        lows    = [float(r[2]) for r in rows]
-        closes  = [float(r[3]) for r in rows]
-        volumes = [max(float(r[4]), 1.0) for r in rows]
+        import math as _math
+        valid_rows = [r for r in rows if r[1] is not None and r[2] is not None and r[3] is not None
+                      and _math.isfinite(float(r[1])) and _math.isfinite(float(r[2])) and _math.isfinite(float(r[3]))]
+        if len(valid_rows) < 6:
+            return []
+        highs   = [float(r[1]) for r in valid_rows]
+        lows    = [float(r[2]) for r in valid_rows]
+        closes  = [float(r[3]) for r in valid_rows]
+        volumes = [max(float(r[4]), 1.0) if r[4] is not None else 1.0 for r in valid_rows]
 
         typical = [(h + l + c) / 3.0 for h, l, c in zip(highs, lows, closes)]
         cum_tv  = 0.0
@@ -328,6 +333,8 @@ class VWAPZoneDetector:
         for tp, v in zip(typical, volumes):
             cum_tv += tp * v
             cum_v  += v
+        if cum_v == 0:
+            return []
         vwap = cum_tv / cum_v
 
         band_low  = vwap - 0.3 * atr

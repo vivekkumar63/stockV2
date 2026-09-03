@@ -152,8 +152,8 @@ class ZoneEngine:
         try:
             vwap_zones = VWAPZoneDetector().detect(symbol, db, atr=atr, current_price=price)
             all_zones.extend(vwap_zones)
-        except Exception:
-            pass  # intraday data may be unavailable; never block daily analysis
+        except Exception as e:
+            logger.debug("[ZoneEngine] VWAP detector failed for %s: %s", symbol, e)
 
         # Score (ZoneScorer.score() returns new Zone copies; single instance is stateless)
         scorer = ZoneScorer()
