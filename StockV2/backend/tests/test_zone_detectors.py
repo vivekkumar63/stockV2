@@ -167,7 +167,7 @@ def test_fibonacci_detector_demand_in_controlled_uptrend():
     })
     df.index = pd.date_range("2020-01-01", periods=n, freq="B")
     levels = FibonacciDetector().detect(df)
-    if len(levels) > 0:
-        assert all(z.zone_type == "demand" for z in levels), (
-            f"Expected only demand zones in uptrend, got: {[z.zone_type for z in levels]}"
-        )
+    assert len(levels) > 0, "Expected at least one Fibonacci demand level in controlled uptrend (ATR is large enough for reaction guard)"
+    assert all(z.zone_type == "demand" for z in levels), (
+        f"Expected only demand zones in uptrend, got: {[z.zone_type for z in levels]}"
+    )

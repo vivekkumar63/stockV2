@@ -1,5 +1,6 @@
 from __future__ import annotations
 import math
+import numpy as np
 import pandas as pd
 from .models import ZoneLevel
 
@@ -19,7 +20,8 @@ class PriceStructureDetector:
 
         for i in range(window, n - window):
             # Swing low (demand)
-            if low[i] == min(low[i - window:i + window + 1]):
+            sub_low = low[i - window:i + window + 1]
+            if np.argmin(sub_low) == window:  # i is the unique minimum position
                 if i - last_demand_idx >= 3:
                     # Estimate reaction: how much did price rally from this low
                     future_max = max(close[i:min(i + 20, n)]) if i + 1 < n else close[i]
@@ -36,7 +38,8 @@ class PriceStructureDetector:
                     last_demand_idx = i
 
             # Swing high (supply)
-            if high[i] == max(high[i - window:i + window + 1]):
+            sub_high = high[i - window:i + window + 1]
+            if np.argmax(sub_high) == window:  # i is the unique maximum position
                 if i - last_supply_idx >= 3:
                     future_min = min(close[i:min(i + 20, n)]) if i + 1 < n else close[i]
                     reaction_pct = (high[i] - future_min) / high[i] * 100
@@ -81,6 +84,8 @@ class MADetector:
             if not math.isfinite(ma_val):
                 continue
             ma_val = float(ma_val)
+            if col == "sma_200" and len(df) < 200:
+                continue
             ma_series = df[col].to_numpy()
 
             # Count bounces/rejections in last 60 bars
@@ -129,6 +134,8 @@ class VolumeDetector:
         for i in range(1, n - 5):
             vr = vol_ratio[i]
             if not math.isfinite(vr) or vr < 1.5:
+                continue
+            if close[i] <= 0:
                 continue
             future_close = close[min(i + 5, n - 1)]
             move_pct = (future_close - close[i]) / close[i] * 100
