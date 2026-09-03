@@ -99,6 +99,7 @@ def zone_to_dict(z: Zone) -> dict:
         "freshness": z.freshness, "touch_count": z.touch_count,
         "last_reaction_pct": z.last_reaction_pct,
         "source_tags": z.source_tags,
+        "source": z.source,
     }
 
 

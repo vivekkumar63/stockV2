@@ -28,6 +28,7 @@ class Zone:
     volume_at_zone: float = 1.0
     bar_index: int = -1      # most recent bar_index among merged levels
     strength_hint: float = 0.5
+    source: str = "daily"    # "daily" | "vwap"
 
     @property
     def midpoint(self) -> float:

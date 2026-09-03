@@ -503,6 +503,58 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning("zones table migration failed: %s", e)
 
+    # Zone Phase B tables
+    try:
+        with engine.connect() as _conn:
+            _conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS intraday_prices_5m (
+                    id       SERIAL PRIMARY KEY,
+                    symbol   VARCHAR(20) NOT NULL,
+                    datetime TIMESTAMP NOT NULL,
+                    open     REAL, high REAL, low REAL, close REAL, volume BIGINT,
+                    UNIQUE (symbol, datetime)
+                )
+            """))
+            _conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS idx_intraday_sym_dt ON intraday_prices_5m (symbol, datetime DESC)"
+            ))
+            _conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS zone_backtest_results (
+                    id            SERIAL PRIMARY KEY,
+                    symbol        VARCHAR(20) NOT NULL,
+                    from_date     DATE NOT NULL,
+                    to_date       DATE NOT NULL,
+                    total_trades  INTEGER DEFAULT 0,
+                    win_rate      REAL,
+                    total_pnl_pct REAL DEFAULT 0,
+                    avg_hold_days REAL,
+                    ran_at        TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """))
+            _conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS idx_zone_bt_results ON zone_backtest_results (symbol, ran_at DESC)"
+            ))
+            _conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS zone_backtest_trades (
+                    id           SERIAL PRIMARY KEY,
+                    result_id    INTEGER NOT NULL,
+                    entry_date   DATE,
+                    entry_price  REAL,
+                    exit_date    DATE,
+                    exit_price   REAL,
+                    pnl_pct      REAL,
+                    exit_reason  VARCHAR(30),
+                    hold_days    INTEGER
+                )
+            """))
+            _conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS idx_zone_bt_trades ON zone_backtest_trades (result_id)"
+            ))
+            _conn.commit()
+        logger.info("Zone Phase B tables verified")
+    except Exception as e:
+        logger.warning("zone phase B tables migration skipped: %s", e)
+
     # Schema upgrade: add new indicator columns to existing stock_indicators_daily tables
     _new_indicator_cols = [
         "ema_50",
