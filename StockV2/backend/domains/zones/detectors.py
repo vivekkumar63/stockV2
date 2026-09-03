@@ -317,9 +317,8 @@ class VWAPZoneDetector:
         if len(rows) < 6:
             return []
 
-        import math as _math
         valid_rows = [r for r in rows if r[1] is not None and r[2] is not None and r[3] is not None
-                      and _math.isfinite(float(r[1])) and _math.isfinite(float(r[2])) and _math.isfinite(float(r[3]))]
+                      and math.isfinite(float(r[1])) and math.isfinite(float(r[2])) and math.isfinite(float(r[3]))]
         if len(valid_rows) < 6:
             return []
         highs   = [float(r[1]) for r in valid_rows]

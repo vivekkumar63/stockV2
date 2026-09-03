@@ -780,12 +780,15 @@ _COMPUTED_TABLES = [
     "intraday_alerts_sent",
     "index_trend",
     "fii_dii_daily",
+    "zone_backtest_results",
+    "zone_backtest_trades",
 ]
 
 _FULL_EXTRA_TABLES = [
     "stock_prices_daily",
     "stock_prices_intraday",
     "index_prices_daily",
+    "intraday_prices_5m",
     "fundamentals",
     "corporate_actions",
     "news",

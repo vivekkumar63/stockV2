@@ -74,7 +74,11 @@ class ZoneBacktester:
         from_date: date,
         to_date: date,
     ) -> dict[tuple, tuple]:
-        """Return {(year, month): (demand_zones, supply_zones, atr)} for each month in range."""
+        """Return {(year, month): (demand_zones, supply_zones, atr)} for each month in range.
+
+        For each month, the snapshot uses only data strictly before the first observed
+        trading day in that month (no look-ahead bias).
+        """
         snapshots: dict[tuple, tuple] = {}
         all_dates = sorted(df_ind["date"].dt.date.tolist())
         sim_dates = [d for d in all_dates if from_date <= d <= to_date]
