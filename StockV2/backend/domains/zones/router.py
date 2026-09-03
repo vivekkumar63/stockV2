@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 from database import get_db, SessionLocal
 from .engine import ZoneEngine, zone_to_dict, setup_to_dict
 from .precompute import ZonePrecomputer, get_precompute_state
+from .backtester import ZoneBacktester
 
 router = APIRouter(tags=["zones"])
 logger = logging.getLogger(__name__)
@@ -243,3 +244,118 @@ def get_chart_data(
             result["short_setup"] = {"entry": ss["ideal_entry"], "stop_loss": ss["stop_loss"], "target": ss.get("t2")}
 
     return result
+
+
+@router.post("/zones/backtest/run")
+def run_backtest(
+    symbol: str,
+    from_date: str,
+    to_date: str,
+    db: Session = Depends(get_db),
+):
+    """Run walk-forward zone backtest for a symbol and store results."""
+    from datetime import date as _date
+    try:
+        fd = _date.fromisoformat(from_date)
+        td = _date.fromisoformat(to_date)
+    except ValueError:
+        raise HTTPException(status_code=422, detail="from_date and to_date must be YYYY-MM-DD")
+
+    sym = symbol.upper()
+    trades = ZoneBacktester().run(sym, fd, td, db)
+
+    total = len(trades)
+    wins  = sum(1 for t in trades if t.pnl_pct > 0)
+    win_rate     = round(wins / total * 100, 1) if total else None
+    total_pnl    = round(sum(t.pnl_pct for t in trades), 2)
+    avg_hold     = round(sum(t.hold_days for t in trades) / total, 1) if total else None
+
+    row = db.execute(
+        text("""
+            INSERT INTO zone_backtest_results
+                (symbol, from_date, to_date, total_trades, win_rate, total_pnl_pct, avg_hold_days)
+            VALUES (:sym, :fd, :td, :tt, :wr, :tp, :ah)
+            RETURNING id, ran_at
+        """),
+        {"sym": sym, "fd": fd, "td": td, "tt": total,
+         "wr": win_rate, "tp": total_pnl, "ah": avg_hold},
+    ).fetchone()
+    result_id = row[0]
+    ran_at    = str(row[1])
+
+    if trades:
+        db.execute(
+            text("""
+                INSERT INTO zone_backtest_trades
+                    (result_id, entry_date, entry_price, exit_date, exit_price,
+                     pnl_pct, exit_reason, hold_days)
+                VALUES (:rid, :ed, :ep, :xd, :xp, :pp, :er, :hd)
+            """),
+            [{"rid": result_id, "ed": t.entry_date, "ep": t.entry_price,
+              "xd": t.exit_date, "xp": t.exit_price, "pp": t.pnl_pct,
+              "er": t.exit_reason, "hd": t.hold_days}
+             for t in trades],
+        )
+    db.commit()
+
+    return {
+        "id":            result_id,
+        "symbol":        sym,
+        "from_date":     str(fd),
+        "to_date":       str(td),
+        "total_trades":  total,
+        "win_rate":      win_rate,
+        "total_pnl_pct": total_pnl,
+        "avg_hold_days": avg_hold,
+        "ran_at":        ran_at,
+    }
+
+
+@router.get("/zones/backtest/results/{symbol}")
+def get_backtest_results(symbol: str, db: Session = Depends(get_db)):
+    """List past backtest runs for a symbol, newest first."""
+    rows = db.execute(
+        text("""
+            SELECT id, symbol, from_date, to_date, total_trades, win_rate,
+                   total_pnl_pct, avg_hold_days, ran_at
+            FROM zone_backtest_results
+            WHERE symbol = :s
+            ORDER BY ran_at DESC
+            LIMIT 20
+        """),
+        {"s": symbol.upper()},
+    ).fetchall()
+    return [
+        {
+            "id":            r[0], "symbol": r[1],
+            "from_date":     str(r[2]), "to_date": str(r[3]),
+            "total_trades":  r[4], "win_rate": r[5],
+            "total_pnl_pct": r[6], "avg_hold_days": r[7],
+            "ran_at":        str(r[8]),
+        }
+        for r in rows
+    ]
+
+
+@router.get("/zones/backtest/trades/{result_id}")
+def get_backtest_trades(result_id: int, db: Session = Depends(get_db)):
+    """Full trade list for a stored backtest result."""
+    rows = db.execute(
+        text("""
+            SELECT id, entry_date, entry_price, exit_date, exit_price,
+                   pnl_pct, exit_reason, hold_days
+            FROM zone_backtest_trades
+            WHERE result_id = :rid
+            ORDER BY entry_date ASC
+        """),
+        {"rid": result_id},
+    ).fetchall()
+    return [
+        {
+            "id":           r[0],
+            "entry_date":   str(r[1]), "entry_price":  r[2],
+            "exit_date":    str(r[3]) if r[3] else None, "exit_price": r[4],
+            "pnl_pct":      r[5], "exit_reason":  r[6], "hold_days":  r[7],
+        }
+        for r in rows
+    ]

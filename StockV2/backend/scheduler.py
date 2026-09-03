@@ -25,6 +25,7 @@ class JobIds:
     FII_DII_FETCH = "fii_dii_fetch"
     SECTOR_ROTATION = "sector_rotation_daily"
     EARNINGS_REFRESH = "earnings_calendar_refresh"
+    INTRADAY_VWAP_FETCH = "intraday_vwap_fetch"
 
 
 _IST = "Asia/Kolkata"
@@ -516,6 +517,25 @@ def _sector_rotation_daily():
         db.close()
 
 
+def _intraday_vwap_fetch():
+    """Fetch 5-min intraday bars for all active symbols at 09:20 IST for VWAP zone computation."""
+    from database import SessionLocal
+    from sqlalchemy import text as _text
+    from domains.data.intraday_fetcher import IntradayFetcher
+    db = SessionLocal()
+    try:
+        rows = db.execute(_text(
+            "SELECT DISTINCT symbol FROM stock_prices_daily WHERE date >= CURRENT_DATE - INTERVAL '10 days'"
+        )).fetchall()
+        symbols = [r[0] for r in rows]
+        n = IntradayFetcher().fetch_and_store(symbols, db)
+        logger.info("[intraday_vwap_fetch] stored %d 5-min rows for %d symbols", n, len(symbols))
+    except Exception:
+        logger.exception("[intraday_vwap_fetch] failed")
+    finally:
+        db.close()
+
+
 def register_jobs():
     # 3:45pm — fetch today's closing data before EOD scan runs at 4pm
     scheduler.add_job(
@@ -627,6 +647,13 @@ def register_jobs():
         _earnings_refresh,
         CronTrigger(hour=6, minute=15, timezone=_IST),
         id=JobIds.EARNINGS_REFRESH,
+        replace_existing=True,
+    )
+    # 9:20am — fetch intraday 5-min bars for VWAP zone computation (20 min after NSE open)
+    scheduler.add_job(
+        _intraday_vwap_fetch,
+        CronTrigger(hour=9, minute=20, day_of_week="mon-fri", timezone=_IST),
+        id=JobIds.INTRADAY_VWAP_FETCH,
         replace_existing=True,
     )
     logger.info("APScheduler jobs registered: %s", [j.id for j in scheduler.get_jobs()])
