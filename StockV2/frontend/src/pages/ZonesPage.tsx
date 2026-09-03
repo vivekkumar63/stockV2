@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useQuery, useMutation } from '@tanstack/react-query'
 import {
   analyzeZones, getZoneRankings, recomputeAll, getRecomputeStatus,
-  type ZoneCard, type ZoneRankRow, type ZoneResult,
+  type ZoneCard, type ZoneRankRow, type ZoneResult, type RecomputeStatus,
 } from '../api/zones'
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
