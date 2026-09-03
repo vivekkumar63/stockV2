@@ -101,8 +101,8 @@ class ZoneBacktester:
             for det in _DETECTORS:
                 try:
                     levels.extend(det.detect(df_hist))
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("[ZoneBacktester] detector %s failed: %s", type(det).__name__, e)
 
             all_zones = ZoneClusterer().cluster(levels, atr)
             scorer = ZoneScorer()
@@ -142,12 +142,14 @@ class ZoneBacktester:
         cur_supply: list[Zone] = []
         cur_atr: float = 0.0
 
+        date_to_row = {d: df_ind[df_ind["date"].dt.date == d] for d in sim_dates}
+
         for d in sim_dates:
             mk = (d.year, d.month)
             if mk in zone_snapshots:
                 cur_demand, cur_supply, cur_atr = zone_snapshots[mk]
 
-            row = df_ind[df_ind["date"].dt.date == d]
+            row = date_to_row[d]
             if row.empty:
                 continue
             open_ = float(row["open"].iloc[0])
@@ -196,7 +198,7 @@ class ZoneBacktester:
 
         # Force-close open position at end of period
         if position:
-            last_row = df_ind[df_ind["date"].dt.date == sim_dates[-1]]
+            last_row = date_to_row.get(sim_dates[-1], pd.DataFrame())
             if not last_row.empty:
                 exit_price = float(last_row["close"].iloc[0])
                 pnl_pct = (exit_price - position["entry_price"]) / position["entry_price"] * 100

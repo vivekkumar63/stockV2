@@ -118,3 +118,53 @@ def test_no_entry_when_no_demand_zones():
     snapshots = {(2023, 1): ([], [], 5.0)}
     trades = bt._simulate("TEST", df, date(2023, 1, 1), date(2023, 1, 31), snapshots)
     assert trades == []
+
+
+def test_reentry_after_exit():
+    """After a supply_zone exit, a new entry in the same window is allowed."""
+    bt = ZoneBacktester()
+    closes = np.full(60, 110.0)
+    closes[5]  = 100.0  # first entry into demand [98, 102]
+    closes[10] = 200.0  # exit into supply [195, 205] → exit day 11
+    closes[20] = 100.0  # second entry into demand [98, 102]
+
+    start = date(2023, 1, 1)
+    dates = pd.to_datetime([start + timedelta(days=i) for i in range(60)])
+    df = pd.DataFrame({
+        "date": dates, "open": closes, "high": closes + 2,
+        "low": closes - 2, "close": closes,
+        "volume": np.full(60, 1e6), "atr_14": np.full(60, 5.0),
+        "volume_ratio": np.ones(60), "ema_50": closes,
+    })
+
+    demand = [_make_zone(98.0, 102.0, "demand")]
+    supply = [_make_zone(195.0, 205.0, "supply")]
+    snapshots = {(2023, 1): (demand, supply, 5.0), (2023, 2): (demand, supply, 5.0)}
+
+    trades = bt._simulate("TEST", df, date(2023, 1, 1), date(2023, 3, 1), snapshots)
+    assert len(trades) >= 2
+    exit_reasons = {t.exit_reason for t in trades}
+    assert "supply_zone" in exit_reasons
+
+
+def test_end_of_period_exit():
+    """Position open at end of window is force-closed as end_of_period."""
+    bt = ZoneBacktester()
+    closes = np.full(10, 110.0)
+    closes[3] = 100.0   # enter demand [98, 102]; no supply zone, no stop loss
+
+    start = date(2023, 1, 1)
+    dates = pd.to_datetime([start + timedelta(days=i) for i in range(10)])
+    df = pd.DataFrame({
+        "date": dates, "open": closes, "high": closes + 2,
+        "low": closes - 2, "close": closes,
+        "volume": np.full(10, 1e6), "atr_14": np.full(10, 5.0),
+        "volume_ratio": np.ones(10), "ema_50": closes,
+    })
+
+    demand = [_make_zone(98.0, 102.0, "demand")]
+    snapshots = {(2023, 1): (demand, [], 5.0)}
+
+    trades = bt._simulate("TEST", df, date(2023, 1, 1), date(2023, 1, 10), snapshots)
+    assert len(trades) == 1
+    assert trades[0].exit_reason == "end_of_period"
