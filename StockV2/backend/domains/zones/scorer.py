@@ -5,6 +5,7 @@ from .models import Zone
 # Tags that are correlated (EMA family) — counted as max 1 unique source each group
 _CORRELATED_GROUPS = [
     {"ema_9", "ema_21"},
+    {"ema_50", "sma_200"},
 ]
 
 
@@ -43,8 +44,8 @@ class ZoneScorer:
         vol = zone.volume_at_zone if math.isfinite(zone.volume_at_zone) else 1.0
         s += min(15, int((vol - 1.0) / 2.0 * 15))
 
-        # 4. Timeframe weight (0–15): daily zones always daily for now
-        s += 10  # daily = 10/15
+        # 4. Timeframe weight (0–15): all Phase A zones are daily → full 15 pts
+        s += 15  # weekly zones (Phase B) will add differentiation later
 
         # 5. Recency (0–10): more recent bar_index = higher
         if n_bars > 0:

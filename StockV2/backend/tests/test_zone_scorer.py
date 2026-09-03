@@ -50,3 +50,11 @@ def test_score_returns_zone_with_score_field():
     result = ZoneScorer().score(zone, atr=20.0, n_bars=500, price=960.0)
     assert isinstance(result, Zone)
     assert result.score > 0
+
+
+def test_correlated_ema50_sma200_count_as_one():
+    corr  = _zone(["ema_50", "sma_200"])     # correlated — counts as 1
+    uncorr = _zone(["ema_50", "vol_node"])   # independent — counts as 2
+    s_corr  = ZoneScorer().score(corr,  atr=20.0, n_bars=500, price=970.0)
+    s_uncorr = ZoneScorer().score(uncorr, atr=20.0, n_bars=500, price=970.0)
+    assert s_uncorr.score >= s_corr.score
