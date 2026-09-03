@@ -464,6 +464,45 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning("stock_indicators_daily migration skipped: %s", e)
 
+    # Demand & Supply Zones table
+    try:
+        with engine.connect() as _conn:
+            _conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS zone_analysis_results (
+                    id                  SERIAL PRIMARY KEY,
+                    symbol              VARCHAR(20) NOT NULL,
+                    computed_date       DATE NOT NULL,
+                    best_demand_score   REAL,
+                    best_supply_score   REAL,
+                    long_setup_score    REAL,
+                    short_setup_score   REAL,
+                    price_at_compute    REAL,
+                    atr_at_compute      REAL,
+                    rvol_at_compute     REAL,
+                    position_tag        VARCHAR(20),
+                    best_long_rr        REAL,
+                    best_short_rr       REAL,
+                    result_json         JSONB NOT NULL,
+                    created_at          TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE (symbol, computed_date)
+                )
+            """))
+            _conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS idx_zones_date ON zone_analysis_results (computed_date)"
+            ))
+            _conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS idx_zones_long_score "
+                "ON zone_analysis_results (computed_date, long_setup_score DESC)"
+            ))
+            _conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS idx_zones_demand_score "
+                "ON zone_analysis_results (computed_date, best_demand_score DESC)"
+            ))
+            _conn.commit()
+        logger.info("zone_analysis_results table verified")
+    except Exception as e:
+        logger.warning("zones table migration failed: %s", e)
+
     # Schema upgrade: add new indicator columns to existing stock_indicators_daily tables
     _new_indicator_cols = [
         "ema_7", "ema_14", "ema_22", "zlema_14",
@@ -797,3 +836,6 @@ app.include_router(special_router, prefix="/api/v1", dependencies=[Depends(verif
 
 from domains.sector_rotation.router import router as sector_router  # noqa: E402
 app.include_router(sector_router, prefix="/api/v1", dependencies=[Depends(verify_api_key)])
+
+from domains.zones.router import router as zones_router  # noqa: E402
+app.include_router(zones_router, prefix="/api/v1", dependencies=[Depends(verify_api_key)])
