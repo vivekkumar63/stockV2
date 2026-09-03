@@ -294,6 +294,123 @@ class FibonacciDetector:
         return levels
 
 
+class PivotPointDetector:
+    """Classic floor trader pivot points (PP, R1-R3, S1-S3) from daily, weekly, and monthly OHLC.
+
+    R levels → supply zones; S levels → demand zones; PP → zone type based on price position.
+    Only emits levels within 10×ATR of current price to stay actionable.
+    """
+
+    @staticmethod
+    def _calc(h: float, l: float, c: float) -> dict:
+        pp = (h + l + c) / 3.0
+        rng = h - l
+        return {
+            "supply": [2 * pp - l, pp + rng, h + 2 * (pp - l)],
+            "demand": [2 * pp - h, pp - rng, l - 2 * (h - pp)],
+            "pivot":  pp,
+        }
+
+    def _add(self, levels: list, computed: dict, tag: str, strength: float,
+             bar_index: int, price: float, atr: float) -> None:
+        max_dist = 10 * atr
+        for lvl in computed["supply"]:
+            if lvl > 0 and abs(lvl - price) <= max_dist:
+                levels.append(ZoneLevel(price=lvl, zone_type="supply",
+                                        source_tag=tag, strength_hint=strength, bar_index=bar_index))
+        for lvl in computed["demand"]:
+            if lvl > 0 and abs(lvl - price) <= max_dist:
+                levels.append(ZoneLevel(price=lvl, zone_type="demand",
+                                        source_tag=tag, strength_hint=strength, bar_index=bar_index))
+        pp = computed["pivot"]
+        if pp > 0 and abs(pp - price) <= max_dist:
+            levels.append(ZoneLevel(
+                price=pp,
+                zone_type="demand" if price > pp else "supply",
+                source_tag=tag, strength_hint=strength, bar_index=bar_index,
+            ))
+
+    def detect(self, df: pd.DataFrame) -> list[ZoneLevel]:
+        if len(df) < 5 or "atr_14" not in df.columns:
+            return []
+        atr = float(df["atr_14"].iloc[-1])
+        if not math.isfinite(atr) or atr <= 0:
+            return []
+        price = float(df["close"].iloc[-1])
+        n = len(df)
+        levels: list[ZoneLevel] = []
+
+        # Daily pivot — previous complete bar
+        if n >= 2:
+            p = df.iloc[-2]
+            self._add(levels, self._calc(float(p["high"]), float(p["low"]), float(p["close"])),
+                      "daily_pivot", 0.50, n - 1, price, atr)
+
+        # Weekly / monthly pivots — need date column
+        if "date" not in df.columns:
+            return levels
+
+        df2 = df.copy()
+        df2["_dt"] = pd.to_datetime(df2["date"])
+        df2["_wk"] = df2["_dt"].dt.to_period("W")
+        df2["_mo"] = df2["_dt"].dt.to_period("M")
+
+        # Weekly pivot — last complete week
+        cur_wk = df2["_wk"].iloc[-1]
+        prev_wk = df2[df2["_wk"] < cur_wk]
+        if not prev_wk.empty:
+            last_wk = prev_wk[prev_wk["_wk"] == prev_wk["_wk"].iloc[-1]]
+            wh = float(last_wk["high"].max())
+            wl = float(last_wk["low"].min())
+            wc = float(last_wk["close"].iloc[-1])
+            self._add(levels, self._calc(wh, wl, wc), "weekly_pivot", 0.65, n - 1, price, atr)
+
+        # Monthly pivot — last complete month
+        cur_mo = df2["_mo"].iloc[-1]
+        prev_mo = df2[df2["_mo"] < cur_mo]
+        if not prev_mo.empty:
+            last_mo = prev_mo[prev_mo["_mo"] == prev_mo["_mo"].iloc[-1]]
+            mh = float(last_mo["high"].max())
+            ml = float(last_mo["low"].min())
+            mc = float(last_mo["close"].iloc[-1])
+            self._add(levels, self._calc(mh, ml, mc), "monthly_pivot", 0.75, n - 1, price, atr)
+
+        return levels
+
+
+class Week52Detector:
+    """52-week high/low as major supply/demand zones.
+
+    52W high → supply (resistance); 52W low → demand (support).
+    Always emitted — even if far away — since they are primary reference levels.
+    """
+
+    def detect(self, df: pd.DataFrame) -> list[ZoneLevel]:
+        if len(df) < 50:
+            return []
+        n = len(df)
+        bars_52w = min(250, n)
+
+        if "high" not in df.columns or "low" not in df.columns:
+            return []
+
+        high_52w = float(df["high"].iloc[-bars_52w:].max())
+        low_52w  = float(df["low"].iloc[-bars_52w:].min())
+
+        levels: list[ZoneLevel] = []
+        if high_52w > 0:
+            levels.append(ZoneLevel(
+                price=high_52w, zone_type="supply",
+                source_tag="52w_high", strength_hint=0.85, bar_index=n - 1,
+            ))
+        if low_52w > 0:
+            levels.append(ZoneLevel(
+                price=low_52w, zone_type="demand",
+                source_tag="52w_low", strength_hint=0.85, bar_index=n - 1,
+            ))
+        return levels
+
+
 class VWAPZoneDetector:
     """Intraday VWAP from 5-min bars → one demand or supply zone at current VWAP level."""
 

@@ -12,8 +12,8 @@ from domains.data.indicators import IndicatorEngine
 from .clusterer import ZoneClusterer
 from .detectors import (
     FibonacciDetector, MADetector, MomentumDetector,
-    PriceStructureDetector, VolatilityDetector, VolumeDetector,
-    VWAPZoneDetector,
+    PivotPointDetector, PriceStructureDetector,
+    VolatilityDetector, VolumeDetector, VWAPZoneDetector, Week52Detector,
 )
 from .entry_engine import EntryEngine
 from .models import Zone, ZoneLevel, ZoneResult
@@ -28,6 +28,8 @@ _DETECTORS = [
     VolatilityDetector(),
     MomentumDetector(),
     FibonacciDetector(),
+    PivotPointDetector(),
+    Week52Detector(),
 ]
 
 
