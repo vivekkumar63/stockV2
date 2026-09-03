@@ -505,6 +505,7 @@ async def lifespan(app: FastAPI):
 
     # Schema upgrade: add new indicator columns to existing stock_indicators_daily tables
     _new_indicator_cols = [
+        "ema_50",
         "ema_7", "ema_14", "ema_22", "zlema_14",
         "psar", "psar_bull",
         "dmi_plus_14", "dmi_minus_14",

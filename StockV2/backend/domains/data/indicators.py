@@ -30,8 +30,6 @@ class IndicatorEngine:
         out["sma_50"] = ta.trend.SMAIndicator(close, window=50).sma_indicator() if n >= 50 else pd.Series(float("nan"), index=close.index)
         out["ema_9"]  = ta.trend.EMAIndicator(close, window=9).ema_indicator()  if n >= 9  else pd.Series(float("nan"), index=close.index)
         out["ema_21"] = ta.trend.EMAIndicator(close, window=21).ema_indicator() if n >= 21 else pd.Series(float("nan"), index=close.index)
-        out["ema_50"]  = ta.trend.EMAIndicator(close, window=50).ema_indicator()  if n >= 50 else pd.Series(float("nan"), index=close.index)
-        out["sma_200"] = ta.trend.SMAIndicator(close, window=200).sma_indicator() if n >= 200 else pd.Series(float("nan"), index=close.index)
 
         # ── RSI ──────────────────────────────────────────────────────
         out["rsi_14"] = ta.momentum.RSIIndicator(close, window=14).rsi() if n >= 15 else pd.Series(float("nan"), index=close.index)
