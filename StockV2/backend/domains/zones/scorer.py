@@ -50,7 +50,7 @@ class ZoneScorer:
         # 5. Recency (0–10): more recent bar_index = higher
         if n_bars > 0:
             recency = zone.bar_index / n_bars
-            s += int(recency * 10)
+            s += round(recency * 10)
 
         # 6. ATR proximity (0–10): price within 2 ATR of zone midpoint
         if atr > 0:

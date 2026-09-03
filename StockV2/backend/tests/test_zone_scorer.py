@@ -33,7 +33,7 @@ def test_correlated_ema9_ema21_count_as_one():
     uncorr = _zone(["ema_9", "vol_node"])    # independent — counts as 2
     s_corr  = ZoneScorer().score(corr,  atr=20.0, n_bars=500, price=970.0)
     s_uncorr = ZoneScorer().score(uncorr, atr=20.0, n_bars=500, price=970.0)
-    assert s_uncorr.score >= s_corr.score
+    assert s_uncorr.score > s_corr.score
 
 
 def test_closer_zone_scores_higher():
@@ -57,4 +57,4 @@ def test_correlated_ema50_sma200_count_as_one():
     uncorr = _zone(["ema_50", "vol_node"])   # independent — counts as 2
     s_corr  = ZoneScorer().score(corr,  atr=20.0, n_bars=500, price=970.0)
     s_uncorr = ZoneScorer().score(uncorr, atr=20.0, n_bars=500, price=970.0)
-    assert s_uncorr.score >= s_corr.score
+    assert s_uncorr.score > s_corr.score
