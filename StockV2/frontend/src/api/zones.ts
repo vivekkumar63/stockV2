@@ -8,6 +8,7 @@ export interface ZoneCard {
   touch_count: number
   last_reaction_pct: number
   source_tags: string[]
+  source: 'daily' | 'vwap'   // NEW in Phase B
 }
 
 export interface ZoneSetup {
@@ -67,17 +68,77 @@ export interface RecomputeStatus {
   error: string | null
 }
 
+// ── Chart overlay ─────────────────────────────────────────────────────────────
+
+export interface OhlcvBar {
+  date: string
+  open: number
+  high: number
+  low: number
+  close: number
+  volume: number
+}
+
+export interface ZoneBand {
+  low: number
+  high: number
+  strength: number
+  zone_type: 'demand' | 'supply'
+  source: 'daily' | 'vwap'
+}
+
+export interface ChartSetupLines {
+  entry: number
+  stop_loss: number
+  target: number
+}
+
+export interface ChartDataResponse {
+  ohlcv: OhlcvBar[]
+  demand_bands?: ZoneBand[]
+  supply_bands?: ZoneBand[]
+  long_setup?: ChartSetupLines
+  short_setup?: ChartSetupLines
+}
+
+// ── Backtest ──────────────────────────────────────────────────────────────────
+
+export interface BacktestResult {
+  id: number
+  symbol: string
+  from_date: string
+  to_date: string
+  total_trades: number
+  win_rate: number | null
+  total_pnl_pct: number
+  avg_hold_days: number | null
+  ran_at: string
+}
+
+export interface BacktestTrade {
+  id: number
+  entry_date: string
+  entry_price: number
+  exit_date: string | null
+  exit_price: number | null
+  pnl_pct: number | null
+  exit_reason: string
+  hold_days: number | null
+}
+
+// ── API functions ─────────────────────────────────────────────────────────────
+
 export const analyzeZones = (symbol: string) =>
   apiFetch<ZoneResult>(`/zones/analyze/${symbol.toUpperCase()}`)
 
 export const getZoneResult = (symbol: string) =>
   apiFetch<ZoneResult>(`/zones/results/${symbol.toUpperCase()}`)
 
-export const getZoneRankings = (params?: { sort_by?: string; filter?: string; limit?: number }) => {
+export const getZoneRankings = (params?: { sort_by?: string; tag_filter?: string; limit?: number }) => {
   const qs = new URLSearchParams()
-  if (params?.sort_by) qs.set('sort_by', params.sort_by)
-  if (params?.filter)  qs.set('filter',  params.filter)
-  if (params?.limit)   qs.set('limit',   String(params.limit))
+  if (params?.sort_by)    qs.set('sort_by',    params.sort_by)
+  if (params?.tag_filter) qs.set('tag_filter', params.tag_filter)  // was 'filter' — fixed
+  if (params?.limit)      qs.set('limit',      String(params.limit))
   const q = qs.toString()
   return apiFetch<ZoneRankRow[]>(`/zones/rankings${q ? '?' + q : ''}`)
 }
@@ -87,3 +148,18 @@ export const recomputeAll = () =>
 
 export const getRecomputeStatus = () =>
   apiFetch<RecomputeStatus>('/zones/recompute-status')
+
+export const getChartData = (symbol: string, bars = 120) =>
+  apiFetch<ChartDataResponse>(`/zones/chart-data/${symbol.toUpperCase()}?bars=${bars}`)
+
+export const runBacktest = (params: { symbol: string; from_date: string; to_date: string }) =>
+  apiFetch<BacktestResult>(
+    `/zones/backtest/run?symbol=${params.symbol.toUpperCase()}&from_date=${params.from_date}&to_date=${params.to_date}`,
+    { method: 'POST' },
+  )
+
+export const getBacktestResults = (symbol: string) =>
+  apiFetch<BacktestResult[]>(`/zones/backtest/results/${symbol.toUpperCase()}`)
+
+export const getBacktestTrades = (resultId: number) =>
+  apiFetch<BacktestTrade[]>(`/zones/backtest/trades/${resultId}`)

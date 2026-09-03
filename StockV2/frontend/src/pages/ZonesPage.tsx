@@ -243,7 +243,7 @@ export function ZonesPage() {
 
   const rankingsQuery = useQuery({
     queryKey: ['zone-rankings', sortBy, filterBy],
-    queryFn: () => getZoneRankings({ sort_by: sortBy, filter: filterBy || undefined }),
+    queryFn: () => getZoneRankings({ sort_by: sortBy, tag_filter: filterBy || undefined }),
     staleTime: 5 * 60 * 1000,
   })
 
