@@ -55,3 +55,31 @@ def test_fetch_and_store_upserts_rows():
 
     assert db.execute.called
     assert db.commit.called
+
+
+def test_fetch_one_returns_empty_when_yf_returns_empty_df():
+    fetcher = IntradayFetcher()
+    with patch("domains.data.intraday_fetcher.yf.Ticker") as mock_ticker:
+        mock_ticker.return_value.history.return_value = pd.DataFrame()
+        df = fetcher.fetch_one("EMPTY")
+    assert df.empty
+
+
+def test_fetch_and_store_continues_on_db_error():
+    fetcher = IntradayFetcher()
+    db = MagicMock()
+    db.execute.side_effect = Exception("DB error")
+
+    with patch.object(fetcher, "fetch_one", return_value=pd.DataFrame({
+        "datetime": pd.date_range("2024-01-02 09:30", periods=2, freq="5min"),
+        "open": [100.0, 100.0],
+        "high": [102.0, 102.0],
+        "low":  [98.0,  98.0],
+        "close":[101.0, 101.0],
+        "volume":[50000, 50000],
+    })):
+        result = fetcher.fetch_and_store(["RELIANCE", "TCS"], db)
+
+    # Should rollback on each symbol's DB error and continue, returning 0 inserted
+    assert db.rollback.called
+    assert result == 0

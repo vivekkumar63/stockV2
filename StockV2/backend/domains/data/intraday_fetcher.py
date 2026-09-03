@@ -33,19 +33,15 @@ class IntradayFetcher:
             return pd.DataFrame()
 
     def fetch_and_store(self, symbols: list[str], db: Session) -> int:
-        """Fetch 5-min bars for all symbols and upsert into intraday_prices_5m. Returns row count."""
+        """Fetch 5-min bars for all symbols and upsert into intraday_prices_5m. Returns number of rows fetched (not necessarily inserted)."""
         total = 0
         for symbol in symbols:
             df = self.fetch_one(symbol)
             if df.empty:
                 continue
             try:
-                for _, row in df.iterrows():
-                    db.execute(text("""
-                        INSERT INTO intraday_prices_5m (symbol, datetime, open, high, low, close, volume)
-                        VALUES (:sym, :dt, :o, :h, :l, :c, :v)
-                        ON CONFLICT (symbol, datetime) DO NOTHING
-                    """), {
+                rows_to_insert = [
+                    {
                         "sym": symbol,
                         "dt": row["datetime"],
                         "o": float(row["open"]),
@@ -53,7 +49,14 @@ class IntradayFetcher:
                         "l": float(row["low"]),
                         "c": float(row["close"]),
                         "v": int(row["volume"]) if pd.notna(row["volume"]) else 0,
-                    })
+                    }
+                    for _, row in df.iterrows()
+                ]
+                db.execute(text("""
+                    INSERT INTO intraday_prices_5m (symbol, datetime, open, high, low, close, volume)
+                    VALUES (:sym, :dt, :o, :h, :l, :c, :v)
+                    ON CONFLICT (symbol, datetime) DO NOTHING
+                """), rows_to_insert)
                 db.commit()
                 total += len(df)
                 logger.debug("[IntradayFetcher] stored %d rows for %s", len(df), symbol)
