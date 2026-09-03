@@ -133,6 +133,12 @@ def _daily_eod_update():
         logger.info("[scheduler] daily_eod_update: %d signals generated", len(results))
         _send_sell_alerts_for_holdings(db)
         _check_special_sell_alerts(db)
+        # Zone precompute (after prices are fresh)
+        try:
+            from domains.zones.precompute import ZonePrecomputer
+            ZonePrecomputer().run_all(db)
+        except Exception:
+            logger.exception("[scheduler] zone precompute failed")
     except Exception:
         logger.exception("[scheduler] daily_eod_update failed")
     finally:

@@ -211,6 +211,25 @@ def get_top_opportunities(
     except Exception:
         logger.warning("[top-opportunities] earnings lookup failed", exc_info=True)
 
+    # Bulk zone summary lookup for today
+    zone_map: dict[str, dict] = {}
+    try:
+        zone_rows = db.execute(text("""
+            SELECT symbol, position_tag, best_demand_score, long_setup_score
+            FROM zone_analysis_results
+            WHERE computed_date = :dt
+        """), {"dt": str(today)}).fetchall()
+        zone_map = {
+            r[0]: {
+                "position_tag": r[1],
+                "best_demand_score": r[2],
+                "long_setup_score": r[3],
+            }
+            for r in zone_rows
+        }
+    except Exception:
+        logger.warning("[top-opportunities] zone summary lookup failed", exc_info=True)
+
     # Build set of (symbol, strategy_name) active today — used for combo alignment check
     active_signals: set[tuple[str, str]] = {(r[1], r[3]) for r in rows}
 
@@ -417,6 +436,7 @@ def get_top_opportunities(
             "confluence_count":   confluence,
             "days_to_earnings":   earnings_map.get(symbol),
             "matched_combo":      matched_combo,
+            "zone_summary":       zone_map.get(symbol),
         })
 
     results.sort(key=lambda x: x["score"], reverse=True)
