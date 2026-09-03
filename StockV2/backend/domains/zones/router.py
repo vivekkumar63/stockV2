@@ -270,33 +270,38 @@ def run_backtest(
     total_pnl    = round(sum(t.pnl_pct for t in trades), 2)
     avg_hold     = round(sum(t.hold_days for t in trades) / total, 1) if total else None
 
-    row = db.execute(
-        text("""
-            INSERT INTO zone_backtest_results
-                (symbol, from_date, to_date, total_trades, win_rate, total_pnl_pct, avg_hold_days)
-            VALUES (:sym, :fd, :td, :tt, :wr, :tp, :ah)
-            RETURNING id, ran_at
-        """),
-        {"sym": sym, "fd": fd, "td": td, "tt": total,
-         "wr": win_rate, "tp": total_pnl, "ah": avg_hold},
-    ).fetchone()
-    result_id = row[0]
-    ran_at    = str(row[1])
-
-    if trades:
-        db.execute(
+    try:
+        row = db.execute(
             text("""
-                INSERT INTO zone_backtest_trades
-                    (result_id, entry_date, entry_price, exit_date, exit_price,
-                     pnl_pct, exit_reason, hold_days)
-                VALUES (:rid, :ed, :ep, :xd, :xp, :pp, :er, :hd)
+                INSERT INTO zone_backtest_results
+                    (symbol, from_date, to_date, total_trades, win_rate, total_pnl_pct, avg_hold_days)
+                VALUES (:sym, :fd, :td, :tt, :wr, :tp, :ah)
+                RETURNING id, ran_at
             """),
-            [{"rid": result_id, "ed": t.entry_date, "ep": t.entry_price,
-              "xd": t.exit_date, "xp": t.exit_price, "pp": t.pnl_pct,
-              "er": t.exit_reason, "hd": t.hold_days}
-             for t in trades],
-        )
-    db.commit()
+            {"sym": sym, "fd": fd, "td": td, "tt": total,
+             "wr": win_rate, "tp": total_pnl, "ah": avg_hold},
+        ).fetchone()
+        result_id = row[0]
+        ran_at    = str(row[1])
+
+        if trades:
+            db.execute(
+                text("""
+                    INSERT INTO zone_backtest_trades
+                        (result_id, entry_date, entry_price, exit_date, exit_price,
+                         pnl_pct, exit_reason, hold_days)
+                    VALUES (:rid, :ed, :ep, :xd, :xp, :pp, :er, :hd)
+                """),
+                [{"rid": result_id, "ed": t.entry_date, "ep": t.entry_price,
+                  "xd": t.exit_date, "xp": t.exit_price, "pp": t.pnl_pct,
+                  "er": t.exit_reason, "hd": t.hold_days}
+                 for t in trades],
+            )
+        db.commit()
+    except Exception:
+        db.rollback()
+        logger.exception("[run_backtest] DB write failed for %s", sym)
+        raise HTTPException(status_code=500, detail="Failed to persist backtest results")
 
     return {
         "id":            result_id,

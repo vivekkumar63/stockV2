@@ -529,7 +529,7 @@ def _intraday_vwap_fetch():
         )).fetchall()
         symbols = [r[0] for r in rows]
         n = IntradayFetcher().fetch_and_store(symbols, db)
-        logger.info("[intraday_vwap_fetch] stored %d 5-min rows for %d symbols", n, len(symbols))
+        logger.info("[intraday_vwap_fetch] fetched %d 5-min rows for %d symbols", n, len(symbols))
     except Exception:
         logger.exception("[intraday_vwap_fetch] failed")
     finally:
