@@ -237,9 +237,9 @@ def get_chart_data(
         ]
         ls = rj.get("long_setup")
         ss = rj.get("short_setup")
-        if ls:
-            result["long_setup"]  = {"entry": ls["ideal_entry"], "stop_loss": ls["stop_loss"], "target": ls["t2"]}
-        if ss:
-            result["short_setup"] = {"entry": ss["ideal_entry"], "stop_loss": ss["stop_loss"], "target": ss["t2"]}
+        if ls and ls.get("ideal_entry") is not None:
+            result["long_setup"]  = {"entry": ls["ideal_entry"], "stop_loss": ls["stop_loss"], "target": ls.get("t2")}
+        if ss and ss.get("ideal_entry") is not None:
+            result["short_setup"] = {"entry": ss["ideal_entry"], "stop_loss": ss["stop_loss"], "target": ss.get("t2")}
 
     return result
