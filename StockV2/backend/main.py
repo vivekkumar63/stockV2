@@ -537,7 +537,7 @@ async def lifespan(app: FastAPI):
             _conn.execute(text("""
                 CREATE TABLE IF NOT EXISTS zone_backtest_trades (
                     id           SERIAL PRIMARY KEY,
-                    result_id    INTEGER NOT NULL,
+                    result_id    INTEGER NOT NULL REFERENCES zone_backtest_results(id) ON DELETE CASCADE,
                     entry_date   DATE,
                     entry_price  REAL,
                     exit_date    DATE,
