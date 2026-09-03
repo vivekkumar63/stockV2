@@ -1,4 +1,5 @@
 from __future__ import annotations
+import dataclasses
 import math
 from .models import Zone
 
@@ -38,17 +39,17 @@ class ZoneScorer:
         s += min(30, unique * 8)
 
         # 2. Reaction quality (0–20): last_reaction_pct; 10% reaction → full 20 pts
-        s += min(20, int(zone.last_reaction_pct / 10 * 20))
+        s += min(20, max(0, int(zone.last_reaction_pct / 10 * 20)))
 
         # 3. Volume at zone (0–15): volume_ratio; 3× = full
         vol = zone.volume_at_zone if math.isfinite(zone.volume_at_zone) else 1.0
-        s += min(15, int((vol - 1.0) / 2.0 * 15))
+        s += min(15, max(0, int((vol - 1.0) / 2.0 * 15)))
 
         # 4. Timeframe weight (0–15): all Phase A zones are daily → full 15 pts
         s += 15  # weekly zones (Phase B) will add differentiation later
 
         # 5. Recency (0–10): more recent bar_index = higher
-        if n_bars > 0:
+        if n_bars > 0 and zone.bar_index >= 0:
             recency = zone.bar_index / n_bars
             s += round(recency * 10)
 
@@ -58,8 +59,7 @@ class ZoneScorer:
             proximity = max(0.0, 1.0 - dist / (2 * atr))
             s += int(proximity * 10)
 
-        zone.score = min(100, max(0, s))
-        return zone
+        return dataclasses.replace(zone, score=min(100, max(0, s)))
 
     def score_all(self, zones: list[Zone], *, atr: float, n_bars: int, price: float) -> list[Zone]:
         return [self.score(z, atr=atr, n_bars=n_bars, price=price) for z in zones]

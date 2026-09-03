@@ -58,3 +58,21 @@ def test_correlated_ema50_sma200_count_as_one():
     s_corr  = ZoneScorer().score(corr,  atr=20.0, n_bars=500, price=970.0)
     s_uncorr = ZoneScorer().score(uncorr, atr=20.0, n_bars=500, price=970.0)
     assert s_uncorr.score > s_corr.score
+
+
+def test_score_not_penalized_by_negative_reaction():
+    """Negative last_reaction_pct must contribute 0, not penalize the score."""
+    good = _zone(["swing_low"], reaction=5.0)
+    bad_reaction = _zone(["swing_low"], reaction=-5.0)
+    s_good = ZoneScorer().score(good, atr=20.0, n_bars=500, price=970.0)
+    s_bad  = ZoneScorer().score(bad_reaction, atr=20.0, n_bars=500, price=970.0)
+    assert s_bad.score <= s_good.score  # penalizing would make bad > good
+
+
+def test_score_does_not_mutate_original_zone():
+    """score() must return a new Zone object, not mutate the original."""
+    zone = _zone(["swing_low"])
+    original_score = zone.score  # should be 0 (default)
+    result = ZoneScorer().score(zone, atr=20.0, n_bars=500, price=970.0)
+    assert zone.score == original_score, "score() must not mutate the original zone"
+    assert result.score != original_score
