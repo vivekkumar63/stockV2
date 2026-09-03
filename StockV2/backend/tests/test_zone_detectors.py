@@ -76,6 +76,16 @@ def test_fibonacci_detector_returns_list(df_ind):
     assert isinstance(levels, list)
 
 
+def test_fibonacci_tags_format(df_ind):
+    """Fibonacci source tags must use 'fib_XX.X' format (e.g. 'fib_61.8')."""
+    levels = FibonacciDetector().detect(df_ind)
+    for level in levels:
+        assert level.source_tag.startswith("fib_"), f"Expected fib_ prefix, got {level.source_tag!r}"
+        # The part after 'fib_' should be a valid number like '61.8'
+        suffix = level.source_tag[4:]
+        float(suffix)  # must be parseable as float, raises ValueError if not
+
+
 def test_all_detectors_handle_short_df():
     """Detectors must not crash when given <50 bars."""
     short = pd.DataFrame({
