@@ -170,6 +170,24 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning("combination tables migration skipped: %s", e)
 
+    # On startup, mark any runs that were still 'running' as failed.
+    # The worker threads that owned those runs are gone — they can never complete.
+    # This unblocks the UI so it falls back to the last 'complete' run's results.
+    try:
+        with engine.connect() as _conn:
+            result = _conn.execute(text("""
+                UPDATE combination_run_log
+                SET status = 'failed',
+                    completed_at = CURRENT_TIMESTAMP,
+                    error_message = 'Server restarted — run interrupted'
+                WHERE status = 'running'
+            """))
+            _conn.commit()
+            if result.rowcount:
+                logger.info("[startup] reset %d stuck combination run(s) to failed", result.rowcount)
+    except Exception as e:
+        logger.warning("[startup] could not reset stuck combination runs: %s", e)
+
     # Walk-forward results table
     try:
         with engine.connect() as _conn:

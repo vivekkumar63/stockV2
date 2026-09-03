@@ -40,6 +40,11 @@ def get_run_status(db: Session = Depends(get_db)):
         LIMIT 1
     """)).fetchone()
 
+    # Whether there is at least one completed run with results (may differ from latest run status)
+    has_results: bool = bool(db.execute(text(
+        "SELECT 1 FROM combination_run_log WHERE status = 'complete' LIMIT 1"
+    )).fetchone())
+
     if row is None:
         return {
             "status": "never_run",
@@ -48,6 +53,7 @@ def get_run_status(db: Session = Depends(get_db)):
             "combinations_tested": None,
             "top_combination": None,
             "error_message": None,
+            "has_results": False,
         }
 
     run_id, status_val, completed_at, combinations_tested, top_combo_id, error_message = row
@@ -85,6 +91,7 @@ def get_run_status(db: Session = Depends(get_db)):
         "combinations_tested": combinations_tested,
         "top_combination": top_combination,
         "error_message": error_message,
+        "has_results": has_results,
     }
 
 

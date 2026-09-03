@@ -38,22 +38,24 @@ export function CombinationsPage() {
     },
   })
 
+  const hasResults = status?.has_results === true
+
   const { data: best } = useQuery({
     queryKey: ['combinations-best'],
     queryFn: getBestCombinations,
-    enabled: status?.status === 'complete',
+    enabled: hasResults,
   })
 
   const { data: rankings = [] } = useQuery({
     queryKey: ['combinations-rankings'],
     queryFn: () => getCombinationRankings(),
-    enabled: status?.status === 'complete',
+    enabled: hasResults,
   })
 
   const { data: picks = [], isLoading: picksLoading } = useQuery({
     queryKey: ['combo-recommendations'],
     queryFn: getComboRecommendations,
-    enabled: status?.status === 'complete',
+    enabled: hasResults,
     staleTime: 5 * 60 * 1000,
   })
 
@@ -140,7 +142,7 @@ export function CombinationsPage() {
     )
   }
 
-  if (status.status === 'failed') {
+  if (status.status === 'failed' && !hasResults) {
     return (
       <div className="p-6">
         <div className="flex justify-between items-center mb-4">
@@ -180,6 +182,16 @@ export function CombinationsPage() {
       </div>
 
       {precomputeBanner}
+
+      {/* Stale-results warning when latest run failed/was interrupted */}
+      {status.status === 'failed' && hasResults && (
+        <div className="mb-4 flex items-center gap-3 bg-red-50 border border-red-200 rounded px-3 py-2 text-sm text-red-700">
+          Last run failed or was interrupted — showing results from a previous run.
+          {status.error_message && (
+            <span className="font-mono text-xs text-red-400 ml-1">{status.error_message}</span>
+          )}
+        </div>
+      )}
 
       {/* Best-of cards */}
       {best && (

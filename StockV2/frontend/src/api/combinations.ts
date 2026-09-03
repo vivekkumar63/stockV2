@@ -60,6 +60,8 @@ export interface RunStatus {
   combinations_tested: number | null
   top_combination: { name: string; oos_cagr: number | null; reliability_label: string | null } | null
   error_message: string | null
+  /** True when at least one completed run exists in the DB (results survive restarts/failures) */
+  has_results: boolean
 }
 
 export interface RankingsParams {
