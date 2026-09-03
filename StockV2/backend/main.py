@@ -503,6 +503,22 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning("zones table migration failed: %s", e)
 
+    # Zone analysis results — add 52W and entry-price columns if missing
+    for _col, _type in [
+        ("pct_from_52w_high", "REAL"),
+        ("pct_from_52w_low",  "REAL"),
+        ("long_entry_price",  "REAL"),
+        ("short_entry_price", "REAL"),
+    ]:
+        try:
+            with engine.connect() as _conn:
+                _conn.execute(text(
+                    f"ALTER TABLE zone_analysis_results ADD COLUMN IF NOT EXISTS {_col} {_type}"
+                ))
+                _conn.commit()
+        except Exception as e:
+            logger.debug("zone_analysis_results ALTER %s skipped: %s", _col, e)
+
     # Zone Phase B tables
     try:
         with engine.connect() as _conn:

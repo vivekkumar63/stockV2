@@ -83,6 +83,10 @@ _SORT_MAP = {
     "supply_score":  "best_supply_score",
     "rvol":          "rvol_at_compute",
     "atr":           "atr_at_compute",
+    "dist_long":     "ABS(price_at_compute - long_entry_price) / NULLIF(price_at_compute, 0) * 100",
+    "dist_short":    "ABS(price_at_compute - short_entry_price) / NULLIF(price_at_compute, 0) * 100",
+    "near_52w_high": "pct_from_52w_high DESC NULLS LAST, long_setup_score",
+    "near_52w_low":  "pct_from_52w_low ASC NULLS LAST, long_setup_score",
 }
 
 _FILTER_TAGS = {"in_demand", "near_supply", "breakout", "in_supply", "near_demand"}
@@ -90,10 +94,10 @@ _FILTER_TAGS = {"in_demand", "near_supply", "breakout", "in_supply", "near_deman
 
 @router.get("/zones/rankings")
 def get_rankings(
-    sort_by: str   = Query("long_score"),
+    sort_by: str    = Query("long_score"),
     tag_filter: str = Query(None),
-    limit: int     = Query(200, ge=1, le=500),
-    db: Session    = Depends(get_db),
+    limit: int      = Query(200, ge=1, le=500),
+    db: Session     = Depends(get_db),
 ):
     """All stocks with today's pre-computed results, sorted and optionally filtered."""
     col = _SORT_MAP.get(sort_by, "long_setup_score")
@@ -106,6 +110,10 @@ def get_rankings(
         where += " AND long_setup_score >= 50"
     elif tag_filter == "short":
         where += " AND short_setup_score >= 50"
+    elif tag_filter == "near_52w_high":
+        where += " AND pct_from_52w_high >= -5"
+    elif tag_filter == "near_52w_low":
+        where += " AND pct_from_52w_low <= 5"
     elif tag_filter in _FILTER_TAGS:
         where += " AND position_tag = :pt"
         params["pt"] = tag_filter
@@ -116,18 +124,25 @@ def get_rankings(
                    best_demand_score, best_supply_score, position_tag,
                    price_at_compute, atr_at_compute, rvol_at_compute,
                    best_long_rr, best_short_rr, created_at,
-                   ROW_NUMBER() OVER (ORDER BY {col} DESC NULLS LAST) AS rank
+                   pct_from_52w_high, pct_from_52w_low,
+                   long_entry_price, short_entry_price,
+                   ROW_NUMBER() OVER (ORDER BY {col} NULLS LAST) AS rank
             FROM zone_analysis_results
             WHERE {where}
-            ORDER BY {col} DESC NULLS LAST
+            ORDER BY {col} NULLS LAST
             LIMIT :lim
         """),
         params,
     ).fetchall()
 
+    def _dist(price, entry):
+        if price and entry and price > 0:
+            return round((price - entry) / price * 100, 1)
+        return None
+
     return [
         {
-            "rank":              int(r[12]),
+            "rank":              int(r[16]),
             "symbol":            r[0],
             "long_setup_score":  r[1],
             "short_setup_score": r[2],
@@ -140,6 +155,10 @@ def get_rankings(
             "best_long_rr":      r[9],
             "best_short_rr":     r[10],
             "computed_at":       str(r[11]),
+            "pct_from_52w_high": r[12],
+            "pct_from_52w_low":  r[13],
+            "dist_to_long":      _dist(r[6], r[14]),
+            "dist_to_short":     _dist(r[6], r[15]),
         }
         for r in rows
     ]

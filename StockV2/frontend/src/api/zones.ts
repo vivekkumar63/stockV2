@@ -58,6 +58,10 @@ export interface ZoneRankRow {
   best_long_rr: number | null
   best_short_rr: number | null
   computed_at: string
+  pct_from_52w_high: number | null
+  pct_from_52w_low: number | null
+  dist_to_long: number | null   // (price - long_entry) / price * 100; negative = below entry
+  dist_to_short: number | null  // (price - short_entry) / price * 100; positive = above entry
 }
 
 export interface RecomputeStatus {

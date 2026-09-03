@@ -174,6 +174,25 @@ function AnalysisPanel({ result }: { result: ZoneResult }) {
 
 // ── Rank Row ──────────────────────────────────────────────────────────────────
 
+const COL_GRID = '28px 72px 50px 95px 60px 50px 50px 45px 45px 62px 62px 62px'
+
+function distColor(v: number | null, isLong: boolean) {
+  if (v == null) return 'text-gray-400'
+  // long: negative = price below entry (close/in zone), near-zero = at entry, positive = above entry (wait for pullback)
+  // short: positive = price above entry (wait for rally), negative = below entry (close/in zone)
+  const abs = Math.abs(v)
+  if (abs <= 1) return 'text-green-600 font-semibold'
+  if (abs <= 3) return 'text-yellow-600'
+  return 'text-gray-500'
+}
+
+function w52Color(pct: number | null, isHigh: boolean) {
+  if (pct == null) return 'text-gray-400'
+  if (isHigh && pct >= -3) return 'text-purple-600 font-semibold'
+  if (!isHigh && pct <= 3) return 'text-teal-600 font-semibold'
+  return 'text-gray-500'
+}
+
 function RankRow({
   row, onSelect, isSelected,
 }: { row: ZoneRankRow; onSelect: (sym: string) => void; isSelected: boolean }) {
@@ -182,7 +201,7 @@ function RankRow({
     <div className={`border-b border-gray-100 cursor-pointer hover:bg-gray-50 ${isSelected ? 'bg-blue-50 border-l-2 border-l-blue-500' : ''}`}>
       <div
         className="grid gap-1 px-3 py-2 text-xs"
-        style={{ gridTemplateColumns: '28px 80px 55px 100px 70px 55px 55px 50px 50px 70px' }}
+        style={{ gridTemplateColumns: COL_GRID }}
         onClick={() => onSelect(row.symbol)}
       >
         <span className="text-gray-400">{row.rank}</span>
@@ -192,8 +211,16 @@ function RankRow({
         <span className={scoreColor(row.short_setup_score)}>{row.short_setup_score != null ? `S:${row.short_setup_score}` : '—'}</span>
         <span className={scoreColor(row.best_demand_score)}>{row.best_demand_score ?? '—'}</span>
         <span className={scoreColor(row.best_supply_score)}>{row.best_supply_score ?? '—'}</span>
-        <span>{row.atr?.toFixed(1) ?? '—'}</span>
         <span className={row.rvol >= 1.5 ? 'text-green-600 font-medium' : ''}>{row.rvol?.toFixed(1) ?? '—'}×</span>
+        <span className={distColor(row.dist_to_long, true)} title="% from long entry (–=below entry, +=above)">
+          {row.dist_to_long != null ? `${row.dist_to_long > 0 ? '+' : ''}${row.dist_to_long}%` : '—'}
+        </span>
+        <span className={w52Color(row.pct_from_52w_high, true)} title="% below 52W high (–=below)">
+          {row.pct_from_52w_high != null ? `${row.pct_from_52w_high > 0 ? '+' : ''}${row.pct_from_52w_high}%` : '—'}
+        </span>
+        <span className={w52Color(row.pct_from_52w_low, false)} title="% above 52W low (+= above)">
+          {row.pct_from_52w_low != null ? `+${row.pct_from_52w_low}%` : '—'}
+        </span>
         <span className="text-gray-400">{row.computed_at ? new Date(row.computed_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '—'}</span>
       </div>
     </div>
@@ -321,24 +348,17 @@ function BacktestTab() {
 
 // ── Main page ─────────────────────────────────────────────────────────────────
 
-type SortKey = 'long_score' | 'short_score' | 'demand_score' | 'supply_score' | 'rvol' | 'atr'
-type FilterKey = '' | 'long' | 'short' | 'in_demand' | 'breakout' | 'near_supply'
+type SortKey = 'long_score' | 'short_score' | 'demand_score' | 'supply_score' | 'rvol' | 'atr' | 'dist_long' | 'dist_short' | 'near_52w_high' | 'near_52w_low'
+type FilterKey = '' | 'long' | 'short' | 'in_demand' | 'breakout' | 'near_supply' | 'near_52w_high' | 'near_52w_low'
 
 const FILTERS: { key: FilterKey; label: string }[] = [
-  { key: 'long',        label: 'Long' },
-  { key: 'short',       label: 'Short' },
-  { key: 'in_demand',   label: 'In Demand' },
-  { key: 'breakout',    label: 'Breakout' },
-  { key: 'near_supply', label: 'Near Supply' },
-]
-
-const SORTS: { key: SortKey; label: string }[] = [
-  { key: 'long_score',   label: 'Long Score' },
-  { key: 'short_score',  label: 'Short Score' },
-  { key: 'demand_score', label: 'Demand' },
-  { key: 'supply_score', label: 'Supply' },
-  { key: 'rvol',         label: 'RVol' },
-  { key: 'atr',          label: 'ATR' },
+  { key: 'long',          label: 'Long' },
+  { key: 'short',         label: 'Short' },
+  { key: 'in_demand',     label: 'In Demand' },
+  { key: 'breakout',      label: 'Breakout' },
+  { key: 'near_supply',   label: 'Near Supply' },
+  { key: 'near_52w_high', label: '52W High' },
+  { key: 'near_52w_low',  label: '52W Low' },
 ]
 
 export function ZonesPage() {
@@ -488,7 +508,7 @@ export function ZonesPage() {
             <div className="flex items-center gap-2 px-4 py-3 border-b border-gray-100">
               <span className="font-bold text-sm">All Stocks Ranking</span>
               <span className="text-xs text-gray-400">{rankingsQuery.data?.length ?? 0} stocks</span>
-              <div className="ml-auto flex items-center gap-2">
+              <div className="ml-auto flex items-center gap-1.5 flex-wrap">
                 {FILTERS.map(f => (
                   <button
                     key={f.key}
@@ -502,22 +522,41 @@ export function ZonesPage() {
                     {f.label}
                   </button>
                 ))}
-                <select
-                  value={sortBy}
-                  onChange={e => setSortBy(e.target.value as SortKey)}
-                  className="border border-gray-300 rounded text-xs px-2 py-1 ml-2 focus:outline-none"
-                >
-                  {SORTS.map(s => <option key={s.key} value={s.key}>{s.label}</option>)}
-                </select>
               </div>
             </div>
 
             <div
               className="grid gap-1 px-3 py-2 bg-gray-50 text-xs font-bold text-gray-500 border-b border-gray-100"
-              style={{ gridTemplateColumns: '28px 80px 55px 100px 70px 55px 55px 50px 50px 70px' }}
+              style={{ gridTemplateColumns: COL_GRID }}
             >
-              <span>#</span><span>Symbol</span><span>Score</span><span>Position</span>
-              <span>Setup</span><span>Demand</span><span>Supply</span><span>ATR</span><span>RVol</span><span>Computed</span>
+              <span>#</span>
+              <span>Symbol</span>
+              {(
+                [
+                  ['long_score',   'LScore'],
+                  [null,           'Position'],
+                  ['short_score',  'SScore'],
+                  ['demand_score', 'Demand'],
+                  ['supply_score', 'Supply'],
+                  ['rvol',         'RVol'],
+                  ['dist_long',    'Dist↓'],
+                  ['near_52w_high','52WH%'],
+                  ['near_52w_low', '52WL%'],
+                  [null,           'Time'],
+                ] as [SortKey | null, string][]
+              ).map(([key, label], i) =>
+                key ? (
+                  <button
+                    key={i}
+                    onClick={() => setSortBy(key)}
+                    className={`text-left flex items-center gap-0.5 hover:text-blue-600 ${sortBy === key ? 'text-blue-600' : ''}`}
+                  >
+                    {label}{sortBy === key ? ' ▲' : ''}
+                  </button>
+                ) : (
+                  <span key={i}>{label}</span>
+                )
+              )}
             </div>
 
             {rankingsQuery.isLoading && (

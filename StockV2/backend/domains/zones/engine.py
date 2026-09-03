@@ -137,6 +137,13 @@ class ZoneEngine:
         if not math.isfinite(atr) or atr <= 0:
             atr = price * 0.01  # fallback: 1% of price
 
+        # 52-week high/low from available price history (~250 trading days)
+        bars_52w = min(250, n)
+        high_52w = float(df_ind["high"].iloc[-bars_52w:].max()) if "high" in df_ind.columns else price
+        low_52w  = float(df_ind["low"].iloc[-bars_52w:].min())  if "low"  in df_ind.columns else price
+        pct_from_52w_high = round((price - high_52w) / high_52w * 100, 2) if high_52w > 0 else None
+        pct_from_52w_low  = round((price - low_52w)  / low_52w  * 100, 2) if low_52w  > 0 else None
+
         # Detect raw levels
         levels: list[ZoneLevel] = []
         for det in _DETECTORS:
@@ -220,22 +227,29 @@ class ZoneEngine:
                         (symbol, computed_date, best_demand_score, best_supply_score,
                          long_setup_score, short_setup_score, price_at_compute,
                          atr_at_compute, rvol_at_compute, position_tag,
-                         best_long_rr, best_short_rr, result_json)
+                         best_long_rr, best_short_rr, result_json,
+                         pct_from_52w_high, pct_from_52w_low,
+                         long_entry_price, short_entry_price)
                     VALUES
-                        (:sym, :dt, :bd, :bs, :ls, :ss, :pr, :atr, :rv, :pt, :lr, :sr, :rj)
+                        (:sym, :dt, :bd, :bs, :ls, :ss, :pr, :atr, :rv, :pt, :lr, :sr, :rj,
+                         :p52h, :p52l, :lep, :sep)
                     ON CONFLICT (symbol, computed_date) DO UPDATE SET
-                        best_demand_score = EXCLUDED.best_demand_score,
-                        best_supply_score = EXCLUDED.best_supply_score,
-                        long_setup_score  = EXCLUDED.long_setup_score,
-                        short_setup_score = EXCLUDED.short_setup_score,
-                        price_at_compute  = EXCLUDED.price_at_compute,
-                        atr_at_compute    = EXCLUDED.atr_at_compute,
-                        rvol_at_compute   = EXCLUDED.rvol_at_compute,
-                        position_tag      = EXCLUDED.position_tag,
-                        best_long_rr      = EXCLUDED.best_long_rr,
-                        best_short_rr     = EXCLUDED.best_short_rr,
-                        result_json       = EXCLUDED.result_json,
-                        created_at        = CURRENT_TIMESTAMP
+                        best_demand_score  = EXCLUDED.best_demand_score,
+                        best_supply_score  = EXCLUDED.best_supply_score,
+                        long_setup_score   = EXCLUDED.long_setup_score,
+                        short_setup_score  = EXCLUDED.short_setup_score,
+                        price_at_compute   = EXCLUDED.price_at_compute,
+                        atr_at_compute     = EXCLUDED.atr_at_compute,
+                        rvol_at_compute    = EXCLUDED.rvol_at_compute,
+                        position_tag       = EXCLUDED.position_tag,
+                        best_long_rr       = EXCLUDED.best_long_rr,
+                        best_short_rr      = EXCLUDED.best_short_rr,
+                        result_json        = EXCLUDED.result_json,
+                        pct_from_52w_high  = EXCLUDED.pct_from_52w_high,
+                        pct_from_52w_low   = EXCLUDED.pct_from_52w_low,
+                        long_entry_price   = EXCLUDED.long_entry_price,
+                        short_entry_price  = EXCLUDED.short_entry_price,
+                        created_at         = CURRENT_TIMESTAMP
                 """),
                 {
                     "sym": symbol, "dt": date.today(),
@@ -247,6 +261,9 @@ class ZoneEngine:
                     "lr": long_setup.t2_rr if long_setup else None,
                     "sr": short_setup.t2_rr if short_setup else None,
                     "rj": json.dumps(result_json),
+                    "p52h": pct_from_52w_high, "p52l": pct_from_52w_low,
+                    "lep": long_setup.ideal_entry if long_setup else None,
+                    "sep": short_setup.ideal_entry if short_setup else None,
                 },
             )
             db.commit()
