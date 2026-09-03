@@ -22,6 +22,7 @@ export interface OpportunityBreakdown {
   ml_signal_probability: number | null
   false_signal_rate: number | null
   sector_health: number | null
+  combo_alignment: number | null
 }
 
 export interface TopOpportunity {
@@ -49,6 +50,7 @@ export interface TopOpportunity {
   confluence_count: number
   days_to_earnings: number | null
   breakdown: OpportunityBreakdown
+  matched_combo: string | null
 }
 
 export interface StrategyRank {

@@ -43,6 +43,7 @@ const SCORE_COMPONENTS: { key: ComponentKey; label: string; weight: number }[] =
   { key: 'sr_context',            label: 'S/R Context',           weight:  7 },
   { key: 'ml_signal_probability', label: 'ML Probability',        weight:  7 },
   { key: 'regime_strategy',       label: 'Regime-Strategy',       weight:  4 },
+  { key: 'combo_alignment',       label: 'Combo Alignment',        weight: 12 },
 ]
 
 function parseConditions(json: string | null): { met: string[]; failed: string[] } {
@@ -154,6 +155,14 @@ function OpportunityRow({
                 title="Stock reports earnings soon — entering before results is high risk"
               >
                 ⚠️ Earnings in {opp.days_to_earnings}d
+              </span>
+            )}
+            {opp.matched_combo && (
+              <span
+                className="px-1.5 py-0.5 rounded text-xs font-medium bg-indigo-100 text-indigo-700"
+                title={`Validated combo: ${opp.matched_combo} — both strategies signalling BUY`}
+              >
+                ⚡ {opp.matched_combo}
               </span>
             )}
           </div>

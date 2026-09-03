@@ -11,12 +11,14 @@ Component weights:
   regime_strategy        4  — strategy's historical win rate in the current regime
   ml_signal_probability  7  — ML model probability that signal will be profitable
   sector_health         10  — sector rotation health score (0–100 from sector_breadth_daily)
-  ── total ────────── 100
+  combo_alignment       12  — combination engine: OOS reliability when partner also signals BUY
+  ── total ──────────112 (normalised; combo_alignment excluded when no match)
 
 Quick mode (scanner): only win_rate, confidence, regime_alignment, regime_strategy
   (sum = 54; normalised to full scale when partial components are absent)
 
-Full mode (on-demand endpoint): all 9 components.
+Full mode (on-demand endpoint): all components except combo_alignment.
+Top-opportunities endpoint: all components including combo_alignment when available.
 """
 
 from dataclasses import dataclass, field
@@ -33,17 +35,17 @@ _REGIME_BUY_SCORE: dict[str, float] = {
 }
 
 _WEIGHTS: dict[str, int] = {
-    "historical_win_rate":   20,   # was 22
-    "strategy_confidence":   16,   # was 18
-    "regime_alignment":      14,   # was 16
-    "mtf_alignment":         13,   # was 14
-    "volume":                 9,   # was 10
-    "sr_context":             7,   # was 8
+    "historical_win_rate":   20,
+    "strategy_confidence":   16,
+    "regime_alignment":      14,
+    "mtf_alignment":         13,
+    "volume":                 9,
+    "sr_context":             7,
     "regime_strategy":        4,
-    "ml_signal_probability":  7,   # was 8
-    "sector_health":         10,   # replaced index_alignment
-    # false_signal_safety: inverted false-signal rate; included in full_score only
-    # Weight not in this dict — applied as a flat multiplier after base score
+    "ml_signal_probability":  7,
+    "sector_health":         10,
+    "combo_alignment":       12,   # OOS reliability when a validated combo partner also signals BUY
+    # false_signal_safety: inverted false-signal rate; applied as a flat multiplier after base score
 }
 
 
@@ -108,6 +110,7 @@ class OpportunityScorer:
         ml_probability: Optional[float] = None,
         sector_health_score: Optional[float] = None,   # 0–1; None = unknown sector (treated as 0.5)
         confluence_count: int = 1,
+        combo_alignment: Optional[float] = None,       # 0–1; reliability_score/100 of best matching combo
     ) -> OpportunityScore:
         parts: dict[str, Optional[float]] = {
             "historical_win_rate": historical_win_rate,
@@ -119,6 +122,7 @@ class OpportunityScorer:
             "sr_context":          sr_score,
             "ml_signal_probability": ml_probability,
             "sector_health":       sector_health_score if sector_health_score is not None else 0.5,
+            "combo_alignment":     combo_alignment,
         }
         opp = self._compute(symbol, strategy_id, parts)
 

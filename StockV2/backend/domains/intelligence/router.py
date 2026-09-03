@@ -211,6 +211,9 @@ def get_top_opportunities(
     except Exception:
         logger.warning("[top-opportunities] earnings lookup failed", exc_info=True)
 
+    # Build set of (symbol, strategy_name) active today — used for combo alignment check
+    active_signals: set[tuple[str, str]] = {(r[1], r[3]) for r in rows}
+
     if not rows:
         return []
 
@@ -257,6 +260,36 @@ def get_top_opportunities(
     sector_health_map: dict[str, float] = {
         r[0]: r[1] / 100.0 for r in sector_health_rows if r[1] is not None
     }
+
+    # Pre-load top combinations from the most recent completed run
+    # combo_lookup: strategy_name → list of {partners, reliability, combo_name}
+    combo_lookup: dict[str, list[dict]] = {}
+    try:
+        combo_rows = db.execute(text("""
+            SELECT sc.strategy_names, sc.name AS combo_name, cr.reliability_score
+            FROM combination_results cr
+            JOIN strategy_combinations sc ON sc.id = cr.combination_id
+            JOIN combination_run_log rl ON rl.id = cr.run_id
+            WHERE rl.id = (SELECT MAX(id) FROM combination_run_log WHERE status = 'complete')
+            ORDER BY cr.reliability_score DESC
+            LIMIT 50
+        """)).fetchall()
+        for cr in combo_rows:
+            try:
+                strategy_names = json.loads(cr[0])
+            except Exception:
+                continue
+            reliability = float(cr[2]) if cr[2] is not None else 0.0
+            combo_name = cr[1]
+            for i, name in enumerate(strategy_names):
+                partners = [n for j, n in enumerate(strategy_names) if j != i]
+                combo_lookup.setdefault(name, []).append({
+                    "partners": partners,
+                    "reliability": reliability,
+                    "combo_name": combo_name,
+                })
+    except Exception:
+        logger.warning("[top-opportunities] combo lookup failed", exc_info=True)
 
     # Pre-compute per-symbol data once to avoid redundant DB calls
     mtf_cache: dict[str, object] = {}
@@ -329,6 +362,17 @@ def get_top_opportunities(
             "day_of_week":      today.weekday(),
         }, db=db, symbol=symbol)
 
+        # Combo alignment: find best validated combination where ALL partner strategies
+        # also have a BUY signal on this symbol today.
+        combo_alignment: Optional[float] = None
+        matched_combo: Optional[str] = None
+        for combo in combo_lookup.get(strategy_name, []):
+            if all((symbol, p) in active_signals for p in combo["partners"]):
+                score = combo["reliability"] / 100.0
+                if combo_alignment is None or score > combo_alignment:
+                    combo_alignment = score
+                    matched_combo = combo["combo_name"]
+
         confluence = confluence_map.get(symbol, 1)
         opp = opp_scorer.full_score(
             symbol=symbol,
@@ -344,6 +388,7 @@ def get_top_opportunities(
             ml_probability=ml_prob,
             sector_health_score=sector_health,
             confluence_count=confluence,
+            combo_alignment=combo_alignment,
         )
 
         results.append({
@@ -371,6 +416,7 @@ def get_top_opportunities(
             "sector_name":        _sym_sector,
             "confluence_count":   confluence,
             "days_to_earnings":   earnings_map.get(symbol),
+            "matched_combo":      matched_combo,
         })
 
     results.sort(key=lambda x: x["score"], reverse=True)
