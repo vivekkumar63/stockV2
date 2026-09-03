@@ -45,9 +45,11 @@ def test_price_structure_tags(df_ind):
     assert tags.issubset({"swing_low", "swing_high"})
 
 
-def test_ma_detector_returns_list(df_ind):
+def test_ma_detector_emits_levels_with_valid_zone_types(df_ind):
+    """MADetector must emit at least one level on a 500-bar series and use valid zone_types."""
     levels = MADetector().detect(df_ind)
-    assert isinstance(levels, list)
+    assert len(levels) > 0, "Expected MADetector to emit levels on 500-bar df"
+    assert all(z.zone_type in ("demand", "supply") for z in levels)
 
 
 def test_ma_tags_known(df_ind):
@@ -56,19 +58,43 @@ def test_ma_tags_known(df_ind):
     assert all(z.source_tag in valid_tags for z in levels)
 
 
-def test_volume_detector_returns_list(df_ind):
+def test_volume_detector_emits_levels_with_valid_zone_types(df_ind):
+    """VolumeDetector must emit at least one vol_node level on a 500-bar series."""
     levels = VolumeDetector().detect(df_ind)
-    assert isinstance(levels, list)
+    assert len(levels) > 0, "Expected VolumeDetector to emit levels on 500-bar df"
+    assert all(z.source_tag == "vol_node" for z in levels)
+    assert all(z.zone_type in ("demand", "supply") for z in levels)
 
 
-def test_volatility_detector_returns_list(df_ind):
-    levels = VolatilityDetector().detect(df_ind)
-    assert isinstance(levels, list)
+def test_volatility_detector_emits_demand_near_lower_band():
+    """VolatilityDetector emits a demand level when close is within ATR of bb_lower."""
+    n = 50
+    close_price = 1000.0
+    bb_lower = 992.0  # abs(1000 - 992) = 8 <= 15 ATR → triggers demand
+    atr = 15.0
+    df = pd.DataFrame({
+        "open": [close_price] * n,
+        "high": [close_price * 1.01] * n,
+        "low":  [close_price * 0.99] * n,
+        "close": [close_price] * n,
+        "volume": [1_000_000] * n,
+        "bb_lower": [bb_lower] * n,
+        "bb_upper": [close_price * 1.05] * n,  # far away, should not trigger
+        "atr_14": [atr] * n,
+    })
+    df.index = pd.date_range("2024-01-01", periods=n, freq="B")
+    levels = VolatilityDetector().detect(df)
+    assert len(levels) == 1
+    assert levels[0].zone_type == "demand"
+    assert levels[0].source_tag == "bb_lower"
 
 
-def test_momentum_detector_returns_list(df_ind):
+def test_momentum_detector_emits_levels_with_valid_zone_types(df_ind):
+    """MomentumDetector must emit levels on a 500-bar series with RSI excursions."""
     levels = MomentumDetector().detect(df_ind)
-    assert isinstance(levels, list)
+    assert len(levels) > 0, "Expected MomentumDetector to emit levels on 500-bar df"
+    assert all(z.zone_type in ("demand", "supply") for z in levels)
+    assert all(z.source_tag in ("rsi_oversold", "rsi_overbought") for z in levels)
 
 
 def test_fibonacci_detector_returns_list(df_ind):
