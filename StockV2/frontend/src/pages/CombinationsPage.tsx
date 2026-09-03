@@ -1,13 +1,17 @@
 // frontend/src/pages/CombinationsPage.tsx
+import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   getRunStatus, getCombinationRankings, getBestCombinations, triggerAnalysis, resetStuckRuns,
   type CombinationSummary,
 } from '../api/combinations'
+import { getComboRecommendations, type ComboRecommendation } from '../api/intelligence'
 import { getScanStatus, triggerPrecompute, getPrecomputeStatus } from '../api/backtest'
+import { inr } from '../utils/format'
 
 export function CombinationsPage() {
   const queryClient = useQueryClient()
+  const [tab, setTab] = useState<'rankings' | 'picks'>('rankings')
 
   const { data: status } = useQuery({
     queryKey: ['combinations-status'],
@@ -44,6 +48,13 @@ export function CombinationsPage() {
     queryKey: ['combinations-rankings'],
     queryFn: () => getCombinationRankings(),
     enabled: status?.status === 'complete',
+  })
+
+  const { data: picks = [], isLoading: picksLoading } = useQuery({
+    queryKey: ['combo-recommendations'],
+    queryFn: getComboRecommendations,
+    enabled: status?.status === 'complete',
+    staleTime: 5 * 60 * 1000,
   })
 
   const trigger = useMutation({
@@ -172,7 +183,7 @@ export function CombinationsPage() {
 
       {/* Best-of cards */}
       {best && (
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
           <BestCard title="Best Overall" combo={best.overall} />
           <BestCard title="Lowest Risk" combo={best.low_risk} />
           <BestCard title="Highest Growth" combo={best.high_growth} />
@@ -180,45 +191,72 @@ export function CombinationsPage() {
         </div>
       )}
 
-      {/* Rankings table */}
-      <div className="bg-white rounded-lg shadow overflow-x-auto">
-        <table className="w-full text-sm">
-          <thead className="bg-gray-50 border-b">
-            <tr>
-              <th className="px-4 py-3 text-left font-medium text-gray-600">Rank</th>
-              <th className="px-4 py-3 text-left font-medium text-gray-600">Strategies</th>
-              <th className="px-4 py-3 text-right font-medium text-gray-600">OOS CAGR</th>
-              <th className="px-4 py-3 text-right font-medium text-gray-600">Max DD</th>
-              <th className="px-4 py-3 text-right font-medium text-gray-600">Sharpe</th>
-              <th className="px-4 py-3 text-right font-medium text-gray-600">Win Rate</th>
-              <th className="px-4 py-3 text-left font-medium text-gray-600">Reliability</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rankings.length === 0 ? (
+      {/* Tabs */}
+      <div className="flex gap-1 mb-4 border-b border-gray-200">
+        {(['rankings', 'picks'] as const).map((t) => (
+          <button
+            key={t}
+            onClick={() => setTab(t)}
+            className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${
+              tab === t
+                ? 'border-blue-600 text-blue-600'
+                : 'border-transparent text-gray-500 hover:text-gray-700'
+            }`}
+          >
+            {t === 'rankings' ? 'Rankings' : "Today's Picks"}
+            {t === 'picks' && picks.length > 0 && (
+              <span className="ml-1.5 px-1.5 py-0.5 rounded-full text-xs bg-blue-100 text-blue-700">
+                {picks.reduce((n, c) => n + c.picks.length, 0)}
+              </span>
+            )}
+          </button>
+        ))}
+      </div>
+
+      {tab === 'rankings' && (
+        <div className="bg-white rounded-lg shadow overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead className="bg-gray-50 border-b">
               <tr>
-                <td colSpan={7} className="px-4 py-8 text-center text-gray-400">
-                  No combinations available yet.
-                </td>
+                <th className="px-4 py-3 text-left font-medium text-gray-600">Rank</th>
+                <th className="px-4 py-3 text-left font-medium text-gray-600">Strategies</th>
+                <th className="px-4 py-3 text-right font-medium text-gray-600">OOS CAGR</th>
+                <th className="px-4 py-3 text-right font-medium text-gray-600">Max DD</th>
+                <th className="px-4 py-3 text-right font-medium text-gray-600">Sharpe</th>
+                <th className="px-4 py-3 text-right font-medium text-gray-600">Win Rate</th>
+                <th className="px-4 py-3 text-left font-medium text-gray-600">Reliability</th>
               </tr>
-            ) : (
-              rankings.map((combo, idx) => (
-                <tr key={combo.combination_id} className="border-t hover:bg-gray-50">
-                  <td className="px-4 py-3 text-gray-500">{idx + 1}</td>
-                  <td className="px-4 py-3 font-medium">{combo.strategies?.join(' + ') ?? combo.name}</td>
-                  <td className="px-4 py-3 text-right">{combo.oos_cagr != null ? `${combo.oos_cagr.toFixed(1)}%` : '—'}</td>
-                  <td className="px-4 py-3 text-right">{combo.oos_max_drawdown != null ? `${combo.oos_max_drawdown.toFixed(1)}%` : '—'}</td>
-                  <td className="px-4 py-3 text-right">{combo.oos_sharpe != null ? combo.oos_sharpe.toFixed(2) : '—'}</td>
-                  <td className="px-4 py-3 text-right">{combo.oos_win_rate != null ? `${(combo.oos_win_rate * 100).toFixed(0)}%` : '—'}</td>
-                  <td className="px-4 py-3">
-                    <ReliabilityBadge label={combo.reliability_label} />
+            </thead>
+            <tbody>
+              {rankings.length === 0 ? (
+                <tr>
+                  <td colSpan={7} className="px-4 py-8 text-center text-gray-400">
+                    No combinations available yet.
                   </td>
                 </tr>
-              ))
-            )}
-          </tbody>
-        </table>
-      </div>
+              ) : (
+                rankings.map((combo, idx) => (
+                  <tr key={combo.combination_id} className="border-t hover:bg-gray-50">
+                    <td className="px-4 py-3 text-gray-500">{idx + 1}</td>
+                    <td className="px-4 py-3 font-medium">{combo.strategies?.join(' + ') ?? combo.name}</td>
+                    <td className="px-4 py-3 text-right">{combo.oos_cagr != null ? `${combo.oos_cagr.toFixed(1)}%` : '—'}</td>
+                    <td className="px-4 py-3 text-right">{combo.oos_max_drawdown != null ? `${combo.oos_max_drawdown.toFixed(1)}%` : '—'}</td>
+                    <td className="px-4 py-3 text-right">{combo.oos_sharpe != null ? combo.oos_sharpe.toFixed(2) : '—'}</td>
+                    <td className="px-4 py-3 text-right">{combo.oos_win_rate != null ? `${(combo.oos_win_rate * 100).toFixed(0)}%` : '—'}</td>
+                    <td className="px-4 py-3">
+                      <ReliabilityBadge label={combo.reliability_label} />
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {tab === 'picks' && (
+        <ComboPicksTab picks={picks} isLoading={picksLoading} />
+      )}
     </div>
   )
 }
@@ -259,5 +297,71 @@ function ReliabilityBadge({ label }: { label: string | null | undefined }) {
     <span className={`inline-block px-2 py-0.5 rounded text-xs font-medium ${color}`}>
       {label}
     </span>
+  )
+}
+
+function ComboPicksTab({ picks, isLoading }: { picks: ComboRecommendation[]; isLoading: boolean }) {
+  if (isLoading) return <p className="text-gray-400 py-4">Loading today's picks…</p>
+  if (picks.length === 0) {
+    return (
+      <p className="text-gray-500 py-6 text-sm">
+        No validated combos are firing today — all strategies in a combo must signal BUY on the same stock simultaneously.
+      </p>
+    )
+  }
+
+  return (
+    <div className="space-y-6">
+      {picks.map((combo) => (
+        <div key={combo.combo_id} className="bg-white rounded-lg shadow overflow-hidden">
+          <div className="flex items-center gap-3 px-4 py-3 bg-gray-50 border-b">
+            <span className="font-semibold text-gray-800">{combo.combo_name}</span>
+            <span className="text-xs text-gray-500">{combo.strategies.join(' + ')}</span>
+            <ReliabilityBadge label={combo.reliability_label} />
+            {combo.reliability_score != null && (
+              <span className="text-xs text-gray-400 ml-auto">
+                Reliability: {combo.reliability_score.toFixed(0)}
+              </span>
+            )}
+          </div>
+          <table className="w-full text-sm">
+            <thead className="bg-white border-b text-gray-500 text-xs">
+              <tr>
+                <th className="px-4 py-2 text-left">Symbol</th>
+                <th className="px-4 py-2 text-left">Sector</th>
+                <th className="px-4 py-2 text-right">Price</th>
+                <th className="px-4 py-2 text-right">Avg Confidence</th>
+              </tr>
+            </thead>
+            <tbody>
+              {combo.picks.map((pick) => (
+                <tr key={pick.symbol} className="border-t hover:bg-gray-50">
+                  <td className="px-4 py-2 font-medium">{pick.symbol}</td>
+                  <td className="px-4 py-2 text-gray-500 text-xs">{pick.sector ?? '—'}</td>
+                  <td className="px-4 py-2 text-right">{pick.price != null ? inr(pick.price) : '—'}</td>
+                  <td className="px-4 py-2 text-right">
+                    <ConfidenceBar value={pick.avg_confidence} />
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function ConfidenceBar({ value }: { value: number | null }) {
+  if (value == null) return <span className="text-gray-400">—</span>
+  const pct = Math.round(value * 100)
+  const color = pct >= 70 ? 'bg-emerald-400' : pct >= 50 ? 'bg-blue-400' : 'bg-amber-300'
+  return (
+    <div className="flex items-center gap-1.5 justify-end">
+      <div className="w-16 h-1.5 bg-gray-100 rounded-full overflow-hidden">
+        <div className={`h-full ${color} rounded-full`} style={{ width: `${pct}%` }} />
+      </div>
+      <span className="text-xs text-gray-500 w-8 text-right">{pct}%</span>
+    </div>
   )
 }

@@ -119,3 +119,24 @@ export interface SignalExplanation {
 
 export const getSignalExplanation = (signalId: number) =>
   apiFetch<SignalExplanation>(`/signals/${signalId}/explanation`)
+
+// ── Combo recommendations ────────────────────────────────────────────────────
+
+export interface ComboPick {
+  symbol: string
+  sector: string | null
+  price: number | null
+  avg_confidence: number | null
+}
+
+export interface ComboRecommendation {
+  combo_id: number
+  combo_name: string
+  strategies: string[]
+  reliability_score: number | null
+  reliability_label: string | null
+  picks: ComboPick[]
+}
+
+export const getComboRecommendations = () =>
+  apiFetch<ComboRecommendation[]>('/intelligence/combo-recommendations')

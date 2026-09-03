@@ -423,6 +423,102 @@ def get_top_opportunities(
     return results[:limit]
 
 
+# ── Combo recommendations (live stocks firing validated combos today) ─────────
+
+@router.get("/intelligence/combo-recommendations")
+def get_combo_recommendations(db: Session = Depends(get_db)):
+    """
+    Stocks where ALL strategies in a validated combination are signalling BUY today.
+    Returns combos grouped by combo, sorted by reliability DESC.
+    Only combos with at least one matching stock are included.
+    """
+    today = ist_today()
+
+    # Today's BUY signals: (symbol, strategy_name) → (price, confidence)
+    sig_rows = db.execute(text("""
+        SELECT ss.symbol, s.name AS strategy_name,
+               ss.price_at_signal, ss.confidence_score
+        FROM strategy_signals ss
+        JOIN strategies s ON s.id = ss.strategy_id
+        WHERE ss.signal_date = :today AND ss.signal_type = 'BUY'
+    """), {"today": str(today)}).fetchall()
+
+    if not sig_rows:
+        return []
+
+    # Map (symbol, strategy_name) → {price, confidence}
+    signal_map: dict[tuple[str, str], dict] = {}
+    for row in sig_rows:
+        signal_map[(row[0], row[1])] = {
+            "price": row[2],
+            "confidence": float(row[3]) if row[3] is not None else 0.5,
+        }
+    active_signals: set[tuple[str, str]] = set(signal_map.keys())
+
+    # Load validated combos from the most recent completed run
+    try:
+        combo_rows = db.execute(text("""
+            SELECT sc.id, sc.name, sc.strategy_names,
+                   cr.reliability_score, cr.reliability_label
+            FROM combination_results cr
+            JOIN strategy_combinations sc ON sc.id = cr.combination_id
+            JOIN combination_run_log rl ON rl.id = cr.run_id
+            WHERE rl.id = (SELECT MAX(id) FROM combination_run_log WHERE status = 'complete')
+              AND cr.reliability_label IN ('Strong evidence', 'Moderate evidence')
+            ORDER BY cr.reliability_score DESC
+        """)).fetchall()
+    except Exception:
+        logger.warning("[combo-recommendations] combo query failed", exc_info=True)
+        return []
+
+    results = []
+    for cr in combo_rows:
+        try:
+            strategies = json.loads(cr[2])
+        except Exception:
+            continue
+        if len(strategies) < 2:
+            continue
+
+        # Find symbols where every strategy in this combo fired BUY today
+        # Candidates: symbols that appear for the first strategy
+        first_strat = strategies[0]
+        candidates = {sym for (sym, sname) in active_signals if sname == first_strat}
+        for strat in strategies[1:]:
+            candidates &= {sym for (sym, sname) in active_signals if sname == strat}
+
+        if not candidates:
+            continue
+
+        picks = []
+        for sym in sorted(candidates):
+            confidences = [
+                signal_map[(sym, s)]["confidence"]
+                for s in strategies
+                if (sym, s) in signal_map
+            ]
+            price = signal_map.get((sym, strategies[0]), {}).get("price")
+            sector = SYMBOL_TO_SECTOR.get(sym)
+            picks.append({
+                "symbol": sym,
+                "sector": sector,
+                "price": price,
+                "avg_confidence": round(sum(confidences) / len(confidences), 4) if confidences else None,
+            })
+
+        picks.sort(key=lambda x: x["avg_confidence"] or 0, reverse=True)
+        results.append({
+            "combo_id": cr[0],
+            "combo_name": cr[1],
+            "strategies": strategies,
+            "reliability_score": float(cr[3]) if cr[3] is not None else None,
+            "reliability_label": cr[4],
+            "picks": picks,
+        })
+
+    return results
+
+
 # ── Regime backfill trigger ───────────────────────────────────────────────────
 
 @router.post("/intelligence/regime-backfill")
