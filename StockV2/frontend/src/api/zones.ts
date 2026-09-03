@@ -39,6 +39,7 @@ export interface ZoneResult {
   price: number
   position_tag: string
   computed_at?: string
+  computed_date?: string
   long_setup_score?: number
   short_setup_score?: number
 }
@@ -90,7 +91,7 @@ export interface ZoneBand {
 export interface ChartSetupLines {
   entry: number
   stop_loss: number
-  target: number
+  target: number | null
 }
 
 export interface ChartDataResponse {
