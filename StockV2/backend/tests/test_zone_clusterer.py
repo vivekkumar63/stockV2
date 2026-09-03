@@ -65,3 +65,32 @@ def test_zone_padding():
     zone = ZoneClusterer().cluster(levels, atr)[0]
     assert zone.low == pytest.approx(1000.0 - 0.1 * atr)
     assert zone.high == pytest.approx(1000.0 + 0.1 * atr)
+
+
+def test_freshness_tested():
+    """4 levels merging → touch_count = 3 → 'tested'."""
+    levels = [
+        _level(1000.0, "demand"),
+        _level(1002.0, "demand"),
+        _level(1004.0, "demand"),
+        _level(1006.0, "demand"),
+    ]
+    atr = 20.0  # threshold = 10; all gaps are 2 < 10, so all merge
+    zone = ZoneClusterer().cluster(levels, atr)[0]
+    assert zone.touch_count == 3
+    assert zone.freshness == "tested"
+
+
+def test_freshness_weakened():
+    """5 levels merging → touch_count = 4 → 'weakened'."""
+    levels = [
+        _level(1000.0, "demand"),
+        _level(1002.0, "demand"),
+        _level(1004.0, "demand"),
+        _level(1006.0, "demand"),
+        _level(1008.0, "demand"),
+    ]
+    atr = 20.0  # all merge (gaps of 2 < 10)
+    zone = ZoneClusterer().cluster(levels, atr)[0]
+    assert zone.touch_count == 4
+    assert zone.freshness == "weakened"
