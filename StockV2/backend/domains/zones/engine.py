@@ -13,6 +13,7 @@ from .clusterer import ZoneClusterer
 from .detectors import (
     FibonacciDetector, MADetector, MomentumDetector,
     PriceStructureDetector, VolatilityDetector, VolumeDetector,
+    VWAPZoneDetector,
 )
 from .entry_engine import EntryEngine
 from .models import Zone, ZoneLevel, ZoneResult
@@ -146,6 +147,13 @@ class ZoneEngine:
 
         # Cluster
         all_zones = ZoneClusterer().cluster(levels, atr)
+
+        # VWAP zones from intraday data (optional — skipped if data unavailable)
+        try:
+            vwap_zones = VWAPZoneDetector().detect(symbol, db, atr=atr, current_price=price)
+            all_zones.extend(vwap_zones)
+        except Exception:
+            pass  # intraday data may be unavailable; never block daily analysis
 
         # Score (ZoneScorer.score() returns new Zone copies; single instance is stateless)
         scorer = ZoneScorer()

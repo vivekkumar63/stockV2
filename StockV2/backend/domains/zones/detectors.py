@@ -2,7 +2,7 @@ from __future__ import annotations
 import math
 import numpy as np
 import pandas as pd
-from .models import ZoneLevel
+from .models import Zone, ZoneLevel
 
 
 class PriceStructureDetector:
@@ -292,3 +292,60 @@ class FibonacciDetector:
             ))
 
         return levels
+
+
+class VWAPZoneDetector:
+    """Intraday VWAP from 5-min bars → one demand or supply zone at current VWAP level."""
+
+    def detect(
+        self,
+        symbol: str,
+        db,           # Session — typed loosely to avoid circular import in tests
+        *,
+        atr: float,
+        current_price: float | None = None,
+    ) -> list[Zone]:
+        from sqlalchemy import text as _text
+
+        rows = db.execute(_text("""
+            SELECT datetime, high, low, close, volume
+            FROM intraday_prices_5m
+            WHERE symbol = :s AND datetime::date = CURRENT_DATE
+            ORDER BY datetime ASC
+        """), {"s": symbol}).fetchall()
+
+        if len(rows) < 6:
+            return []
+
+        highs   = [float(r[1]) for r in rows]
+        lows    = [float(r[2]) for r in rows]
+        closes  = [float(r[3]) for r in rows]
+        volumes = [max(float(r[4]), 1.0) for r in rows]
+
+        typical = [(h + l + c) / 3.0 for h, l, c in zip(highs, lows, closes)]
+        cum_tv  = 0.0
+        cum_v   = 0.0
+        for tp, v in zip(typical, volumes):
+            cum_tv += tp * v
+            cum_v  += v
+        vwap = cum_tv / cum_v
+
+        band_low  = vwap - 0.3 * atr
+        band_high = vwap + 0.3 * atr
+
+        price = current_price if current_price is not None else closes[-1]
+        zone_type = "demand" if price > vwap else "supply"
+
+        return [Zone(
+            low=band_low,
+            high=band_high,
+            zone_type=zone_type,
+            source_tags=["vwap"],
+            touch_count=0,
+            last_reaction_pct=0.0,
+            freshness="fresh",
+            volume_at_zone=1.0,
+            bar_index=len(rows) - 1,
+            strength_hint=0.6,
+            source="vwap",
+        )]
