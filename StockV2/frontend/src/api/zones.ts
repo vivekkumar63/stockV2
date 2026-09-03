@@ -38,6 +38,7 @@ export interface ZoneResult {
   rvol: number
   price: number
   position_tag: string
+  candle_signal?: string
   computed_at?: string
   computed_date?: string
   long_setup_score?: number
@@ -139,11 +140,12 @@ export const analyzeZones = (symbol: string) =>
 export const getZoneResult = (symbol: string) =>
   apiFetch<ZoneResult>(`/zones/results/${symbol.toUpperCase()}`)
 
-export const getZoneRankings = (params?: { sort_by?: string; tag_filter?: string; limit?: number }) => {
+export const getZoneRankings = (params?: { sort_by?: string; tag_filter?: string; limit?: number; min_rr?: number }) => {
   const qs = new URLSearchParams()
   if (params?.sort_by)    qs.set('sort_by',    params.sort_by)
-  if (params?.tag_filter) qs.set('tag_filter', params.tag_filter)  // was 'filter' — fixed
+  if (params?.tag_filter) qs.set('tag_filter', params.tag_filter)
   if (params?.limit)      qs.set('limit',      String(params.limit))
+  if (params?.min_rr)     qs.set('min_rr',     String(params.min_rr))
   const q = qs.toString()
   return apiFetch<ZoneRankRow[]>(`/zones/rankings${q ? '?' + q : ''}`)
 }
@@ -168,3 +170,41 @@ export const getBacktestResults = (symbol: string) =>
 
 export const getBacktestTrades = (resultId: number) =>
   apiFetch<BacktestTrade[]>(`/zones/backtest/trades/${resultId}`)
+
+export const getBacktestSymbols = () =>
+  apiFetch<{ symbols: string[] }>('/zones/backtest/symbols')
+
+export const runBacktestAll = (from_date: string, to_date: string) =>
+  apiFetch<{ status: string; symbol_count?: number }>(
+    `/zones/backtest/run-all?from_date=${from_date}&to_date=${to_date}`,
+    { method: 'POST' },
+  )
+
+export const getBacktestAllStatus = () =>
+  apiFetch<{ running: boolean; done: number; total: number; errors: number; finished: boolean }>(
+    '/zones/backtest/run-all/status',
+  )
+
+export const getAllBacktestResults = () =>
+  apiFetch<BacktestResult[]>('/zones/backtest/all-results')
+
+// ── Breakout scanner ──────────────────────────────────────────────────────────
+
+export interface BreakoutSignal {
+  symbol: string
+  current_price: number
+  resistance: number
+  breakout_pct: number
+  volume_ratio: number
+  rsi: number
+  conviction_score: number
+  signals_met: string[]
+  signals_failed: string[]
+  zone_score: number | null
+  market_structure: string
+  candle_signal: string
+  trendline_resistance: number | null
+}
+
+export const scanBreakouts = () =>
+  apiFetch<BreakoutSignal[]>('/zones/breakout/scan')

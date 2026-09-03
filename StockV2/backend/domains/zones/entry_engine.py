@@ -105,14 +105,18 @@ class EntryEngine:
         rr_pts    = min(30, int(max(0.0, min(best_rr, 5.0)) / 5.0 * 30))
         trend_pts = 20 if trend == "bullish" else 10 if trend == "sideways" else 0
         rsi_pts   = min(10, int(max(0.0, (50 - rsi)) / 50.0 * 10)) if rsi < 50 else 0
-        return min(100, zone_pts + rr_pts + trend_pts + rsi_pts)
+        raw = min(100, zone_pts + rr_pts + trend_pts + rsi_pts)
+        # Counter-trend longs capped at 50 to prevent over-scoring against trend
+        return min(50, raw) if trend == "bearish" else raw
 
     def _short_score(self, zone: Zone, best_rr: float, trend: str, rsi: float) -> int:
         zone_pts  = int(zone.score * 0.4)
         rr_pts    = min(30, int(max(0.0, min(best_rr, 5.0)) / 5.0 * 30))
         trend_pts = 20 if trend == "bearish" else 10 if trend == "sideways" else 0
         rsi_pts   = min(10, int(max(0.0, (rsi - 50)) / 50.0 * 10)) if rsi > 50 else 0
-        return min(100, zone_pts + rr_pts + trend_pts + rsi_pts)
+        raw = min(100, zone_pts + rr_pts + trend_pts + rsi_pts)
+        # Counter-trend shorts capped at 50 to prevent over-scoring against trend
+        return min(50, raw) if trend == "bullish" else raw
 
     def _long_explanation(self, zone: Zone, entry: float, sl: float,
                            t1: float, rr: float, t2: float, atr: float) -> str:

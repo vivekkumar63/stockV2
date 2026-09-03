@@ -13,11 +13,17 @@ from database import get_db, SessionLocal
 from .engine import ZoneEngine, zone_to_dict, setup_to_dict
 from .precompute import ZonePrecomputer, get_precompute_state
 from .backtester import ZoneBacktester
+from .breakout_scanner import BreakoutScanner
+from domains.data.nse_universe import NSE_SYMBOLS
 
 router = APIRouter(tags=["zones"])
 logger = logging.getLogger(__name__)
 
 _recompute_lock = threading.Lock()
+
+# ── All-stocks backtest state ─────────────────────────────────────────────────
+_bt_all_lock    = threading.Lock()
+_bt_all_state: dict = {"running": False, "done": 0, "total": 0, "errors": 0, "finished": False}
 
 
 def _serialize_result(r) -> dict:
@@ -32,6 +38,7 @@ def _serialize_result(r) -> dict:
         "rvol":             r.rvol,
         "price":            r.price,
         "position_tag":     r.position_tag,
+        "candle_signal":    r.candle_signal,
     }
 
 
@@ -73,6 +80,7 @@ def get_stored_result(symbol: str, db: Session = Depends(get_db)):
     result["best_demand_score"]= row[8]
     result["best_supply_score"]= row[9]
     result["computed_at"]      = str(row[10])
+    result.setdefault("candle_signal", "NONE")  # populated for newly analyzed results
     return result
 
 
@@ -97,6 +105,7 @@ def get_rankings(
     sort_by: str    = Query("long_score"),
     tag_filter: str = Query(None),
     limit: int      = Query(200, ge=1, le=500),
+    min_rr: float   = Query(None, ge=0.5, le=10.0),
     db: Session     = Depends(get_db),
 ):
     """All stocks with today's pre-computed results, sorted and optionally filtered."""
@@ -117,6 +126,10 @@ def get_rankings(
     elif tag_filter in _FILTER_TAGS:
         where += " AND position_tag = :pt"
         params["pt"] = tag_filter
+
+    if min_rr is not None:
+        where += " AND (best_long_rr >= :min_rr OR best_short_rr >= :min_rr)"
+        params["min_rr"] = min_rr
 
     rows = db.execute(
         text(f"""
@@ -384,3 +397,130 @@ def get_backtest_trades(result_id: int, db: Session = Depends(get_db)):
         }
         for r in rows
     ]
+
+
+# ── All-stocks backtest ───────────────────────────────────────────────────────
+
+@router.get("/zones/backtest/symbols")
+def get_backtest_symbols():
+    """Return the full NSE universe symbol list for the combo box."""
+    return {"symbols": NSE_SYMBOLS}
+
+
+def _run_bt_all_bg(from_date: date, to_date: date) -> None:
+    global _bt_all_state
+    symbols = list(NSE_SYMBOLS)
+    with _bt_all_lock:
+        _bt_all_state = {"running": True, "done": 0, "total": len(symbols),
+                         "errors": 0, "finished": False}
+
+    backtester = ZoneBacktester()
+    for sym in symbols:
+        db = SessionLocal()
+        try:
+            trades = backtester.run(sym, from_date, to_date, db)
+            total = len(trades)
+            wins  = sum(1 for t in trades if t.pnl_pct > 0)
+            win_rate  = round(wins / total * 100, 1) if total else None
+            total_pnl = round(sum(t.pnl_pct for t in trades), 2)
+            avg_hold  = round(sum(t.hold_days for t in trades) / total, 1) if total else None
+
+            db.execute(
+                text("""
+                    INSERT INTO zone_backtest_results
+                        (symbol, from_date, to_date, total_trades, win_rate, total_pnl_pct, avg_hold_days)
+                    VALUES (:sym, :fd, :td, :tt, :wr, :tp, :ah)
+                """),
+                {"sym": sym, "fd": from_date, "td": to_date, "tt": total,
+                 "wr": win_rate, "tp": total_pnl, "ah": avg_hold},
+            )
+            if trades:
+                result_id = db.execute(
+                    text("SELECT id FROM zone_backtest_results WHERE symbol=:s AND from_date=:fd AND to_date=:td ORDER BY ran_at DESC LIMIT 1"),
+                    {"s": sym, "fd": from_date, "td": to_date},
+                ).scalar()
+                if result_id:
+                    db.execute(
+                        text("""
+                            INSERT INTO zone_backtest_trades
+                                (result_id, entry_date, entry_price, exit_date, exit_price,
+                                 pnl_pct, exit_reason, hold_days)
+                            VALUES (:rid, :ed, :ep, :xd, :xp, :pp, :er, :hd)
+                        """),
+                        [{"rid": result_id, "ed": t.entry_date, "ep": t.entry_price,
+                          "xd": t.exit_date, "xp": t.exit_price, "pp": t.pnl_pct,
+                          "er": t.exit_reason, "hd": t.hold_days}
+                         for t in trades],
+                    )
+            db.commit()
+        except Exception:
+            db.rollback()
+            logger.exception("[bt-all] failed for %s", sym)
+            with _bt_all_lock:
+                _bt_all_state["errors"] += 1
+        finally:
+            db.close()
+        with _bt_all_lock:
+            _bt_all_state["done"] += 1
+
+    with _bt_all_lock:
+        _bt_all_state["running"]  = False
+        _bt_all_state["finished"] = True
+    logger.info("[bt-all] complete: %d/%d symbols, %d errors",
+                _bt_all_state["done"], _bt_all_state["total"], _bt_all_state["errors"])
+
+
+@router.post("/zones/backtest/run-all")
+def run_backtest_all(from_date: str, to_date: str):
+    """Start a background backtest run for all NSE symbols."""
+    global _bt_all_state
+    with _bt_all_lock:
+        if _bt_all_state.get("running"):
+            return {"status": "already_running", **_bt_all_state}
+    try:
+        fd = date.fromisoformat(from_date)
+        td = date.fromisoformat(to_date)
+    except ValueError:
+        raise HTTPException(status_code=422, detail="Dates must be YYYY-MM-DD")
+
+    threading.Thread(
+        target=_run_bt_all_bg, args=(fd, td), daemon=True, name="zone-bt-all"
+    ).start()
+    return {"status": "started", "symbol_count": len(NSE_SYMBOLS)}
+
+
+@router.get("/zones/backtest/run-all/status")
+def get_backtest_all_status():
+    with _bt_all_lock:
+        return dict(_bt_all_state)
+
+
+@router.get("/zones/backtest/all-results")
+def get_all_backtest_results(db: Session = Depends(get_db)):
+    """Return the most recent backtest result per symbol, sorted by total_pnl_pct desc."""
+    rows = db.execute(text("""
+        SELECT DISTINCT ON (symbol)
+            id, symbol, from_date, to_date, total_trades, win_rate, total_pnl_pct, avg_hold_days, ran_at
+        FROM zone_backtest_results
+        ORDER BY symbol, ran_at DESC
+    """)).fetchall()
+    results = [
+        {
+            "id":            r[0], "symbol": r[1],
+            "from_date":     str(r[2]), "to_date": str(r[3]),
+            "total_trades":  r[4], "win_rate": r[5],
+            "total_pnl_pct": r[6], "avg_hold_days": r[7],
+            "ran_at":        str(r[8]),
+        }
+        for r in rows
+    ]
+    results.sort(key=lambda x: x["total_pnl_pct"] or 0, reverse=True)
+    return results
+
+
+# ── Breakout scanner ──────────────────────────────────────────────────────────
+
+@router.get("/zones/breakout/scan")
+def scan_breakouts(db: Session = Depends(get_db)):
+    """Scan today's precomputed zone data for breakout signals with conviction scoring."""
+    return BreakoutScanner().scan(db)

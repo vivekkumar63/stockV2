@@ -571,6 +571,28 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning("zone phase B tables migration skipped: %s", e)
 
+    # Zone intraday price alerts deduplication table
+    try:
+        with engine.connect() as _conn:
+            _conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS zone_price_alerts_sent (
+                    id             SERIAL PRIMARY KEY,
+                    symbol         VARCHAR(20) NOT NULL,
+                    direction      VARCHAR(5)  NOT NULL,
+                    alert_date     DATE        NOT NULL,
+                    price_at_alert REAL,
+                    alerted_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(symbol, direction, alert_date)
+                )
+            """))
+            _conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS idx_zpas ON zone_price_alerts_sent (alert_date)"
+            ))
+            _conn.commit()
+        logger.info("zone_price_alerts_sent table verified")
+    except Exception as e:
+        logger.warning("zone_price_alerts_sent migration skipped: %s", e)
+
     # Schema upgrade: add new indicator columns to existing stock_indicators_daily tables
     _new_indicator_cols = [
         "ema_50",

@@ -26,6 +26,10 @@ class JobIds:
     SECTOR_ROTATION = "sector_rotation_daily"
     EARNINGS_REFRESH = "earnings_calendar_refresh"
     INTRADAY_VWAP_FETCH = "intraday_vwap_fetch"
+    ZONE_ALERT_0930 = "zone_alert_0930"
+    ZONE_ALERT_1130 = "zone_alert_1130"
+    ZONE_ALERT_1330 = "zone_alert_1330"
+    ZONE_ALERT_1515 = "zone_alert_1515"
 
 
 _IST = "Asia/Kolkata"
@@ -517,6 +521,22 @@ def _sector_rotation_daily():
         db.close()
 
 
+def _zone_price_alert():
+    """Intraday zone price alert: check if any stock's live price has entered a pre-computed
+    entry zone. Fires a Telegram alert with chart image + multi-signal confluence summary
+    when >= 5/8 signals align. Runs 4× per trading day."""
+    from database import SessionLocal
+    from domains.zones.alert_scanner import ZoneAlertScanner
+    db = SessionLocal()
+    try:
+        n = ZoneAlertScanner().scan_and_alert(db)
+        logger.info("[zone_alert] scan complete — %d alert(s) sent", n)
+    except Exception:
+        logger.exception("[zone_alert] failed")
+    finally:
+        db.close()
+
+
 def _intraday_vwap_fetch():
     """Fetch 5-min intraday bars for all active symbols at 09:20 IST for VWAP zone computation."""
     from database import SessionLocal
@@ -656,4 +676,18 @@ def register_jobs():
         id=JobIds.INTRADAY_VWAP_FETCH,
         replace_existing=True,
     )
+    # Zone price alerts: 4× per trading day — check if live price enters a zone entry
+    for job_id, hour, minute in [
+        (JobIds.ZONE_ALERT_0930,  9, 30),   # 30 min after open — prices have settled
+        (JobIds.ZONE_ALERT_1130, 11, 30),   # mid-morning
+        (JobIds.ZONE_ALERT_1330, 13, 30),   # post-lunch
+        (JobIds.ZONE_ALERT_1515, 15, 15),   # pre-close (same time as digest)
+    ]:
+        scheduler.add_job(
+            _zone_price_alert,
+            CronTrigger(hour=hour, minute=minute, day_of_week="mon-fri", timezone=_IST),
+            id=job_id,
+            replace_existing=True,
+        )
+
     logger.info("APScheduler jobs registered: %s", [j.id for j in scheduler.get_jobs()])

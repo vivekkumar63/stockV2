@@ -1,4 +1,5 @@
 from __future__ import annotations
+import dataclasses
 import json
 import logging
 import math
@@ -11,9 +12,10 @@ from sqlalchemy.orm import Session
 from domains.data.indicators import IndicatorEngine
 from .clusterer import ZoneClusterer
 from .detectors import (
-    FibonacciDetector, MADetector, MomentumDetector,
-    PivotPointDetector, PriceStructureDetector,
-    VolatilityDetector, VolumeDetector, VWAPZoneDetector, Week52Detector,
+    CandlestickDetector, FibonacciDetector, MADetector, MomentumDetector,
+    PivotPointDetector, PrevHighLowDetector, PriceStructureDetector,
+    TrendlineDetector, VolatilityDetector, VolumeDetector, VWAPZoneDetector,
+    Week52Detector,
 )
 from .entry_engine import EntryEngine
 from .models import Zone, ZoneLevel, ZoneResult
@@ -30,6 +32,9 @@ _DETECTORS = [
     FibonacciDetector(),
     PivotPointDetector(),
     Week52Detector(),
+    CandlestickDetector(),
+    PrevHighLowDetector(),
+    TrendlineDetector(),
 ]
 
 
@@ -54,15 +59,70 @@ def _load_prices(db: Session, symbol: str) -> pd.DataFrame:
 
 
 def _market_structure(df: pd.DataFrame) -> str:
-    if "ema_50" not in df.columns or len(df) < 10:
+    """Multi-signal market structure: EMA-50 position, SMA-200 position,
+    EMA-50 slope, and HH/LL price structure. Majority vote from available signals."""
+    if len(df) < 10:
         return "sideways"
+
+    signals: list[int] = []  # +1 bullish, -1 bearish, 0 neutral
     close = float(df["close"].iloc[-1])
-    ema50 = float(df["ema_50"].iloc[-1])
-    if not math.isfinite(ema50):
+
+    # Signal 1: price vs EMA-50 with ±2% buffer
+    if "ema_50" in df.columns:
+        ema50 = float(df["ema_50"].iloc[-1])
+        if math.isfinite(ema50) and ema50 > 0:
+            if close > ema50 * 1.02:
+                signals.append(1)
+            elif close < ema50 * 0.98:
+                signals.append(-1)
+            else:
+                signals.append(0)
+
+    # Signal 2: price vs SMA-200
+    if "sma_200" in df.columns and len(df) >= 200:
+        sma200 = float(df["sma_200"].iloc[-1])
+        if math.isfinite(sma200) and sma200 > 0:
+            signals.append(1 if close > sma200 else -1 if close < sma200 else 0)
+
+    # Signal 3: EMA-50 slope over last 10 bars (>1% rise/fall = trending)
+    if "ema_50" in df.columns and len(df) >= 15:
+        ema_now  = float(df["ema_50"].iloc[-1])
+        ema_prev = float(df["ema_50"].iloc[-10])
+        if math.isfinite(ema_now) and math.isfinite(ema_prev) and ema_prev > 0:
+            slope_pct = (ema_now - ema_prev) / ema_prev * 100
+            if slope_pct > 1.0:
+                signals.append(1)
+            elif slope_pct < -1.0:
+                signals.append(-1)
+            else:
+                signals.append(0)
+
+    # Signal 4: higher-highs / lower-lows structure over last 20 bars
+    if len(df) >= 20 and "high" in df.columns and "low" in df.columns:
+        h_arr = df["high"].to_numpy()[-20:]
+        l_arr = df["low"].to_numpy()[-20:]
+        q = 5  # four groups of 5 bars
+        h_g = [h_arr[i * q:(i + 1) * q].max() for i in range(4)]
+        l_g = [l_arr[i * q:(i + 1) * q].min() for i in range(4)]
+        hh = all(h_g[i] > h_g[i - 1] for i in range(1, 4))
+        hl = all(l_g[i] > l_g[i - 1] for i in range(1, 4))
+        lh = all(h_g[i] < h_g[i - 1] for i in range(1, 4))
+        ll = all(l_g[i] < l_g[i - 1] for i in range(1, 4))
+        if hh and hl:
+            signals.append(1)
+        elif ll and lh:
+            signals.append(-1)
+        else:
+            signals.append(0)
+
+    if not signals:
         return "sideways"
-    if close > ema50 * 1.02:
+
+    vote = sum(signals)
+    threshold = max(2, len(signals) // 2)  # need majority
+    if vote >= threshold:
         return "bullish"
-    if close < ema50 * 0.98:
+    if vote <= -threshold:
         return "bearish"
     return "sideways"
 
@@ -94,6 +154,36 @@ def _position_tag(price: float, demand_zones: list[Zone], supply_zones: list[Zon
             if nearest_supply - price <= 1.5 * atr:
                 return "near_supply"
     return "neutral"
+
+
+def _detect_candle_signal(df: pd.DataFrame) -> str:
+    """Return the last bar's candlestick pattern name, or 'NONE'."""
+    if len(df) < 2:
+        return "NONE"
+    curr = df.iloc[-1]
+    prev = df.iloc[-2]
+    o, h, l, c = float(curr["open"]), float(curr["high"]), float(curr["low"]), float(curr["close"])
+    po, pc = float(prev["open"]), float(prev["close"])
+    if not all(math.isfinite(v) for v in (o, h, l, c, po, pc)):
+        return "NONE"
+    rng = h - l
+    if rng <= 0:
+        return "NONE"
+    body = abs(c - o)
+    upper_wick = h - max(o, c)
+    lower_wick = min(o, c) - l
+
+    if body / rng < 0.1:
+        return "doji"
+    if lower_wick >= 2 * body and upper_wick <= 0.3 * body:
+        return "hammer"
+    if upper_wick >= 2 * body and lower_wick <= 0.3 * body:
+        return "shooting_star"
+    if c > o and pc < po and c >= po and o <= pc:
+        return "bullish_engulfing"
+    if c < o and pc > po and c <= po and o >= pc:
+        return "bearish_engulfing"
+    return "NONE"
 
 
 def zone_to_dict(z: Zone) -> dict:
@@ -157,6 +247,22 @@ class ZoneEngine:
         # Cluster
         all_zones = ZoneClusterer().cluster(levels, atr)
 
+        # Mark broken zones: demand broken if close fell below zone.low after formation;
+        # supply broken if close rose above zone.high after formation.
+        close_arr = df_ind["close"].to_numpy()
+        for i, zone in enumerate(all_zones):
+            if zone.bar_index < 0 or zone.freshness == "broken":
+                continue
+            start = zone.bar_index + 1
+            if start >= n:
+                continue
+            if zone.zone_type == "demand":
+                if any(close_arr[j] < zone.low for j in range(start, n)):
+                    all_zones[i] = dataclasses.replace(zone, freshness="broken")
+            else:
+                if any(close_arr[j] > zone.high for j in range(start, n)):
+                    all_zones[i] = dataclasses.replace(zone, freshness="broken")
+
         # VWAP zones from intraday data (optional — skipped if data unavailable)
         try:
             vwap_zones = VWAPZoneDetector().detect(symbol, db, atr=atr, current_price=price)
@@ -195,6 +301,7 @@ class ZoneEngine:
         ) if supply_zones else None
 
         pos_tag = _position_tag(price, demand_zones, supply_zones, atr)
+        candle_signal = _detect_candle_signal(df_ind)
 
         result = ZoneResult(
             symbol=symbol,
@@ -207,6 +314,7 @@ class ZoneEngine:
             rvol=round(rvol if math.isfinite(rvol) else 1.0, 2),
             price=round(price, 2),
             position_tag=pos_tag,
+            candle_signal=candle_signal,
         )
 
         # Upsert to DB
@@ -217,6 +325,7 @@ class ZoneEngine:
             "short_setup":   setup_to_dict(short_setup),
             "market_structure": structure,
             "atr": result.atr, "rvol": result.rvol,
+            "candle_signal": candle_signal,
         }
 
         best_demand = max((z.score for z in demand_zones), default=None)

@@ -32,6 +32,8 @@ class ZoneScorer:
 
     def score(self, zone: Zone, *, atr: float, n_bars: int, price: float) -> Zone:
         """Return a copy of zone with `.score` filled."""
+        if zone.freshness == "broken":
+            return dataclasses.replace(zone, score=0)
         s = 0
 
         # 1. Confirmations (0–30): unique independent source tags

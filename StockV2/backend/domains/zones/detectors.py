@@ -77,6 +77,8 @@ class MADetector:
         low   = df["low"].to_numpy()
         high  = df["high"].to_numpy()
 
+        atr_arr = df["atr_14"].to_numpy() if "atr_14" in df.columns else None
+
         for col, tag in self._MAS:
             if col not in df.columns:
                 continue
@@ -88,17 +90,21 @@ class MADetector:
                 continue
             ma_series = df[col].to_numpy()
 
-            # Count bounces/rejections in last 60 bars
+            # Count bounces/rejections in last 60 bars using ATR-based tolerance
             lookback = min(60, n)
             touches = 0
             for i in range(n - lookback, n):
                 if not math.isfinite(ma_series[i]):
                     continue
-                # Demand bounce: price touched MA from above and bounced
-                if low[i] <= ma_series[i] * 1.01 and close[i] > ma_series[i]:
+                if atr_arr is not None and math.isfinite(atr_arr[i]) and atr_arr[i] > 0:
+                    tol = 0.5 * atr_arr[i]
+                else:
+                    tol = ma_series[i] * 0.01
+                # Demand bounce: low touched MA (within tol) and close recovered above
+                if low[i] <= ma_series[i] + tol and close[i] > ma_series[i]:
                     touches += 1
-                # Supply rejection: price touched MA from below and rejected
-                if high[i] >= ma_series[i] * 0.99 and close[i] < ma_series[i]:
+                # Supply rejection: high touched MA (within tol) and close fell below
+                if high[i] >= ma_series[i] - tol and close[i] < ma_series[i]:
                     touches += 1
 
             if touches < 2:
@@ -408,6 +414,270 @@ class Week52Detector:
                 price=low_52w, zone_type="demand",
                 source_tag="52w_low", strength_hint=0.85, bar_index=n - 1,
             ))
+        return levels
+
+
+class CandlestickDetector:
+    """Classic reversal candlestick patterns → zone levels for the last 30 bars.
+
+    Each pattern emits a ZoneLevel at the bar's close price so the clusterer can
+    merge it with nearby structural or MA zones for confluence.
+    """
+
+    def detect(self, df: pd.DataFrame) -> list[ZoneLevel]:
+        if len(df) < 3:
+            return []
+        levels: list[ZoneLevel] = []
+        n = len(df)
+        lookback = min(30, n - 1)  # leave room for prev-bar access
+
+        open_  = df["open"].to_numpy()
+        high_  = df["high"].to_numpy()
+        low_   = df["low"].to_numpy()
+        close_ = df["close"].to_numpy()
+
+        for i in range(n - lookback, n):
+            o, h, l, c = open_[i], high_[i], low_[i], close_[i]
+            if not (math.isfinite(o) and math.isfinite(h) and math.isfinite(l) and math.isfinite(c)):
+                continue
+            rng = h - l
+            if rng <= 0:
+                continue
+            body = abs(c - o)
+            upper_wick = h - max(o, c)
+            lower_wick = min(o, c) - l
+            body_ratio = body / rng
+
+            # Doji: body < 10% of range → ambiguous; skip if far from S/R
+            if body_ratio < 0.1:
+                levels.append(ZoneLevel(price=float(c), zone_type="demand",
+                                        source_tag="doji", strength_hint=0.3, bar_index=i))
+                continue
+
+            # Hammer (bullish): lower wick ≥ 2× body, upper wick ≤ 30% of body, any color
+            if lower_wick >= 2 * body and upper_wick <= 0.3 * body:
+                levels.append(ZoneLevel(price=float(l), zone_type="demand",
+                                        source_tag="hammer", strength_hint=0.65, bar_index=i))
+                continue
+
+            # Shooting Star (bearish): upper wick ≥ 2× body, lower wick ≤ 30% of body
+            if upper_wick >= 2 * body and lower_wick <= 0.3 * body:
+                levels.append(ZoneLevel(price=float(h), zone_type="supply",
+                                        source_tag="shooting_star", strength_hint=0.65, bar_index=i))
+                continue
+
+            # Engulfing patterns need previous bar
+            if i == 0:
+                continue
+            po, pc = open_[i - 1], close_[i - 1]
+            if not (math.isfinite(po) and math.isfinite(pc)):
+                continue
+
+            # Bullish engulfing: green bar fully engulfs previous red bar
+            if c > o and pc < po and c >= po and o <= pc:
+                levels.append(ZoneLevel(price=float(c), zone_type="demand",
+                                        source_tag="bullish_engulfing", strength_hint=0.70, bar_index=i))
+                continue
+
+            # Bearish engulfing: red bar fully engulfs previous green bar
+            if c < o and pc > po and c <= po and o >= pc:
+                levels.append(ZoneLevel(price=float(c), zone_type="supply",
+                                        source_tag="bearish_engulfing", strength_hint=0.70, bar_index=i))
+
+        return levels
+
+
+class PrevHighLowDetector:
+    """Previous day, week, and month raw H/L as institutional S/R levels.
+
+    These are different from calculated pivot points — they are exact price levels
+    where buyers/sellers actually transacted, making them strong institutional references.
+    """
+
+    def detect(self, df: pd.DataFrame) -> list[ZoneLevel]:
+        if len(df) < 5 or "date" not in df.columns:
+            return []
+        n = len(df)
+
+        df2 = df.copy()
+        df2["_dt"] = pd.to_datetime(df2["date"])
+        df2["_wk"] = df2["_dt"].dt.to_period("W")
+        df2["_mo"] = df2["_dt"].dt.to_period("M")
+
+        levels: list[ZoneLevel] = []
+
+        # Previous day H/L (strength 0.55 — less reliable than weekly/monthly)
+        if n >= 2:
+            pd_row = df.iloc[-2]
+            levels.append(ZoneLevel(price=float(pd_row["high"]), zone_type="supply",
+                                    source_tag="prev_day_high", strength_hint=0.55, bar_index=n - 1))
+            levels.append(ZoneLevel(price=float(pd_row["low"]), zone_type="demand",
+                                    source_tag="prev_day_low", strength_hint=0.55, bar_index=n - 1))
+
+        # Previous week H/L (strength 0.70)
+        cur_wk = df2["_wk"].iloc[-1]
+        prev_wk_df = df2[df2["_wk"] < cur_wk]
+        if not prev_wk_df.empty:
+            last_wk = prev_wk_df[prev_wk_df["_wk"] == prev_wk_df["_wk"].iloc[-1]]
+            wh = float(last_wk["high"].max())
+            wl = float(last_wk["low"].min())
+            levels.append(ZoneLevel(price=wh, zone_type="supply",
+                                    source_tag="prev_week_high", strength_hint=0.70, bar_index=n - 1))
+            levels.append(ZoneLevel(price=wl, zone_type="demand",
+                                    source_tag="prev_week_low", strength_hint=0.70, bar_index=n - 1))
+
+        # Previous month H/L (strength 0.80)
+        cur_mo = df2["_mo"].iloc[-1]
+        prev_mo_df = df2[df2["_mo"] < cur_mo]
+        if not prev_mo_df.empty:
+            last_mo = prev_mo_df[prev_mo_df["_mo"] == prev_mo_df["_mo"].iloc[-1]]
+            mh = float(last_mo["high"].max())
+            ml = float(last_mo["low"].min())
+            levels.append(ZoneLevel(price=mh, zone_type="supply",
+                                    source_tag="prev_month_high", strength_hint=0.80, bar_index=n - 1))
+            levels.append(ZoneLevel(price=ml, zone_type="demand",
+                                    source_tag="prev_month_low", strength_hint=0.80, bar_index=n - 1))
+
+        return levels
+
+
+class TrendlineDetector:
+    """Diagonal trendlines from swing pivot points.
+
+    Detects descending/horizontal resistance (supply) and ascending/horizontal
+    support (demand) trendlines. Emits a ZoneLevel at the current trendline price
+    so the clusterer can merge it with nearby horizontal zones for confluence.
+    """
+
+    PIVOT_WINDOW    = 7    # bars on each side to qualify a pivot
+    LOOKBACK        = 150  # max bars to scan for pivots
+    MIN_PIVOT_GAP   = 10   # min bars between two pivots on the same line
+    MAX_VIOLATIONS  = 1    # max closes on wrong side of line before it's invalidated
+
+    # ── helpers ──────────────────────────────────────────────────────────────
+
+    @staticmethod
+    def _linreg(xs: list, ys: list) -> tuple[float, float]:
+        n = len(xs)
+        sx  = sum(xs);  sy  = sum(ys)
+        sxy = sum(x * y for x, y in zip(xs, ys))
+        sxx = sum(x * x for x in xs)
+        d = n * sxx - sx * sx
+        if abs(d) < 1e-10:
+            return 0.0, sy / n
+        slope = (n * sxy - sx * sy) / d
+        return slope, (sy - slope * sx) / n
+
+    def _find_pivots(self, arr: np.ndarray, kind: str) -> list[int]:
+        """Return bar indices of pivot highs ('high') or pivot lows ('low')."""
+        w, n = self.PIVOT_WINDOW, len(arr)
+        pivots: list[int] = []
+        for i in range(w, n - w):
+            if pivots and i - pivots[-1] < self.MIN_PIVOT_GAP:
+                continue
+            sub = arr[i - w: i + w + 1]
+            if kind == "high" and np.argmax(sub) == w:
+                pivots.append(i)
+            elif kind == "low" and np.argmin(sub) == w:
+                pivots.append(i)
+        return pivots
+
+    def _best_line(
+        self,
+        pivots: list[int],
+        pivot_arr: np.ndarray,   # high[] for resistance, low[] for support
+        close_arr: np.ndarray,
+        atr: float,
+        kind: str,               # "high" → resistance/supply, "low" → support/demand
+    ) -> tuple[float, float, int] | None:
+        """Try pairs of pivots (newest first). Return (slope, intercept, touches) or None."""
+        best: tuple[float, float, int] | None = None
+        m = len(pivot_arr)
+
+        for i in range(len(pivots) - 1, 0, -1):
+            p2, p1 = pivots[i], pivots[i - 1]
+            slope, intercept = self._linreg([p1, p2], [pivot_arr[p1], pivot_arr[p2]])
+
+            violations = 0
+            touches    = 2   # the two anchor pivots count
+            for j in range(p1 + 1, m):
+                tl = slope * j + intercept
+                if not math.isfinite(tl) or tl <= 0:
+                    continue
+                if kind == "high":
+                    if close_arr[j] > tl + 0.15 * atr:
+                        violations += 1
+                    elif pivot_arr[j] >= tl - atr:   # high came within 1 ATR
+                        touches += 1
+                else:
+                    if close_arr[j] < tl - 0.15 * atr:
+                        violations += 1
+                    elif pivot_arr[j] <= tl + atr:
+                        touches += 1
+                if violations > self.MAX_VIOLATIONS:
+                    break
+
+            if violations <= self.MAX_VIOLATIONS and touches >= 2:
+                if best is None or touches > best[2]:
+                    best = (slope, intercept, touches)
+        return best
+
+    # ── public ───────────────────────────────────────────────────────────────
+
+    def detect(self, df: pd.DataFrame) -> list[ZoneLevel]:
+        n = len(df)
+        if n < self.PIVOT_WINDOW * 2 + 20:
+            return []
+
+        atr = float(df["atr_14"].iloc[-1]) if "atr_14" in df.columns else 0.0
+        if not math.isfinite(atr) or atr <= 0:
+            atr = float(df["close"].iloc[-1]) * 0.01
+
+        lb   = max(0, n - self.LOOKBACK)
+        h_lb = df["high"].to_numpy()[lb:]
+        l_lb = df["low"].to_numpy()[lb:]
+        c_lb = df["close"].to_numpy()[lb:]
+        m    = len(h_lb)
+        price = float(c_lb[-1])
+
+        levels: list[ZoneLevel] = []
+
+        # ── Resistance trendline (pivot highs → supply) ───────────────────
+        ph = self._find_pivots(h_lb, "high")
+        if len(ph) >= 2:
+            res = self._best_line(ph, h_lb, c_lb, atr, "high")
+            if res:
+                slope, intercept, touches = res
+                tl_price = slope * (m - 1) + intercept
+                if (math.isfinite(tl_price) and tl_price > 0
+                        and abs(tl_price - price) <= 15 * atr):
+                    strength = min(0.85, 0.60 + (touches - 2) * 0.07)
+                    levels.append(ZoneLevel(
+                        price=round(tl_price, 4),
+                        zone_type="supply",
+                        source_tag="trendline_resistance",
+                        strength_hint=strength,
+                        bar_index=n - 1,
+                    ))
+
+        # ── Support trendline (pivot lows → demand) ───────────────────────
+        pl = self._find_pivots(l_lb, "low")
+        if len(pl) >= 2:
+            res = self._best_line(pl, l_lb, c_lb, atr, "low")
+            if res:
+                slope, intercept, touches = res
+                tl_price = slope * (m - 1) + intercept
+                if (math.isfinite(tl_price) and tl_price > 0
+                        and abs(tl_price - price) <= 15 * atr):
+                    strength = min(0.85, 0.60 + (touches - 2) * 0.07)
+                    levels.append(ZoneLevel(
+                        price=round(tl_price, 4),
+                        zone_type="demand",
+                        source_tag="trendline_support",
+                        strength_hint=strength,
+                        bar_index=n - 1,
+                    ))
+
         return levels
 
 

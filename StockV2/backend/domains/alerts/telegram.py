@@ -217,6 +217,35 @@ class AlertService:
         lines.append("\n⚠️ Strategy sell signal fired — consider exiting this position.")
         return self.send("\n".join(lines))
 
+    def send_zone_photo_alert(self, caption: str, chart_bytes: Optional[bytes]) -> bool:
+        """Send a zone price alert with an optional chart image via Telegram sendPhoto."""
+        if not self._enabled():
+            logger.debug("[AlertService] Telegram not configured, skipping zone photo alert")
+            return False
+
+        if chart_bytes:
+            url = f"https://api.telegram.org/bot{self._token}/sendPhoto"
+            try:
+                r = httpx.post(
+                    url,
+                    data={
+                        "chat_id":    self._chat_id,
+                        "caption":    caption[:1024],  # Telegram caption limit
+                        "parse_mode": "HTML",
+                    },
+                    files={"photo": ("chart.png", chart_bytes, "image/png")},
+                    timeout=30.0,
+                )
+                if r.status_code == 200:
+                    return True
+                logger.warning("[AlertService] sendPhoto error %d: %s", r.status_code, r.text[:200])
+                # Fall through to text-only
+            except Exception as e:
+                logger.warning("[AlertService] sendPhoto exception: %s", e)
+
+        # Fallback: send as plain text (no chart)
+        return self.send(caption)
+
     def send_combined_digest(
         self,
         normal_top: list[dict],

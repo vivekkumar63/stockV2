@@ -3,8 +3,10 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   analyzeZones, getZoneRankings, recomputeAll, getRecomputeStatus,
   getChartData, runBacktest, getBacktestResults, getBacktestTrades,
+  getBacktestSymbols, runBacktestAll, getBacktestAllStatus, getAllBacktestResults,
+  scanBreakouts,
   type ZoneCard, type ZoneRankRow, type ZoneResult, type RecomputeStatus,
-  type BacktestResult, type BacktestTrade,
+  type BacktestResult, type BacktestTrade, type BreakoutSignal,
 } from '../api/zones'
 import { PriceChart } from '../components/PriceChart'
 
@@ -29,6 +31,15 @@ const FRESHNESS_STYLE: Record<string, string> = {
   fresh:    'text-green-600',
   tested:   'text-yellow-600',
   weakened: 'text-red-500',
+  broken:   'text-gray-400 line-through',
+}
+
+const CANDLE_BADGE: Record<string, { bg: string; text: string; label: string }> = {
+  hammer:             { bg: 'bg-green-100',  text: 'text-green-700',  label: '🔨 Hammer' },
+  bullish_engulfing:  { bg: 'bg-green-100',  text: 'text-green-700',  label: '↑ Bull Engulf' },
+  shooting_star:      { bg: 'bg-red-100',    text: 'text-red-700',    label: '★ Shooting Star' },
+  bearish_engulfing:  { bg: 'bg-red-100',    text: 'text-red-700',    label: '↓ Bear Engulf' },
+  doji:               { bg: 'bg-gray-100',   text: 'text-gray-600',   label: '≡ Doji' },
 }
 
 const EXIT_BADGE: Record<string, string> = {
@@ -92,10 +103,22 @@ function ZoneCardUI({ zone, type }: { zone: ZoneCard; type: 'demand' | 'supply' 
 
 // ── Analysis Panel ─────────────────────────────────────────────────────────────
 
+function positionSize(capital: number, entry: number, stopLoss: number): string {
+  const risk = capital * 0.01
+  const riskPerShare = Math.abs(entry - stopLoss)
+  if (riskPerShare <= 0) return '—'
+  const qty = Math.floor(risk / riskPerShare)
+  const capUsed = qty * entry
+  return `${qty} shares · ₹${capUsed.toLocaleString('en-IN', { maximumFractionDigits: 0 })} capital`
+}
+
 function AnalysisPanel({ result }: { result: ZoneResult }) {
   const [showShort, setShowShort] = useState(false)
+  const [capital, setCapital] = useState(500000)
   const posTag   = POSITION_BADGE[result.position_tag] ?? POSITION_BADGE.neutral
   const trendTag = TREND_BADGE[result.market_structure] ?? TREND_BADGE.sideways
+  const candleBadge = result.candle_signal && result.candle_signal !== 'NONE'
+    ? CANDLE_BADGE[result.candle_signal] : null
 
   return (
     <div className="h-full overflow-y-auto">
@@ -110,6 +133,11 @@ function AnalysisPanel({ result }: { result: ZoneResult }) {
         <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${posTag.bg} ${posTag.text}`}>
           {posTag.label}
         </span>
+        {candleBadge && (
+          <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${candleBadge.bg} ${candleBadge.text}`}>
+            {candleBadge.label}
+          </span>
+        )}
       </div>
 
       {/* Demand zones */}
@@ -130,6 +158,19 @@ function AnalysisPanel({ result }: { result: ZoneResult }) {
         }
       </div>
 
+      {/* Position size calculator */}
+      <div className="flex items-center gap-2 mb-2 text-xs">
+        <span className="text-gray-500">Capital ₹</span>
+        <input
+          type="number"
+          min={10000} step={10000}
+          value={capital}
+          onChange={e => setCapital(Number(e.target.value))}
+          className="border border-gray-200 rounded px-2 py-0.5 w-28 text-xs focus:outline-none focus:border-blue-400"
+        />
+        <span className="text-gray-400">@ 1% risk</span>
+      </div>
+
       {/* Setup panel */}
       <div className="bg-blue-50 border border-blue-100 rounded-md p-3">
         {result.long_setup ? (
@@ -144,6 +185,10 @@ function AnalysisPanel({ result }: { result: ZoneResult }) {
               <span className="text-green-700 font-semibold">₹{result.long_setup.t1.toLocaleString('en-IN', { maximumFractionDigits: 0 })} · 1:{result.long_setup.t1_rr}</span>
               <span className="text-green-600">Target 2</span>
               <span className="text-green-700">₹{result.long_setup.t2.toLocaleString('en-IN', { maximumFractionDigits: 0 })} · 1:{result.long_setup.t2_rr}</span>
+              <span className="text-indigo-500">Qty (1% risk)</span>
+              <span className="text-indigo-600 font-medium">
+                {positionSize(capital, result.long_setup.ideal_entry, result.long_setup.stop_loss)}
+              </span>
             </div>
             <div className="text-[10px] text-gray-600 bg-white border border-blue-100 rounded p-2 leading-relaxed mb-2">
               {result.long_setup.explanation}
@@ -234,13 +279,21 @@ function BacktestTab() {
   const [fromDate, setFromDate]   = useState('2022-01-01')
   const [toDate, setToDate]       = useState(new Date().toISOString().slice(0, 10))
   const [selectedResult, setSelectedResult] = useState<BacktestResult | null>(null)
+  const [allTab, setAllTab]       = useState<'single' | 'all'>('single')
   const queryClient = useQueryClient()
 
+  // Symbol list for combo box
+  const symbolsQuery = useQuery({
+    queryKey: ['zone-bt-symbols'],
+    queryFn:  getBacktestSymbols,
+    staleTime: Infinity,
+  })
+  const symbolList = symbolsQuery.data?.symbols ?? []
+
+  // Single-symbol backtest
   const btMutation = useMutation({
     mutationFn: runBacktest,
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['zone-bt-results'] })
-    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['zone-bt-results'] }),
   })
 
   const resultsQuery = useQuery({
@@ -255,91 +308,342 @@ function BacktestTab() {
     enabled:  !!selectedResult,
   })
 
+  // All-stocks backtest
+  const runAllMutation = useMutation({
+    mutationFn: () => runBacktestAll(fromDate, toDate),
+    onSuccess:  () => queryClient.invalidateQueries({ queryKey: ['zone-bt-all-status'] }),
+  })
+
+  const allStatusQuery = useQuery({
+    queryKey:  ['zone-bt-all-status'],
+    queryFn:   getBacktestAllStatus,
+    refetchInterval: (q) => q.state.data?.running ? 2000 : false,
+  })
+
+  const allResultsQuery = useQuery({
+    queryKey: ['zone-bt-all-results'],
+    queryFn:  getAllBacktestResults,
+    enabled:  allTab === 'all',
+  })
+
   const handleRun = () => {
     if (!btSymbol.trim()) return
     btMutation.mutate({ symbol: btSymbol.trim().toUpperCase(), from_date: fromDate, to_date: toDate })
   }
 
   const result = btMutation.data
+  const allStatus = allStatusQuery.data
 
   return (
     <div>
-      {/* Form */}
+      {/* Sub-tab toggle */}
+      <div className="flex gap-1 mb-4">
+        {(['single', 'all'] as const).map(t => (
+          <button key={t}
+            onClick={() => setAllTab(t)}
+            className={`px-4 py-1.5 text-sm rounded font-medium transition-colors ${
+              allTab === t ? 'bg-indigo-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+            }`}
+          >
+            {t === 'single' ? 'Single Stock' : 'All Stocks'}
+          </button>
+        ))}
+      </div>
+
+      {allTab === 'single' && (
+        <>
+          {/* Form */}
+          <div className="flex items-center gap-3 bg-white rounded-lg border border-gray-200 px-4 py-3 mb-4 shadow-sm flex-wrap">
+            <input
+              list="zone-bt-symbols"
+              className="border border-gray-300 rounded px-3 py-1.5 text-sm w-36 focus:outline-none focus:border-blue-400"
+              placeholder="Symbol (e.g. RELIANCE)"
+              value={btSymbol}
+              onChange={e => setBtSymbol(e.target.value.toUpperCase())}
+            />
+            <datalist id="zone-bt-symbols">
+              {symbolList.map(s => <option key={s} value={s} />)}
+            </datalist>
+            <input type="date" value={fromDate} onChange={e => setFromDate(e.target.value)}
+              className="border border-gray-300 rounded px-2 py-1.5 text-sm focus:outline-none" />
+            <span className="text-gray-400 text-sm">→</span>
+            <input type="date" value={toDate} onChange={e => setToDate(e.target.value)}
+              className="border border-gray-300 rounded px-2 py-1.5 text-sm focus:outline-none" />
+            <button
+              onClick={handleRun}
+              disabled={btMutation.isPending || !btSymbol.trim()}
+              className="px-4 py-1.5 bg-indigo-600 text-white text-sm rounded font-medium hover:bg-indigo-700 disabled:opacity-50"
+            >
+              {btMutation.isPending ? 'Simulating…' : 'Run Backtest'}
+            </button>
+          </div>
+
+          {/* Latest result summary */}
+          {result && (
+            <div className="bg-white rounded-lg border border-gray-200 p-4 mb-4 shadow-sm">
+              <div className="text-sm font-bold text-gray-700 mb-2">{result.symbol} · {result.from_date} → {result.to_date}</div>
+              <div className="grid grid-cols-4 gap-4 text-center">
+                <div><div className="text-2xl font-bold text-gray-800">{result.total_trades}</div><div className="text-xs text-gray-500">Trades</div></div>
+                <div><div className={`text-2xl font-bold ${result.win_rate != null && result.win_rate >= 50 ? 'text-green-600' : 'text-red-600'}`}>{result.win_rate != null ? `${result.win_rate}%` : '—'}</div><div className="text-xs text-gray-500">Win Rate</div></div>
+                <div><div className={`text-2xl font-bold ${result.total_pnl_pct >= 0 ? 'text-green-600' : 'text-red-600'}`}>{result.total_pnl_pct >= 0 ? '+' : ''}{result.total_pnl_pct.toFixed(1)}%</div><div className="text-xs text-gray-500">Total PnL</div></div>
+                <div><div className="text-2xl font-bold text-gray-800">{result.avg_hold_days != null ? result.avg_hold_days.toFixed(1) : '—'}</div><div className="text-xs text-gray-500">Avg Days</div></div>
+              </div>
+            </div>
+          )}
+
+          {/* Past results + trade table */}
+          {btSymbol && (
+            <div className="bg-white rounded-lg border border-gray-200 shadow-sm">
+              <div className="px-4 py-3 border-b border-gray-100 text-sm font-bold text-gray-700">
+                Past Backtests — {btSymbol}
+              </div>
+              {resultsQuery.data?.map(r => (
+                <div key={r.id}>
+                  <div
+                    className={`grid gap-2 px-4 py-2 text-xs cursor-pointer hover:bg-gray-50 border-b border-gray-100 ${selectedResult?.id === r.id ? 'bg-blue-50' : ''}`}
+                    style={{ gridTemplateColumns: '120px 80px 60px 80px 80px' }}
+                    onClick={() => setSelectedResult(selectedResult?.id === r.id ? null : r)}
+                  >
+                    <span>{r.from_date} → {r.to_date}</span>
+                    <span>{r.total_trades} trades</span>
+                    <span className={r.win_rate != null && r.win_rate >= 50 ? 'text-green-600 font-medium' : 'text-red-600'}>{r.win_rate != null ? `${r.win_rate}%` : '—'} WR</span>
+                    <span className={r.total_pnl_pct >= 0 ? 'text-green-600' : 'text-red-600'}>{r.total_pnl_pct >= 0 ? '+' : ''}{r.total_pnl_pct.toFixed(1)}%</span>
+                    <span className="text-gray-400">{new Date(r.ran_at).toLocaleDateString()}</span>
+                  </div>
+                  {selectedResult?.id === r.id && tradesQuery.data && (
+                    <div className="bg-blue-50 px-4 py-3 border-b border-blue-100">
+                      <div className="grid gap-1 mb-1 text-[10px] font-bold text-gray-500" style={{ gridTemplateColumns: '90px 90px 75px 60px 70px 80px' }}>
+                        <span>Entry</span><span>Exit</span><span>Prices</span><span>PnL%</span><span>Days</span><span>Reason</span>
+                      </div>
+                      {tradesQuery.data.map((t: BacktestTrade) => (
+                        <div key={t.id} className="grid gap-1 text-xs py-0.5" style={{ gridTemplateColumns: '90px 90px 75px 60px 70px 80px' }}>
+                          <span>{t.entry_date}</span>
+                          <span>{t.exit_date ?? '—'}</span>
+                          <span>₹{t.entry_price?.toLocaleString('en-IN', { maximumFractionDigits: 0 })} → ₹{t.exit_price?.toLocaleString('en-IN', { maximumFractionDigits: 0 }) ?? '—'}</span>
+                          <span className={t.pnl_pct != null && t.pnl_pct >= 0 ? 'text-green-600 font-medium' : 'text-red-600'}>{t.pnl_pct != null ? `${t.pnl_pct >= 0 ? '+' : ''}${t.pnl_pct.toFixed(1)}%` : '—'}</span>
+                          <span>{t.hold_days ?? '—'}d</span>
+                          <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${EXIT_BADGE[t.exit_reason] ?? 'bg-gray-100 text-gray-600'}`}>{t.exit_reason}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ))}
+              {resultsQuery.data?.length === 0 && (
+                <div className="text-center py-8 text-gray-400 text-sm">No backtests run for {btSymbol} yet.</div>
+              )}
+            </div>
+          )}
+        </>
+      )}
+
+      {allTab === 'all' && (
+        <>
+          {/* Run-all form */}
+          <div className="flex items-center gap-3 bg-white rounded-lg border border-gray-200 px-4 py-3 mb-4 shadow-sm flex-wrap">
+            <input type="date" value={fromDate} onChange={e => setFromDate(e.target.value)}
+              className="border border-gray-300 rounded px-2 py-1.5 text-sm focus:outline-none" />
+            <span className="text-gray-400 text-sm">→</span>
+            <input type="date" value={toDate} onChange={e => setToDate(e.target.value)}
+              className="border border-gray-300 rounded px-2 py-1.5 text-sm focus:outline-none" />
+            <button
+              onClick={() => runAllMutation.mutate()}
+              disabled={allStatus?.running}
+              className="px-4 py-1.5 bg-indigo-600 text-white text-sm rounded font-medium hover:bg-indigo-700 disabled:opacity-50"
+            >
+              {allStatus?.running ? `Running… ${allStatus.done}/${allStatus.total}` : 'Run All Stocks'}
+            </button>
+            {allStatus?.running && (
+              <div className="flex-1 h-2 bg-gray-200 rounded-full overflow-hidden min-w-[120px]">
+                <div
+                  className="h-full bg-indigo-500 transition-all"
+                  style={{ width: `${allStatus.total ? (allStatus.done / allStatus.total) * 100 : 0}%` }}
+                />
+              </div>
+            )}
+            {allStatus?.finished && !allStatus.running && (
+              <span className="text-xs text-green-600 font-medium">
+                Done — {allStatus.done} stocks{allStatus.errors > 0 ? `, ${allStatus.errors} errors` : ''}
+              </span>
+            )}
+            <button
+              onClick={() => queryClient.invalidateQueries({ queryKey: ['zone-bt-all-results'] })}
+              className="px-3 py-1.5 text-xs border border-gray-300 rounded text-gray-600 hover:bg-gray-50"
+            >
+              Refresh
+            </button>
+          </div>
+
+          {/* All-stocks results table */}
+          <div className="bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden">
+            <div className="grid px-4 py-2 text-[10px] font-bold text-gray-500 uppercase bg-gray-50 border-b border-gray-200"
+              style={{ gridTemplateColumns: '1fr 80px 70px 80px 70px 90px' }}>
+              <span>Symbol</span>
+              <span className="text-right">Trades</span>
+              <span className="text-right">Win %</span>
+              <span className="text-right">PnL %</span>
+              <span className="text-right">Avg Days</span>
+              <span className="text-right">Period</span>
+            </div>
+            {allResultsQuery.isLoading && (
+              <div className="text-center py-8 text-gray-400 text-sm">Loading…</div>
+            )}
+            {allResultsQuery.data?.length === 0 && (
+              <div className="text-center py-8 text-gray-400 text-sm">No results yet. Run "All Stocks" first.</div>
+            )}
+            {allResultsQuery.data?.map(r => (
+              <div
+                key={r.id}
+                className="grid px-4 py-2 text-xs border-b border-gray-100 hover:bg-gray-50 cursor-pointer"
+                style={{ gridTemplateColumns: '1fr 80px 70px 80px 70px 90px' }}
+                onClick={() => { setAllTab('single'); setBtSymbol(r.symbol) }}
+              >
+                <span className="font-medium text-gray-800">{r.symbol}</span>
+                <span className="text-right text-gray-600">{r.total_trades}</span>
+                <span className={`text-right font-medium ${r.win_rate != null && r.win_rate >= 50 ? 'text-green-600' : 'text-red-500'}`}>
+                  {r.win_rate != null ? `${r.win_rate}%` : '—'}
+                </span>
+                <span className={`text-right font-semibold ${r.total_pnl_pct >= 0 ? 'text-green-600' : 'text-red-500'}`}>
+                  {r.total_pnl_pct >= 0 ? '+' : ''}{r.total_pnl_pct.toFixed(1)}%
+                </span>
+                <span className="text-right text-gray-500">{r.avg_hold_days != null ? `${r.avg_hold_days.toFixed(1)}d` : '—'}</span>
+                <span className="text-right text-gray-400 text-[10px]">{r.from_date.slice(0, 7)} → {r.to_date.slice(0, 7)}</span>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
+
+// ── Breakouts Tab ─────────────────────────────────────────────────────────────
+
+const CONVICTION_COLOR: Record<number, string> = {
+  6: 'bg-green-600 text-white',
+  5: 'bg-green-500 text-white',
+  4: 'bg-yellow-500 text-white',
+}
+
+function BreakoutsTab() {
+  const queryClient = useQueryClient()
+
+  const breakoutQuery = useQuery({
+    queryKey: ['zone-breakouts'],
+    queryFn:  scanBreakouts,
+    staleTime: 5 * 60 * 1000,
+  })
+
+  const [expanded, setExpanded] = useState<string | null>(null)
+
+  return (
+    <div>
+      {/* Header */}
       <div className="flex items-center gap-3 bg-white rounded-lg border border-gray-200 px-4 py-3 mb-4 shadow-sm">
-        <input
-          className="border border-gray-300 rounded px-3 py-1.5 text-sm w-28 focus:outline-none focus:border-blue-400"
-          placeholder="Symbol"
-          value={btSymbol}
-          onChange={e => setBtSymbol(e.target.value.toUpperCase())}
-        />
-        <input type="date" value={fromDate} onChange={e => setFromDate(e.target.value)}
-          className="border border-gray-300 rounded px-2 py-1.5 text-sm focus:outline-none" />
-        <span className="text-gray-400 text-sm">→</span>
-        <input type="date" value={toDate} onChange={e => setToDate(e.target.value)}
-          className="border border-gray-300 rounded px-2 py-1.5 text-sm focus:outline-none" />
+        <span className="text-sm font-semibold text-gray-700">Breakout Scanner</span>
+        <span className="text-xs text-gray-400">Min 4/6 conviction signals · Max 6% above resistance · Today's zones</span>
         <button
-          onClick={handleRun}
-          disabled={btMutation.isPending || !btSymbol.trim()}
-          className="px-4 py-1.5 bg-indigo-600 text-white text-sm rounded font-medium hover:bg-indigo-700 disabled:opacity-50"
+          onClick={() => queryClient.invalidateQueries({ queryKey: ['zone-breakouts'] })}
+          disabled={breakoutQuery.isFetching}
+          className="ml-auto px-4 py-1.5 bg-blue-600 text-white text-sm rounded font-medium hover:bg-blue-700 disabled:opacity-50"
         >
-          {btMutation.isPending ? 'Simulating…' : 'Run Backtest'}
+          {breakoutQuery.isFetching ? 'Scanning…' : 'Scan Now'}
         </button>
       </div>
 
-      {/* Latest result summary */}
-      {result && (
-        <div className="bg-white rounded-lg border border-gray-200 p-4 mb-4 shadow-sm">
-          <div className="text-sm font-bold text-gray-700 mb-2">{result.symbol} · {result.from_date} → {result.to_date}</div>
-          <div className="grid grid-cols-4 gap-4 text-center">
-            <div><div className="text-2xl font-bold text-gray-800">{result.total_trades}</div><div className="text-xs text-gray-500">Trades</div></div>
-            <div><div className={`text-2xl font-bold ${result.win_rate != null && result.win_rate >= 50 ? 'text-green-600' : 'text-red-600'}`}>{result.win_rate != null ? `${result.win_rate}%` : '—'}</div><div className="text-xs text-gray-500">Win Rate</div></div>
-            <div><div className={`text-2xl font-bold ${result.total_pnl_pct >= 0 ? 'text-green-600' : 'text-red-600'}`}>{result.total_pnl_pct >= 0 ? '+' : ''}{result.total_pnl_pct.toFixed(1)}%</div><div className="text-xs text-gray-500">Total PnL</div></div>
-            <div><div className="text-2xl font-bold text-gray-800">{result.avg_hold_days != null ? result.avg_hold_days.toFixed(1) : '—'}</div><div className="text-xs text-gray-500">Avg Days</div></div>
-          </div>
+      {breakoutQuery.isLoading && (
+        <div className="text-center py-12 text-gray-400 text-sm">Scanning for breakouts…</div>
+      )}
+
+      {!breakoutQuery.isLoading && breakoutQuery.data?.length === 0 && (
+        <div className="text-center py-12 text-gray-400 text-sm">
+          No breakout signals today. Run zone precompute first if no data.
         </div>
       )}
 
-      {/* Past results + trade table */}
-      {btSymbol && (
-        <div className="bg-white rounded-lg border border-gray-200 shadow-sm">
-          <div className="px-4 py-3 border-b border-gray-100 text-sm font-bold text-gray-700">
-            Past Backtests — {btSymbol}
+      {breakoutQuery.data && breakoutQuery.data.length > 0 && (
+        <div className="bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden">
+          {/* Table header */}
+          <div className="grid px-4 py-2 text-[10px] font-bold text-gray-500 uppercase bg-gray-50 border-b border-gray-200"
+            style={{ gridTemplateColumns: '1fr 80px 80px 70px 65px 55px 70px' }}>
+            <span>Symbol</span>
+            <span className="text-right">Price</span>
+            <span className="text-right">Resistance</span>
+            <span className="text-right">Break%</span>
+            <span className="text-right">Vol×</span>
+            <span className="text-right">RSI</span>
+            <span className="text-center">Conviction</span>
           </div>
-          {resultsQuery.data?.map(r => (
-            <div key={r.id}>
+
+          {breakoutQuery.data.map((sig: BreakoutSignal) => (
+            <div key={sig.symbol}>
               <div
-                className={`grid gap-2 px-4 py-2 text-xs cursor-pointer hover:bg-gray-50 border-b border-gray-100 ${selectedResult?.id === r.id ? 'bg-blue-50' : ''}`}
-                style={{ gridTemplateColumns: '120px 80px 60px 80px 80px' }}
-                onClick={() => setSelectedResult(selectedResult?.id === r.id ? null : r)}
+                className={`grid px-4 py-2.5 text-xs border-b border-gray-100 hover:bg-gray-50 cursor-pointer ${expanded === sig.symbol ? 'bg-blue-50' : ''}`}
+                style={{ gridTemplateColumns: '1fr 80px 80px 70px 65px 55px 70px' }}
+                onClick={() => setExpanded(expanded === sig.symbol ? null : sig.symbol)}
               >
-                <span>{r.from_date} → {r.to_date}</span>
-                <span>{r.total_trades} trades</span>
-                <span className={r.win_rate != null && r.win_rate >= 50 ? 'text-green-600 font-medium' : 'text-red-600'}>{r.win_rate != null ? `${r.win_rate}%` : '—'} WR</span>
-                <span className={r.total_pnl_pct >= 0 ? 'text-green-600' : 'text-red-600'}>{r.total_pnl_pct >= 0 ? '+' : ''}{r.total_pnl_pct.toFixed(1)}%</span>
-                <span className="text-gray-400">{new Date(r.ran_at).toLocaleDateString()}</span>
+                <div>
+                  <span className="font-semibold text-gray-800">{sig.symbol}</span>
+                  <span className={`ml-2 text-[10px] px-1.5 py-0.5 rounded capitalize ${
+                    TREND_BADGE[sig.market_structure]?.bg ?? 'bg-gray-100'
+                  } ${TREND_BADGE[sig.market_structure]?.text ?? 'text-gray-600'}`}>
+                    {sig.market_structure}
+                  </span>
+                  {sig.candle_signal !== 'NONE' && CANDLE_BADGE[sig.candle_signal] && (
+                    <span className={`ml-1 text-[10px] px-1.5 py-0.5 rounded ${CANDLE_BADGE[sig.candle_signal]?.bg} ${CANDLE_BADGE[sig.candle_signal]?.text}`}>
+                      {sig.candle_signal.replace('_', ' ')}
+                    </span>
+                  )}
+                </div>
+                <span className="text-right font-medium">₹{sig.current_price.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</span>
+                <span className="text-right text-gray-500">₹{sig.resistance.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</span>
+                <span className="text-right text-green-600 font-semibold">+{sig.breakout_pct.toFixed(1)}%</span>
+                <span className={`text-right font-medium ${sig.volume_ratio >= 2 ? 'text-green-600' : sig.volume_ratio >= 1.5 ? 'text-yellow-600' : 'text-gray-500'}`}>
+                  {sig.volume_ratio.toFixed(1)}×
+                </span>
+                <span className={`text-right ${sig.rsi > 65 ? 'text-orange-500' : sig.rsi > 55 ? 'text-green-600' : 'text-gray-500'}`}>
+                  {sig.rsi.toFixed(0)}
+                </span>
+                <div className="flex justify-center">
+                  <span className={`px-2 py-0.5 rounded text-[11px] font-bold ${CONVICTION_COLOR[sig.conviction_score] ?? 'bg-gray-100 text-gray-600'}`}>
+                    {sig.conviction_score}/6
+                  </span>
+                </div>
               </div>
-              {selectedResult?.id === r.id && tradesQuery.data && (
-                <div className="bg-blue-50 px-4 py-3 border-b border-blue-100">
-                  <div className="grid gap-1 mb-1 text-[10px] font-bold text-gray-500" style={{ gridTemplateColumns: '90px 90px 75px 60px 70px 80px' }}>
-                    <span>Entry</span><span>Exit</span><span>Prices</span><span>PnL%</span><span>Days</span><span>Reason</span>
-                  </div>
-                  {tradesQuery.data.map((t: BacktestTrade) => (
-                    <div key={t.id} className="grid gap-1 text-xs py-0.5" style={{ gridTemplateColumns: '90px 90px 75px 60px 70px 80px' }}>
-                      <span>{t.entry_date}</span>
-                      <span>{t.exit_date ?? '—'}</span>
-                      <span>₹{t.entry_price?.toLocaleString('en-IN', { maximumFractionDigits: 0 })} → ₹{t.exit_price?.toLocaleString('en-IN', { maximumFractionDigits: 0 }) ?? '—'}</span>
-                      <span className={t.pnl_pct != null && t.pnl_pct >= 0 ? 'text-green-600 font-medium' : 'text-red-600'}>{t.pnl_pct != null ? `${t.pnl_pct >= 0 ? '+' : ''}${t.pnl_pct.toFixed(1)}%` : '—'}</span>
-                      <span>{t.hold_days ?? '—'}d</span>
-                      <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${EXIT_BADGE[t.exit_reason] ?? 'bg-gray-100 text-gray-600'}`}>{t.exit_reason}</span>
+
+              {/* Expanded signals detail */}
+              {expanded === sig.symbol && (
+                <div className="bg-blue-50 px-6 py-3 border-b border-blue-100 text-xs">
+                  <div className="flex gap-8">
+                    <div>
+                      <div className="font-semibold text-gray-600 mb-1">Signals Met ({sig.signals_met.length})</div>
+                      {sig.signals_met.map(s => (
+                        <div key={s} className="text-green-700">✅ {s}</div>
+                      ))}
                     </div>
-                  ))}
+                    <div>
+                      <div className="font-semibold text-gray-600 mb-1">Not Met</div>
+                      {sig.signals_failed.map(s => (
+                        <div key={s} className="text-red-500">❌ {s}</div>
+                      ))}
+                    </div>
+                    {sig.trendline_resistance && (
+                      <div>
+                        <div className="font-semibold text-gray-600 mb-1">Trendline</div>
+                        <div className="text-gray-600">Resistance at ₹{sig.trendline_resistance.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</div>
+                      </div>
+                    )}
+                    {sig.zone_score != null && (
+                      <div>
+                        <div className="font-semibold text-gray-600 mb-1">Zone Score</div>
+                        <div className="text-gray-600">{sig.zone_score}/100</div>
+                      </div>
+                    )}
+                  </div>
                 </div>
               )}
             </div>
           ))}
-          {resultsQuery.data?.length === 0 && (
-            <div className="text-center py-8 text-gray-400 text-sm">No backtests run for {btSymbol} yet.</div>
-          )}
         </div>
       )}
     </div>
@@ -362,12 +666,14 @@ const FILTERS: { key: FilterKey; label: string }[] = [
 ]
 
 export function ZonesPage() {
+  const queryClient = useQueryClient()
   const [symbol, setSymbol]             = useState('')
   const [activeSymbol, setActiveSymbol] = useState<string | null>(null)
   const [sortBy, setSortBy]             = useState<SortKey>('long_score')
   const [filterBy, setFilterBy]         = useState<FilterKey>('')
+  const [minRr, setMinRr]               = useState<number | undefined>(undefined)
   const [expandedSym, setExpandedSym]   = useState<string | null>(null)
-  const [activeTab, setActiveTab]       = useState<'rankings' | 'backtest'>('rankings')
+  const [activeTab, setActiveTab]       = useState<'rankings' | 'backtest' | 'breakouts'>('rankings')
 
   const analyzeQuery = useQuery({
     queryKey: ['zone-analyze', activeSymbol],
@@ -383,8 +689,8 @@ export function ZonesPage() {
   })
 
   const rankingsQuery = useQuery({
-    queryKey: ['zone-rankings', sortBy, filterBy],
-    queryFn:  () => getZoneRankings({ sort_by: sortBy, tag_filter: filterBy || undefined }),
+    queryKey: ['zone-rankings', sortBy, filterBy, minRr],
+    queryFn:  () => getZoneRankings({ sort_by: sortBy, tag_filter: filterBy || undefined, min_rr: minRr }),
     staleTime: 5 * 60 * 1000,
   })
 
@@ -432,7 +738,7 @@ export function ZonesPage() {
         <span className="font-bold text-base text-gray-800">Demand &amp; Supply Zones</span>
         {/* Tab buttons */}
         <div className="flex gap-1 ml-2">
-          {(['rankings', 'backtest'] as const).map(tab => (
+          {(['rankings', 'breakouts', 'backtest'] as const).map(tab => (
             <button
               key={tab}
               onClick={() => setActiveTab(tab)}
@@ -442,7 +748,7 @@ export function ZonesPage() {
                   : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
               }`}
             >
-              {tab.charAt(0).toUpperCase() + tab.slice(1)}
+              {tab === 'breakouts' ? 'Breakouts' : tab.charAt(0).toUpperCase() + tab.slice(1)}
             </button>
           ))}
         </div>
@@ -474,7 +780,8 @@ export function ZonesPage() {
         )}
       </div>
 
-      {activeTab === 'backtest' && <BacktestTab />}
+      {activeTab === 'backtest'   && <BacktestTab />}
+      {activeTab === 'breakouts'  && <BreakoutsTab />}
 
       {activeTab === 'rankings' && (
         <>
@@ -522,6 +829,20 @@ export function ZonesPage() {
                     {f.label}
                   </button>
                 ))}
+                <div className="flex items-center gap-1 ml-1">
+                  <span className="text-xs text-gray-400">Min R:R</span>
+                  <select
+                    value={minRr ?? ''}
+                    onChange={e => setMinRr(e.target.value ? Number(e.target.value) : undefined)}
+                    className="border border-gray-300 rounded px-1.5 py-0.5 text-xs focus:outline-none focus:border-blue-400"
+                  >
+                    <option value="">Any</option>
+                    <option value="1.5">1.5×</option>
+                    <option value="2">2×</option>
+                    <option value="3">3×</option>
+                    <option value="4">4×</option>
+                  </select>
+                </div>
               </div>
             </div>
 

@@ -81,3 +81,4 @@ class ZoneResult:
     rvol: float = 1.0
     price: float = 0.0
     position_tag: str = "neutral"
+    candle_signal: str = "NONE"  # last-bar pattern: "hammer" | "shooting_star" | "bullish_engulfing" | "bearish_engulfing" | "doji" | "NONE"
