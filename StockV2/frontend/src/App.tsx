@@ -11,6 +11,7 @@ import { SpecialStrategiesPage } from './pages/SpecialStrategiesPage'
 import { SectorRotationPage } from './pages/SectorRotationPage'
 import { MLModelsPage } from './pages/MLModelsPage'
 import { FundamentalsPage } from './pages/FundamentalsPage'
+import { ZonesPage } from './pages/ZonesPage'
 
 const queryClient = new QueryClient()
 
@@ -32,6 +33,7 @@ export function App() {
               <Route path="/sector-rotation" element={<SectorRotationPage />} />
               <Route path="/ml-models" element={<MLModelsPage />} />
               <Route path="/fundamentals" element={<FundamentalsPage />} />
+              <Route path="/zones" element={<ZonesPage />} />
             </Routes>
           </main>
         </div>
