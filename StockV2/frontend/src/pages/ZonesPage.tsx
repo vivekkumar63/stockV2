@@ -105,7 +105,7 @@ function AnalysisPanel({ result }: { result: ZoneResult }) {
           {result.demand_zones.length === 0 && (
             <div className="text-xs text-gray-400">No demand zones detected</div>
           )}
-          {result.demand_zones.map((z, i) => <ZoneCardUI key={i} zone={z} type="demand" />)}
+          {result.demand_zones.map(z => <ZoneCardUI key={`${z.low}-${z.high}`} zone={z} type="demand" />)}
         </div>
 
         {/* Supply zones */}
@@ -114,7 +114,7 @@ function AnalysisPanel({ result }: { result: ZoneResult }) {
           {result.supply_zones.length === 0 && (
             <div className="text-xs text-gray-400">No supply zones detected</div>
           )}
-          {result.supply_zones.map((z, i) => <ZoneCardUI key={i} zone={z} type="supply" />)}
+          {result.supply_zones.map(z => <ZoneCardUI key={`${z.low}-${z.high}`} zone={z} type="supply" />)}
         </div>
 
         {/* Setup panel */}
@@ -193,8 +193,8 @@ function RankRow({
         <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-medium ${posStyle.bg} ${posStyle.text}`}>
           {posStyle.label}
         </span>
-        <span className={scoreColor(row.long_setup_score)}>
-          {row.long_setup_score != null ? `Long ${row.long_setup_score}` : '—'}
+        <span className={scoreColor(row.short_setup_score)}>
+          {row.short_setup_score != null ? `S:${row.short_setup_score}` : '—'}
         </span>
         <span className={scoreColor(row.best_demand_score)}>{row.best_demand_score ?? '—'}</span>
         <span className={scoreColor(row.best_supply_score)}>{row.best_supply_score ?? '—'}</span>
@@ -210,6 +210,23 @@ function RankRow({
 
 type SortKey = 'long_score' | 'short_score' | 'demand_score' | 'supply_score' | 'rvol' | 'atr'
 type FilterKey = '' | 'long' | 'short' | 'in_demand' | 'breakout' | 'near_supply'
+
+const FILTERS: { key: FilterKey; label: string }[] = [
+  { key: 'long',        label: 'Long' },
+  { key: 'short',       label: 'Short' },
+  { key: 'in_demand',   label: 'In Demand' },
+  { key: 'breakout',    label: 'Breakout' },
+  { key: 'near_supply', label: 'Near Supply' },
+]
+
+const SORTS: { key: SortKey; label: string }[] = [
+  { key: 'long_score',   label: 'Long Score' },
+  { key: 'short_score',  label: 'Short Score' },
+  { key: 'demand_score', label: 'Demand' },
+  { key: 'supply_score', label: 'Supply' },
+  { key: 'rvol',         label: 'RVol' },
+  { key: 'atr',          label: 'ATR' },
+]
 
 export function ZonesPage() {
   const [symbol, setSymbol]     = useState('')
@@ -233,7 +250,7 @@ export function ZonesPage() {
   const statusQuery = useQuery({
     queryKey: ['zone-recompute-status'],
     queryFn: getRecomputeStatus,
-    refetchInterval: (data: any) => data?.is_running ? 3000 : false,
+    refetchInterval: (query) => (query.state.data as RecomputeStatus | undefined)?.is_running ? 3000 : false,
   })
 
   const recomputeMut = useMutation({ mutationFn: recomputeAll })
@@ -260,23 +277,6 @@ export function ZonesPage() {
       : status?.started_at
         ? `Last batch: ${new Date(status.started_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
         : 'No batch run yet'
-
-  const FILTERS: { key: FilterKey; label: string }[] = [
-    { key: 'long',        label: 'Long' },
-    { key: 'short',       label: 'Short' },
-    { key: 'in_demand',   label: 'In Demand' },
-    { key: 'breakout',    label: 'Breakout' },
-    { key: 'near_supply', label: 'Near Supply' },
-  ]
-
-  const SORTS: { key: SortKey; label: string }[] = [
-    { key: 'long_score',   label: 'Long Score' },
-    { key: 'short_score',  label: 'Short Score' },
-    { key: 'demand_score', label: 'Demand' },
-    { key: 'supply_score', label: 'Supply' },
-    { key: 'rvol',         label: 'RVol' },
-    { key: 'atr',          label: 'ATR' },
-  ]
 
   return (
     <div>
@@ -392,10 +392,15 @@ export function ZonesPage() {
                 )}
                 {' '}
                 <button
-                  className="text-blue-600 underline hover:text-blue-800 ml-1"
-                  onClick={() => { setActiveSymbol(row.symbol); window.scrollTo({ top: 0, behavior: 'smooth' }) }}
+                  className={`underline ml-1 ${analyzeQuery.isFetching && activeSymbol === row.symbol ? 'text-gray-400 cursor-wait' : 'text-blue-600 hover:text-blue-800'}`}
+                  onClick={() => {
+                    setActiveSymbol(row.symbol)
+                    if (analyzeQuery.data?.symbol === row.symbol) {
+                      window.scrollTo({ top: 0, behavior: 'smooth' })
+                    }
+                  }}
                 >
-                  View full analysis ↑
+                  {analyzeQuery.isFetching && activeSymbol === row.symbol ? 'Loading…' : 'View full analysis ↑'}
                 </button>
               </div>
             )}
