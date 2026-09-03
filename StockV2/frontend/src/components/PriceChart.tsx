@@ -114,6 +114,15 @@ export function PriceChart({
       }
     }
 
+    // Setup lines (short)
+    if (shortSetup) {
+      candleSeries.createPriceLine({ price: shortSetup.entry,     color: '#a855f7', lineWidth: 1, lineStyle: LineStyle.Dashed, axisLabelVisible: true, title: 'Short Entry' })
+      candleSeries.createPriceLine({ price: shortSetup.stop_loss, color: '#ef4444', lineWidth: 1, lineStyle: LineStyle.Dashed, axisLabelVisible: true, title: 'SL' })
+      if (shortSetup.target != null) {
+        candleSeries.createPriceLine({ price: shortSetup.target,  color: '#22c55e', lineWidth: 1, lineStyle: LineStyle.Dashed, axisLabelVisible: true, title: 'T2' })
+      }
+    }
+
     chart.timeScale().fitContent()
 
     // Resize observer
