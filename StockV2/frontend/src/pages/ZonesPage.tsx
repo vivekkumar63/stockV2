@@ -375,7 +375,10 @@ export function ZonesPage() {
       (query.state.data as RecomputeStatus | undefined)?.is_running ? 3000 : false,
   })
 
-  const recomputeMut = useMutation({ mutationFn: recomputeAll })
+  const recomputeMut = useMutation({
+    mutationFn: recomputeAll,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['zone-rankings'] }),
+  })
 
   const handleAnalyze = () => {
     const sym = symbol.trim().toUpperCase()
