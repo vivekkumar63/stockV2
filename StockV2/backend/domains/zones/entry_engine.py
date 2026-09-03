@@ -1,5 +1,4 @@
 from __future__ import annotations
-import math
 from .models import Zone, LongSetup, ShortSetup
 
 
@@ -21,7 +20,7 @@ class EntryEngine:
 
         # Targets: use supply zones sorted by low ascending
         supply_above = sorted(
-            [z for z in supply_zones if z.low > ideal],
+            [z for z in supply_zones if z.low > ideal and (z.low - ideal) <= 5 * atr],
             key=lambda z: z.low,
         )
 
@@ -67,7 +66,7 @@ class EntryEngine:
         sl = round(supply_zone.high + 0.3 * atr, 2)
 
         demand_below = sorted(
-            [z for z in demand_zones if z.high < ideal],
+            [z for z in demand_zones if z.high < ideal and (ideal - z.high) <= 5 * atr],
             key=lambda z: z.high, reverse=True,
         )
 
@@ -118,9 +117,8 @@ class EntryEngine:
     def _long_explanation(self, zone: Zone, entry: float, sl: float,
                            t1: float, rr: float, t2: float, atr: float) -> str:
         tags = ", ".join(zone.source_tags[:3]) if zone.source_tags else "price structure"
-        dist_atr = round(abs(entry - zone.midpoint) / atr, 1) if atr > 0 else 0
         return (
-            f"Price is {dist_atr} ATR above a {zone.freshness} demand zone "
+            f"Price in/near a {zone.freshness} demand zone "
             f"(₹{zone.low:,.0f}–₹{zone.high:,.0f}) supported by {tags}. "
             f"Entry at ₹{entry:,.0f} with SL ₹{sl:,.0f}, "
             f"first target ₹{t1:,.0f} (R:R 1:{rr}), second target ₹{t2:,.0f}."
@@ -129,9 +127,8 @@ class EntryEngine:
     def _short_explanation(self, zone: Zone, entry: float, sl: float,
                             t1: float, rr: float, t2: float, atr: float) -> str:
         tags = ", ".join(zone.source_tags[:3]) if zone.source_tags else "price structure"
-        dist_atr = round(abs(entry - zone.midpoint) / atr, 1) if atr > 0 else 0
         return (
-            f"Price is {dist_atr} ATR below a {zone.freshness} supply zone "
+            f"Price in/near a {zone.freshness} supply zone "
             f"(₹{zone.low:,.0f}–₹{zone.high:,.0f}) confirmed by {tags}. "
             f"Short entry at ₹{entry:,.0f} with SL ₹{sl:,.0f}, "
             f"first target ₹{t1:,.0f} (R:R 1:{rr})."

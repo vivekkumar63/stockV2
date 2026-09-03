@@ -64,3 +64,13 @@ def test_setup_score_0_to_100():
     result = EntryEngine().compute_long(demand, supply_zones=[], atr=20.0,
                                         rsi=45.0, trend="bullish", n_bars=500)
     assert 0 <= result.score <= 100
+
+
+def test_long_t1_fallback_when_supply_beyond_5atr():
+    """Supply zone more than 5 ATR away must trigger the +2 ATR fallback."""
+    demand = _zone(960.0, 980.0)  # ideal = 970
+    # Supply zone at 1080: 1080 - 970 = 110 > 5*20=100 → beyond 5 ATR → fallback
+    supply_far = _zone(1080.0, 1100.0, zone_type="supply")
+    result = EntryEngine().compute_long(demand, supply_zones=[supply_far], atr=20.0,
+                                        rsi=45.0, trend="bullish", n_bars=500)
+    assert result.t1 == pytest.approx(970.0 + 2 * 20.0)  # fallback, not 1080
