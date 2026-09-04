@@ -7,6 +7,7 @@ import {
   scanBreakouts, runBreakoutBacktest, runBreakoutBacktestAll,
   getBreakoutBacktestAllStatus, getBreakoutBacktestResults, getBreakoutBacktestTrades,
   getBreakoutMLStatus, trainBreakoutML,
+  getMLStatus, trainMLModel,
   type ZoneCard, type ZoneRankRow, type ZoneResult, type RecomputeStatus,
   type BacktestResult, type BacktestTrade, type BreakoutSignal,
   type BreakoutBacktestResult, type BreakoutBacktestTrade,
@@ -1015,6 +1016,16 @@ export function ZonesPage() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['zone-rankings'] }),
   })
 
+  const zoneMLStatusQuery = useQuery({
+    queryKey: ['zone-ml-status'],
+    queryFn:  getMLStatus,
+  })
+
+  const trainZoneMLMut = useMutation({
+    mutationFn: trainMLModel,
+    onSuccess:  () => queryClient.invalidateQueries({ queryKey: ['zone-ml-status'] }),
+  })
+
   const handleAnalyze = () => {
     const sym = symbol.trim().toUpperCase()
     if (sym) { setActiveSymbol(sym); setExpandedSym(sym) }
@@ -1085,9 +1096,29 @@ export function ZonesPage() {
             >
               ⟳ Recompute All
             </button>
+            {zoneMLStatusQuery.data && (
+              <span className={`text-[10px] px-2 py-0.5 rounded font-medium whitespace-nowrap ${zoneMLStatusQuery.data.model_exists ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
+                {zoneMLStatusQuery.data.model_exists ? 'Zone ML active' : 'Zone ML: rule-based'}
+              </span>
+            )}
+            <button
+              onClick={() => trainZoneMLMut.mutate()}
+              disabled={trainZoneMLMut.isPending}
+              className="px-3 py-1.5 text-xs border border-purple-300 text-purple-700 rounded hover:bg-purple-50 disabled:opacity-50 whitespace-nowrap"
+            >
+              {trainZoneMLMut.isPending ? 'Training…' : 'Train Zone ML'}
+            </button>
           </>
         )}
       </div>
+
+      {trainZoneMLMut.data && activeTab === 'rankings' && (
+        <div className={`mb-3 px-4 py-2 rounded text-xs font-medium ${trainZoneMLMut.data.trained ? 'bg-green-50 text-green-700 border border-green-200' : 'bg-yellow-50 text-yellow-700 border border-yellow-200'}`}>
+          {trainZoneMLMut.data.trained
+            ? `Zone ML trained on ${trainZoneMLMut.data.samples} samples · CV accuracy: ${((trainZoneMLMut.data.cv_accuracy ?? 0) * 100).toFixed(1)}% · win rate: ${((trainZoneMLMut.data.positive_rate ?? 0) * 100).toFixed(0)}%`
+            : trainZoneMLMut.data.reason}
+        </div>
+      )}
 
       {activeTab === 'backtest'   && <BacktestTab />}
       {activeTab === 'breakouts'  && <BreakoutsTab />}
