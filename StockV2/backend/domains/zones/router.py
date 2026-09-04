@@ -14,6 +14,7 @@ from .engine import ZoneEngine, zone_to_dict, setup_to_dict
 from .precompute import ZonePrecomputer, get_precompute_state
 from .backtester import ZoneBacktester
 from .breakout_scanner import BreakoutScanner
+from .ml_scorer import MLZoneScorer, _build_reason
 from domains.data.nse_universe import NSE_SYMBOLS
 
 router = APIRouter(tags=["zones"])
@@ -24,6 +25,10 @@ _recompute_lock = threading.Lock()
 # ── All-stocks backtest state ─────────────────────────────────────────────────
 _bt_all_lock    = threading.Lock()
 _bt_all_state: dict = {"running": False, "done": 0, "total": 0, "errors": 0, "finished": False}
+
+# ── Breakout-candidates backtest state ────────────────────────────────────────
+_bt_breakout_lock  = threading.Lock()
+_bt_breakout_state: dict = {"running": False, "done": 0, "total": 0, "errors": 0, "finished": False}
 
 
 def _serialize_result(r) -> dict:
@@ -172,6 +177,13 @@ def get_rankings(
             "pct_from_52w_low":  r[13],
             "dist_to_long":      _dist(r[6], r[14]),
             "dist_to_short":     _dist(r[6], r[15]),
+            "ml_confidence":     MLZoneScorer.predict({
+                "long_setup_score": r[1], "short_setup_score": r[2],
+                "best_demand_score": r[3], "best_supply_score": r[4],
+                "best_long_rr": r[9], "best_short_rr": r[10],
+                "rvol_at_compute": r[8], "position_tag": r[5],
+                "pct_from_52w_low": r[13], "pct_from_52w_high": r[12],
+            }),
         }
         for r in rows
     ]
@@ -524,3 +536,240 @@ def get_all_backtest_results(db: Session = Depends(get_db)):
 def scan_breakouts(db: Session = Depends(get_db)):
     """Scan today's precomputed zone data for breakout signals with conviction scoring."""
     return BreakoutScanner().scan(db)
+
+
+# ── Breakout-candidates backtest ──────────────────────────────────────────────
+
+def _run_bt_breakout_bg(from_date: date, to_date: date) -> None:
+    global _bt_breakout_state
+
+    # Step 1: scan for today's breakout symbols
+    db = SessionLocal()
+    try:
+        signals = BreakoutScanner().scan(db)
+    except Exception:
+        logger.exception("[bt-breakout] scan failed")
+        signals = []
+    finally:
+        db.close()
+
+    symbols = [s["symbol"] for s in signals]
+    with _bt_breakout_lock:
+        _bt_breakout_state = {
+            "running": True, "done": 0, "total": len(symbols),
+            "errors": 0, "finished": False,
+        }
+
+    if not symbols:
+        with _bt_breakout_lock:
+            _bt_breakout_state["running"]  = False
+            _bt_breakout_state["finished"] = True
+        return
+
+    # Step 2: backtest each breakout symbol
+    backtester = ZoneBacktester()
+    for sym in symbols:
+        db = SessionLocal()
+        try:
+            trades    = backtester.run(sym, from_date, to_date, db)
+            total     = len(trades)
+            wins      = sum(1 for t in trades if t.pnl_pct > 0)
+            win_rate  = round(wins / total * 100, 1) if total else None
+            total_pnl = round(sum(t.pnl_pct for t in trades), 2)
+            avg_hold  = round(sum(t.hold_days for t in trades) / total, 1) if total else None
+
+            db.execute(
+                text("""
+                    INSERT INTO zone_backtest_results
+                        (symbol, from_date, to_date, total_trades, win_rate, total_pnl_pct, avg_hold_days)
+                    VALUES (:sym, :fd, :td, :tt, :wr, :tp, :ah)
+                """),
+                {"sym": sym, "fd": from_date, "td": to_date, "tt": total,
+                 "wr": win_rate, "tp": total_pnl, "ah": avg_hold},
+            )
+            if trades:
+                rid = db.execute(
+                    text("SELECT id FROM zone_backtest_results WHERE symbol=:s AND from_date=:fd AND to_date=:td ORDER BY ran_at DESC LIMIT 1"),
+                    {"s": sym, "fd": from_date, "td": to_date},
+                ).scalar()
+                if rid:
+                    db.execute(
+                        text("""
+                            INSERT INTO zone_backtest_trades
+                                (result_id, entry_date, entry_price, exit_date, exit_price,
+                                 pnl_pct, exit_reason, hold_days)
+                            VALUES (:rid, :ed, :ep, :xd, :xp, :pp, :er, :hd)
+                        """),
+                        [{"rid": rid, "ed": t.entry_date, "ep": t.entry_price,
+                          "xd": t.exit_date, "xp": t.exit_price, "pp": t.pnl_pct,
+                          "er": t.exit_reason, "hd": t.hold_days}
+                         for t in trades],
+                    )
+            db.commit()
+        except Exception:
+            db.rollback()
+            logger.exception("[bt-breakout] failed for %s", sym)
+            with _bt_breakout_lock:
+                _bt_breakout_state["errors"] += 1
+        finally:
+            db.close()
+        with _bt_breakout_lock:
+            _bt_breakout_state["done"] += 1
+
+    with _bt_breakout_lock:
+        _bt_breakout_state["running"]  = False
+        _bt_breakout_state["finished"] = True
+    logger.info("[bt-breakout] complete: %d/%d", _bt_breakout_state["done"], _bt_breakout_state["total"])
+
+
+@router.post("/zones/breakout/backtest-all")
+def run_breakout_backtest_all(from_date: str, to_date: str):
+    """Backtest zone strategy for all stocks with current breakout signals."""
+    global _bt_breakout_state
+    with _bt_breakout_lock:
+        if _bt_breakout_state.get("running"):
+            return {"status": "already_running", **_bt_breakout_state}
+    try:
+        fd = date.fromisoformat(from_date)
+        td = date.fromisoformat(to_date)
+    except ValueError:
+        raise HTTPException(status_code=422, detail="Dates must be YYYY-MM-DD")
+
+    threading.Thread(
+        target=_run_bt_breakout_bg, args=(fd, td), daemon=True, name="zone-bt-breakout"
+    ).start()
+    return {"status": "started"}
+
+
+@router.get("/zones/breakout/backtest-all/status")
+def get_breakout_backtest_status():
+    with _bt_breakout_lock:
+        return dict(_bt_breakout_state)
+
+
+@router.get("/zones/breakout/backtest-results")
+def get_breakout_backtest_results(db: Session = Depends(get_db)):
+    """Return latest backtest result for each breakout symbol, sorted by pnl desc."""
+    today = str(date.today())
+    # Get today's breakout symbols from zone_analysis_results (position_tag or recent scan)
+    # Use the current breakout scan results
+    signals = BreakoutScanner().scan(db)
+    if not signals:
+        return []
+    syms = [s["symbol"] for s in signals]
+
+    rows = db.execute(text("""
+        SELECT DISTINCT ON (symbol)
+            id, symbol, from_date, to_date, total_trades, win_rate, total_pnl_pct, avg_hold_days, ran_at
+        FROM zone_backtest_results
+        WHERE symbol = ANY(:syms)
+        ORDER BY symbol, ran_at DESC
+    """), {"syms": syms}).fetchall()
+
+    results = [
+        {
+            "id":            r[0], "symbol": r[1],
+            "from_date":     str(r[2]), "to_date": str(r[3]),
+            "total_trades":  r[4], "win_rate": r[5],
+            "total_pnl_pct": r[6], "avg_hold_days": r[7],
+            "ran_at":        str(r[8]),
+        }
+        for r in rows
+    ]
+    results.sort(key=lambda x: x["total_pnl_pct"] or 0, reverse=True)
+    return results
+
+
+# ── ML Zone Scorer ────────────────────────────────────────────────────────────
+
+@router.post("/zones/ml/train")
+def train_ml_model(db: Session = Depends(get_db)):
+    """Train (or retrain) the ML zone quality model on stored backtest outcomes."""
+    return MLZoneScorer.train(db)
+
+
+@router.get("/zones/ml/status")
+def get_ml_status():
+    """Return whether a trained model exists and its path."""
+    from .ml_scorer import MODEL_PATH
+    return {
+        "model_exists": MLZoneScorer.model_exists(),
+        "model_path":   str(MODEL_PATH),
+        "using_ml":     MLZoneScorer.model_exists(),
+        "note":         "Rule-based fallback active" if not MLZoneScorer.model_exists()
+                        else "ML model active",
+    }
+
+
+# ── Recommendations ───────────────────────────────────────────────────────────
+
+@router.get("/zones/recommendations")
+def get_recommendations(
+    limit: int    = Query(20, ge=5, le=50),
+    setup_type: str = Query("long"),
+    db: Session   = Depends(get_db),
+):
+    """Top zone setups ranked by composite score (ML confidence × zone quality × R:R × volume)."""
+    today = str(date.today())
+
+    if setup_type == "short":
+        score_filter = "short_setup_score >= 50"
+        score_col    = "short_setup_score"
+    else:
+        score_filter = "long_setup_score >= 50"
+        score_col    = "long_setup_score"
+
+    rows = db.execute(text(f"""
+        SELECT symbol, long_setup_score, short_setup_score, best_demand_score,
+               best_supply_score, best_long_rr, best_short_rr, rvol_at_compute,
+               position_tag, pct_from_52w_low, pct_from_52w_high,
+               price_at_compute, atr_at_compute, result_json
+        FROM zone_analysis_results
+        WHERE computed_date = :dt AND {score_filter}
+        ORDER BY {score_col} DESC NULLS LAST
+        LIMIT 200
+    """), {"dt": today}).fetchall()
+
+    out = []
+    for r in rows:
+        row_dict = {
+            "long_setup_score":  r[1], "short_setup_score": r[2],
+            "best_demand_score": r[3], "best_supply_score": r[4],
+            "best_long_rr": r[5], "best_short_rr": r[6],
+            "rvol_at_compute": r[7], "position_tag": r[8],
+            "pct_from_52w_low": r[9], "pct_from_52w_high": r[10],
+        }
+        ml_conf = MLZoneScorer.predict(row_dict)
+
+        rj = r[13] if isinstance(r[13], dict) else json.loads(r[13] or "{}")
+        ls = (r[1] or 0) / 100.0
+        rr = min((r[5] or 0), 5) / 5.0
+        rv = min((r[7] or 1.0), 3.0) / 3.0
+        # Weighted composite: ML 40%, zone setup 30%, R:R 20%, volume 10%
+        composite = round((0.40 * ml_conf + 0.30 * ls + 0.20 * rr + 0.10 * rv) * 100, 1)
+
+        out.append({
+            "symbol":            r[0],
+            "composite_score":   composite,
+            "ml_confidence":     round(ml_conf * 100, 1),
+            "long_setup_score":  r[1],
+            "short_setup_score": r[2],
+            "best_long_rr":      r[5],
+            "best_short_rr":     r[6],
+            "rvol":              r[7],
+            "position_tag":      r[8],
+            "price":             r[11],
+            "atr":               r[12],
+            "pct_from_52w_high": r[10],
+            "pct_from_52w_low":  r[9],
+            "long_setup":        rj.get("long_setup"),
+            "short_setup":       rj.get("short_setup"),
+            "demand_zones":      rj.get("demand_zones", [])[:2],
+            "supply_zones":      rj.get("supply_zones", [])[:2],
+            "market_structure":  rj.get("market_structure", "sideways"),
+            "candle_signal":     rj.get("candle_signal", "NONE"),
+            "reason":            _build_reason(row_dict, ml_conf, rj),
+        })
+
+    out.sort(key=lambda x: x["composite_score"], reverse=True)
+    return out[:limit]

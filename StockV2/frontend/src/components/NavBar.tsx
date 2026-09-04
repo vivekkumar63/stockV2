@@ -15,6 +15,7 @@ export function NavBar() {
       <NavLink to="/special-strategies" className={link}>Special</NavLink>
       <NavLink to="/sector-rotation" className={link}>Sectors</NavLink>
       <NavLink to="/zones" className={link}>Zones</NavLink>
+      <NavLink to="/zone-recommendations" className={link}>Reco</NavLink>
       <NavLink to="/ml-models" className={link}>ML Models</NavLink>
       <NavLink to="/fundamentals" className={link}>Fundamentals</NavLink>
     </nav>

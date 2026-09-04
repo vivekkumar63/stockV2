@@ -63,6 +63,7 @@ export interface ZoneRankRow {
   pct_from_52w_low: number | null
   dist_to_long: number | null   // (price - long_entry) / price * 100; negative = below entry
   dist_to_short: number | null  // (price - short_entry) / price * 100; positive = above entry
+  ml_confidence: number | null  // P(profitable) in [0,1] from ML model or rule-based fallback
 }
 
 export interface RecomputeStatus {
@@ -208,3 +209,69 @@ export interface BreakoutSignal {
 
 export const scanBreakouts = () =>
   apiFetch<BreakoutSignal[]>('/zones/breakout/scan')
+
+export const runBreakoutBacktestAll = (from_date: string, to_date: string) =>
+  apiFetch<{ status: string }>(
+    `/zones/breakout/backtest-all?from_date=${from_date}&to_date=${to_date}`,
+    { method: 'POST' },
+  )
+
+export const getBreakoutBacktestAllStatus = () =>
+  apiFetch<{ running: boolean; done: number; total: number; errors: number; finished: boolean }>(
+    '/zones/breakout/backtest-all/status',
+  )
+
+export const getBreakoutBacktestResults = () =>
+  apiFetch<BacktestResult[]>('/zones/breakout/backtest-results')
+
+// ── ML Zone Scorer ─────────────────────────────────────────────────────────────
+
+export interface MLModelStatus {
+  model_exists: boolean
+  using_ml: boolean
+  note: string
+}
+
+export interface MLTrainResult {
+  trained: boolean
+  samples: number
+  cv_accuracy?: number
+  positive_rate?: number
+  reason?: string
+}
+
+export const getMLStatus = () => apiFetch<MLModelStatus>('/zones/ml/status')
+export const trainMLModel = () => apiFetch<MLTrainResult>('/zones/ml/train', { method: 'POST' })
+
+// ── Recommendations ────────────────────────────────────────────────────────────
+
+export interface ZoneRecommendation {
+  symbol: string
+  composite_score: number
+  ml_confidence: number
+  long_setup_score: number | null
+  short_setup_score: number | null
+  best_long_rr: number | null
+  best_short_rr: number | null
+  rvol: number
+  position_tag: string
+  price: number
+  atr: number
+  pct_from_52w_high: number | null
+  pct_from_52w_low: number | null
+  long_setup: ZoneSetup | null
+  short_setup: ZoneSetup | null
+  demand_zones: ZoneCard[]
+  supply_zones: ZoneCard[]
+  market_structure: string
+  candle_signal: string
+  reason: string
+}
+
+export const getZoneRecommendations = (params?: { setup_type?: string; limit?: number }) => {
+  const qs = new URLSearchParams()
+  if (params?.setup_type) qs.set('setup_type', params.setup_type)
+  if (params?.limit)      qs.set('limit', String(params.limit))
+  const q = qs.toString()
+  return apiFetch<ZoneRecommendation[]>(`/zones/recommendations${q ? '?' + q : ''}`)
+}

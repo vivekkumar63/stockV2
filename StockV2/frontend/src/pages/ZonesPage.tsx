@@ -4,7 +4,7 @@ import {
   analyzeZones, getZoneRankings, recomputeAll, getRecomputeStatus,
   getChartData, runBacktest, getBacktestResults, getBacktestTrades,
   getBacktestSymbols, runBacktestAll, getBacktestAllStatus, getAllBacktestResults,
-  scanBreakouts,
+  scanBreakouts, runBreakoutBacktestAll, getBreakoutBacktestAllStatus, getBreakoutBacktestResults,
   type ZoneCard, type ZoneRankRow, type ZoneResult, type RecomputeStatus,
   type BacktestResult, type BacktestTrade, type BreakoutSignal,
 } from '../api/zones'
@@ -219,7 +219,15 @@ function AnalysisPanel({ result }: { result: ZoneResult }) {
 
 // ── Rank Row ──────────────────────────────────────────────────────────────────
 
-const COL_GRID = '28px 72px 50px 95px 60px 50px 50px 45px 45px 62px 62px 62px'
+const COL_GRID = '28px 72px 50px 95px 60px 50px 50px 45px 45px 62px 62px 54px'
+
+function mlColor(v: number | null): string {
+  if (v == null) return 'text-gray-400'
+  const pct = v * 100
+  if (pct >= 70) return 'text-green-600 font-bold'
+  if (pct >= 55) return 'text-yellow-600 font-semibold'
+  return 'text-gray-500'
+}
 
 function distColor(v: number | null, isLong: boolean) {
   if (v == null) return 'text-gray-400'
@@ -266,7 +274,9 @@ function RankRow({
         <span className={w52Color(row.pct_from_52w_low, false)} title="% above 52W low (+= above)">
           {row.pct_from_52w_low != null ? `+${row.pct_from_52w_low}%` : '—'}
         </span>
-        <span className="text-gray-400">{row.computed_at ? new Date(row.computed_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '—'}</span>
+        <span className={mlColor(row.ml_confidence)} title={`ML confidence: ${row.ml_confidence != null ? Math.round(row.ml_confidence * 100) + '%' : 'N/A'}`}>
+          {row.ml_confidence != null ? `${Math.round(row.ml_confidence * 100)}%` : '—'}
+        </span>
       </div>
     </div>
   )
@@ -274,13 +284,25 @@ function RankRow({
 
 // ── Backtest Tab ──────────────────────────────────────────────────────────────
 
+type AllBtSortKey = 'symbol' | 'total_trades' | 'win_rate' | 'total_pnl_pct' | 'avg_hold_days'
+
 function BacktestTab() {
   const [btSymbol, setBtSymbol]   = useState('')
   const [fromDate, setFromDate]   = useState('2022-01-01')
   const [toDate, setToDate]       = useState(new Date().toISOString().slice(0, 10))
   const [selectedResult, setSelectedResult] = useState<BacktestResult | null>(null)
   const [allTab, setAllTab]       = useState<'single' | 'all'>('single')
+  const [btSort, setBtSort]       = useState<AllBtSortKey>('total_pnl_pct')
+  const [btSortDir, setBtSortDir] = useState<'asc' | 'desc'>('desc')
   const queryClient = useQueryClient()
+
+  const toggleSort = (key: AllBtSortKey) => {
+    if (btSort === key) setBtSortDir(d => d === 'asc' ? 'desc' : 'asc')
+    else { setBtSort(key); setBtSortDir('desc') }
+  }
+
+  const sortIndicator = (key: AllBtSortKey) =>
+    btSort === key ? (btSortDir === 'desc' ? ' ▼' : ' ▲') : ''
 
   // Symbol list for combo box
   const symbolsQuery = useQuery({
@@ -478,11 +500,22 @@ function BacktestTab() {
           <div className="bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden">
             <div className="grid px-4 py-2 text-[10px] font-bold text-gray-500 uppercase bg-gray-50 border-b border-gray-200"
               style={{ gridTemplateColumns: '1fr 80px 70px 80px 70px 90px' }}>
-              <span>Symbol</span>
-              <span className="text-right">Trades</span>
-              <span className="text-right">Win %</span>
-              <span className="text-right">PnL %</span>
-              <span className="text-right">Avg Days</span>
+              {(
+                [
+                  ['symbol',         'Symbol',   'text-left'],
+                  ['total_trades',   'Trades',   'text-right'],
+                  ['win_rate',       'Win %',    'text-right'],
+                  ['total_pnl_pct',  'PnL %',    'text-right'],
+                  ['avg_hold_days',  'Avg Days', 'text-right'],
+                ] as [AllBtSortKey, string, string][]
+              ).map(([key, label, align]) => (
+                <button key={key}
+                  onClick={() => toggleSort(key)}
+                  className={`${align} hover:text-blue-600 ${btSort === key ? 'text-blue-600' : ''}`}
+                >
+                  {label}{sortIndicator(key)}
+                </button>
+              ))}
               <span className="text-right">Period</span>
             </div>
             {allResultsQuery.isLoading && (
@@ -491,7 +524,15 @@ function BacktestTab() {
             {allResultsQuery.data?.length === 0 && (
               <div className="text-center py-8 text-gray-400 text-sm">No results yet. Run "All Stocks" first.</div>
             )}
-            {allResultsQuery.data?.map(r => (
+            {allResultsQuery.data
+              ?.slice()
+              .sort((a, b) => {
+                const va = a[btSort] ?? (btSort === 'symbol' ? '' : -Infinity)
+                const vb = b[btSort] ?? (btSort === 'symbol' ? '' : -Infinity)
+                const cmp = typeof va === 'string' ? va.localeCompare(vb as string) : (va as number) - (vb as number)
+                return btSortDir === 'desc' ? -cmp : cmp
+              })
+              .map(r => (
               <div
                 key={r.id}
                 className="grid px-4 py-2 text-xs border-b border-gray-100 hover:bg-gray-50 cursor-pointer"
@@ -527,12 +568,34 @@ const CONVICTION_COLOR: Record<number, string> = {
 
 function BreakoutsTab() {
   const queryClient = useQueryClient()
+  const [btFromDate, setBtFromDate] = useState('2022-01-01')
+  const [btToDate, setBtToDate]     = useState(new Date().toISOString().slice(0, 10))
+  const [showBtSection, setShowBtSection] = useState(false)
 
   const breakoutQuery = useQuery({
     queryKey: ['zone-breakouts'],
     queryFn:  scanBreakouts,
     staleTime: 5 * 60 * 1000,
   })
+
+  const btAllMutation = useMutation({
+    mutationFn: () => runBreakoutBacktestAll(btFromDate, btToDate),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['zone-breakout-bt-status'] }),
+  })
+
+  const btStatusQuery = useQuery({
+    queryKey:  ['zone-breakout-bt-status'],
+    queryFn:   getBreakoutBacktestAllStatus,
+    refetchInterval: (q) => q.state.data?.running ? 2000 : false,
+  })
+
+  const btResultsQuery = useQuery({
+    queryKey: ['zone-breakout-bt-results'],
+    queryFn:  getBreakoutBacktestResults,
+    enabled:  showBtSection,
+  })
+
+  const btStatus = btStatusQuery.data
 
   const [expanded, setExpanded] = useState<string | null>(null)
 
@@ -560,6 +623,83 @@ function BreakoutsTab() {
           No breakout signals today. Run zone precompute first if no data.
         </div>
       )}
+
+      {/* Backtest breakout candidates section */}
+      <div className="mb-4">
+        <button
+          onClick={() => setShowBtSection(v => !v)}
+          className="text-sm font-semibold text-indigo-600 hover:text-indigo-800 flex items-center gap-1"
+        >
+          {showBtSection ? '▼' : '▶'} Backtest Breakout Candidates
+        </button>
+        {showBtSection && (
+          <div className="mt-3 bg-white rounded-lg border border-gray-200 p-4 shadow-sm">
+            <div className="flex items-center gap-3 flex-wrap mb-4">
+              <span className="text-xs text-gray-500">Run zone strategy backtest on stocks with current breakout signals:</span>
+              <input type="date" value={btFromDate} onChange={e => setBtFromDate(e.target.value)}
+                className="border border-gray-300 rounded px-2 py-1.5 text-sm focus:outline-none" />
+              <span className="text-gray-400 text-sm">→</span>
+              <input type="date" value={btToDate} onChange={e => setBtToDate(e.target.value)}
+                className="border border-gray-300 rounded px-2 py-1.5 text-sm focus:outline-none" />
+              <button
+                onClick={() => btAllMutation.mutate()}
+                disabled={btStatus?.running}
+                className="px-4 py-1.5 bg-indigo-600 text-white text-sm rounded font-medium hover:bg-indigo-700 disabled:opacity-50"
+              >
+                {btStatus?.running ? `Running… ${btStatus.done}/${btStatus.total}` : 'Backtest All Breakout Stocks'}
+              </button>
+              {btStatus?.running && (
+                <div className="flex-1 h-2 bg-gray-200 rounded-full overflow-hidden min-w-[100px]">
+                  <div className="h-full bg-indigo-500 transition-all"
+                    style={{ width: `${btStatus.total ? (btStatus.done / btStatus.total) * 100 : 0}%` }} />
+                </div>
+              )}
+              {btStatus?.finished && !btStatus.running && (
+                <span className="text-xs text-green-600 font-medium">
+                  Done — {btStatus.done} stocks{btStatus.errors > 0 ? `, ${btStatus.errors} errors` : ''}
+                </span>
+              )}
+              <button
+                onClick={() => queryClient.invalidateQueries({ queryKey: ['zone-breakout-bt-results'] })}
+                className="px-3 py-1.5 text-xs border border-gray-300 rounded text-gray-600 hover:bg-gray-50"
+              >
+                Refresh Results
+              </button>
+            </div>
+            {btResultsQuery.data && btResultsQuery.data.length > 0 && (
+              <div className="overflow-hidden rounded border border-gray-100">
+                <div className="grid px-4 py-2 text-[10px] font-bold text-gray-500 uppercase bg-gray-50 border-b border-gray-200"
+                  style={{ gridTemplateColumns: '1fr 80px 70px 80px 70px 90px' }}>
+                  <span>Symbol</span>
+                  <span className="text-right">Trades</span>
+                  <span className="text-right">Win %</span>
+                  <span className="text-right">PnL %</span>
+                  <span className="text-right">Avg Days</span>
+                  <span className="text-right">Period</span>
+                </div>
+                {btResultsQuery.data.map(r => (
+                  <div key={r.id} className="grid px-4 py-2 text-xs border-b border-gray-100 hover:bg-gray-50"
+                    style={{ gridTemplateColumns: '1fr 80px 70px 80px 70px 90px' }}>
+                    <span className="font-medium text-gray-800">{r.symbol}</span>
+                    <span className="text-right text-gray-600">{r.total_trades}</span>
+                    <span className={`text-right font-medium ${r.win_rate != null && r.win_rate >= 50 ? 'text-green-600' : 'text-red-500'}`}>
+                      {r.win_rate != null ? `${r.win_rate}%` : '—'}
+                    </span>
+                    <span className={`text-right font-semibold ${r.total_pnl_pct >= 0 ? 'text-green-600' : 'text-red-500'}`}>
+                      {r.total_pnl_pct >= 0 ? '+' : ''}{r.total_pnl_pct.toFixed(1)}%
+                    </span>
+                    <span className="text-right text-gray-500">{r.avg_hold_days != null ? `${r.avg_hold_days.toFixed(1)}d` : '—'}</span>
+                    <span className="text-right text-gray-400 text-[10px]">{r.from_date.slice(0, 7)} → {r.to_date.slice(0, 7)}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+            {btResultsQuery.data?.length === 0 && (
+              <div className="text-center py-4 text-gray-400 text-sm">No backtest results for current breakout candidates yet.</div>
+            )}
+          </div>
+        )}
+      </div>
 
       {breakoutQuery.data && breakoutQuery.data.length > 0 && (
         <div className="bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden">
@@ -863,7 +1003,7 @@ export function ZonesPage() {
                   ['dist_long',    'Dist↓'],
                   ['near_52w_high','52WH%'],
                   ['near_52w_low', '52WL%'],
-                  [null,           'Time'],
+                  [null,           'ML%'],
                 ] as [SortKey | null, string][]
               ).map(([key, label], i) =>
                 key ? (
