@@ -198,6 +198,9 @@ export interface BreakoutSignal {
   breakout_pct: number
   volume_ratio: number
   rsi: number
+  body_ratio: number
+  range_atr_ratio: number
+  ema50_slope_pct: number
   conviction_score: number
   signals_met: string[]
   signals_failed: string[]
@@ -205,13 +208,50 @@ export interface BreakoutSignal {
   market_structure: string
   candle_signal: string
   trendline_resistance: number | null
+  true_breakout_probability: number
+}
+
+export interface BreakoutBacktestResult {
+  id: number
+  symbol: string
+  from_date: string
+  to_date: string
+  total_trades: number
+  win_rate: number | null
+  total_pnl: number
+  avg_pnl_pct: number | null
+  ran_at: string
+}
+
+export interface BreakoutBacktestTrade {
+  entry_date: string
+  entry_price: number
+  resistance: number
+  exit_date: string | null
+  exit_price: number | null
+  pnl_pct: number | null
+  exit_reason: string
+  hold_days: number | null
+  volume_ratio: number
+  rsi: number
+  conviction_score: number
+}
+
+export interface BreakoutSingleBacktestResponse extends BreakoutBacktestResult {
+  trades: BreakoutBacktestTrade[]
 }
 
 export const scanBreakouts = () =>
   apiFetch<BreakoutSignal[]>('/zones/breakout/scan')
 
+export const runBreakoutBacktest = (params: { symbol: string; from_date: string; to_date: string }) =>
+  apiFetch<BreakoutSingleBacktestResponse>(
+    `/zones/breakout/backtest?symbol=${params.symbol.toUpperCase()}&from_date=${params.from_date}&to_date=${params.to_date}`,
+    { method: 'POST' },
+  )
+
 export const runBreakoutBacktestAll = (from_date: string, to_date: string) =>
-  apiFetch<{ status: string }>(
+  apiFetch<{ status: string; total?: number }>(
     `/zones/breakout/backtest-all?from_date=${from_date}&to_date=${to_date}`,
     { method: 'POST' },
   )
@@ -222,7 +262,21 @@ export const getBreakoutBacktestAllStatus = () =>
   )
 
 export const getBreakoutBacktestResults = () =>
-  apiFetch<BacktestResult[]>('/zones/breakout/backtest-results')
+  apiFetch<BreakoutBacktestResult[]>('/zones/breakout/backtest-results')
+
+export const getBreakoutBacktestTrades = (resultId: number) =>
+  apiFetch<BreakoutBacktestTrade[]>(`/zones/breakout/backtest-results/${resultId}/trades`)
+
+// ── Breakout ML ────────────────────────────────────────────────────────────────
+
+export interface BreakoutMLStatus {
+  model_exists: boolean
+  using_ml: boolean
+  note: string
+}
+
+export const getBreakoutMLStatus = () => apiFetch<BreakoutMLStatus>('/zones/breakout/ml/status')
+export const trainBreakoutML = () => apiFetch<MLTrainResult>('/zones/breakout/ml/train', { method: 'POST' })
 
 // ── ML Zone Scorer ─────────────────────────────────────────────────────────────
 

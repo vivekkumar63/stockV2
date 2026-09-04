@@ -14,6 +14,8 @@ from .engine import ZoneEngine, zone_to_dict, setup_to_dict
 from .precompute import ZonePrecomputer, get_precompute_state
 from .backtester import ZoneBacktester
 from .breakout_scanner import BreakoutScanner
+from .breakout_backtester import BreakoutBacktester
+from .breakout_ml import BreakoutMLScorer as BreakoutML
 from .ml_scorer import MLZoneScorer, _build_reason
 from domains.data.nse_universe import NSE_SYMBOLS
 
@@ -538,74 +540,63 @@ def scan_breakouts(db: Session = Depends(get_db)):
     return BreakoutScanner().scan(db)
 
 
-# ── Breakout-candidates backtest ──────────────────────────────────────────────
+# ── Breakout signal backtesting ───────────────────────────────────────────────
 
-def _run_bt_breakout_bg(from_date: date, to_date: date) -> None:
+def _store_breakout_backtest(db: Session, symbol: str, from_date: date,
+                              to_date: date, trades) -> int:
+    total    = len(trades)
+    wins     = sum(1 for t in trades if t.pnl_pct > 0)
+    win_rate = round(wins / total * 100, 1) if total else None
+    total_pnl = round(sum(t.pnl_pct for t in trades), 2)
+    avg_pnl   = round(total_pnl / total, 2) if total else None
+
+    db.execute(text("""
+        INSERT INTO breakout_backtest_results
+            (symbol, from_date, to_date, total_trades, win_rate, total_pnl, avg_pnl_pct)
+        VALUES (:sym, :fd, :td, :tt, :wr, :tp, :ap)
+    """), {"sym": symbol, "fd": from_date, "td": to_date, "tt": total,
+           "wr": win_rate, "tp": total_pnl, "ap": avg_pnl})
+
+    rid = db.execute(
+        text("SELECT id FROM breakout_backtest_results WHERE symbol=:s AND from_date=:fd AND to_date=:td ORDER BY ran_at DESC LIMIT 1"),
+        {"s": symbol, "fd": from_date, "td": to_date},
+    ).scalar()
+
+    if rid and trades:
+        db.execute(text("""
+            INSERT INTO breakout_backtest_trades
+                (result_id, entry_date, entry_price, resistance, exit_date, exit_price,
+                 pnl_pct, exit_reason, hold_days,
+                 volume_ratio, rsi, body_ratio, range_atr_ratio,
+                 conviction_score, breakout_pct, ema50_slope_pct)
+            VALUES (:rid, :ed, :ep, :res, :xd, :xp, :pp, :er, :hd,
+                    :vr, :rsi, :br, :rar, :cs, :bpct, :slope)
+        """), [{
+            "rid": rid, "ed": t.entry_date, "ep": t.entry_price,
+            "res": t.resistance, "xd": t.exit_date, "xp": t.exit_price,
+            "pp": t.pnl_pct, "er": t.exit_reason, "hd": t.hold_days,
+            "vr": t.volume_ratio, "rsi": t.rsi, "br": t.body_ratio,
+            "rar": t.range_atr_ratio, "cs": t.conviction_score,
+            "bpct": t.breakout_pct, "slope": t.ema50_slope_pct,
+        } for t in trades])
+    db.commit()
+    return rid or 0
+
+
+def _run_bt_breakout_bg(symbols: list[str], from_date: date, to_date: date) -> None:
     global _bt_breakout_state
-
-    # Step 1: scan for today's breakout symbols
-    db = SessionLocal()
-    try:
-        signals = BreakoutScanner().scan(db)
-    except Exception:
-        logger.exception("[bt-breakout] scan failed")
-        signals = []
-    finally:
-        db.close()
-
-    symbols = [s["symbol"] for s in signals]
     with _bt_breakout_lock:
         _bt_breakout_state = {
             "running": True, "done": 0, "total": len(symbols),
             "errors": 0, "finished": False,
         }
 
-    if not symbols:
-        with _bt_breakout_lock:
-            _bt_breakout_state["running"]  = False
-            _bt_breakout_state["finished"] = True
-        return
-
-    # Step 2: backtest each breakout symbol
-    backtester = ZoneBacktester()
+    backtester = BreakoutBacktester()
     for sym in symbols:
         db = SessionLocal()
         try:
-            trades    = backtester.run(sym, from_date, to_date, db)
-            total     = len(trades)
-            wins      = sum(1 for t in trades if t.pnl_pct > 0)
-            win_rate  = round(wins / total * 100, 1) if total else None
-            total_pnl = round(sum(t.pnl_pct for t in trades), 2)
-            avg_hold  = round(sum(t.hold_days for t in trades) / total, 1) if total else None
-
-            db.execute(
-                text("""
-                    INSERT INTO zone_backtest_results
-                        (symbol, from_date, to_date, total_trades, win_rate, total_pnl_pct, avg_hold_days)
-                    VALUES (:sym, :fd, :td, :tt, :wr, :tp, :ah)
-                """),
-                {"sym": sym, "fd": from_date, "td": to_date, "tt": total,
-                 "wr": win_rate, "tp": total_pnl, "ah": avg_hold},
-            )
-            if trades:
-                rid = db.execute(
-                    text("SELECT id FROM zone_backtest_results WHERE symbol=:s AND from_date=:fd AND to_date=:td ORDER BY ran_at DESC LIMIT 1"),
-                    {"s": sym, "fd": from_date, "td": to_date},
-                ).scalar()
-                if rid:
-                    db.execute(
-                        text("""
-                            INSERT INTO zone_backtest_trades
-                                (result_id, entry_date, entry_price, exit_date, exit_price,
-                                 pnl_pct, exit_reason, hold_days)
-                            VALUES (:rid, :ed, :ep, :xd, :xp, :pp, :er, :hd)
-                        """),
-                        [{"rid": rid, "ed": t.entry_date, "ep": t.entry_price,
-                          "xd": t.exit_date, "xp": t.exit_price, "pp": t.pnl_pct,
-                          "er": t.exit_reason, "hd": t.hold_days}
-                         for t in trades],
-                    )
-            db.commit()
+            trades = backtester.run(sym, from_date, to_date, db)
+            _store_breakout_backtest(db, sym, from_date, to_date, trades)
         except Exception:
             db.rollback()
             logger.exception("[bt-breakout] failed for %s", sym)
@@ -622,9 +613,49 @@ def _run_bt_breakout_bg(from_date: date, to_date: date) -> None:
     logger.info("[bt-breakout] complete: %d/%d", _bt_breakout_state["done"], _bt_breakout_state["total"])
 
 
+@router.post("/zones/breakout/backtest")
+def run_breakout_backtest_single(symbol: str, from_date: str, to_date: str,
+                                  db: Session = Depends(get_db)):
+    """Backtest the breakout signal strategy for a single symbol."""
+    try:
+        fd = date.fromisoformat(from_date)
+        td = date.fromisoformat(to_date)
+    except ValueError:
+        raise HTTPException(status_code=422, detail="Dates must be YYYY-MM-DD")
+
+    sym = symbol.upper().strip()
+    trades = BreakoutBacktester().run(sym, fd, td, db)
+    rid = _store_breakout_backtest(db, sym, fd, td, trades)
+
+    total    = len(trades)
+    wins     = sum(1 for t in trades if t.pnl_pct > 0)
+    win_rate = round(wins / total * 100, 1) if total else None
+    return {
+        "result_id":   rid,
+        "symbol":      sym,
+        "total_trades": total,
+        "win_rate":    win_rate,
+        "total_pnl":   round(sum(t.pnl_pct for t in trades), 2),
+        "avg_pnl_pct": round(sum(t.pnl_pct for t in trades) / total, 2) if total else None,
+        "trades": [{
+            "entry_date":   str(t.entry_date),
+            "entry_price":  t.entry_price,
+            "resistance":   t.resistance,
+            "exit_date":    str(t.exit_date),
+            "exit_price":   t.exit_price,
+            "pnl_pct":      t.pnl_pct,
+            "exit_reason":  t.exit_reason,
+            "hold_days":    t.hold_days,
+            "conviction":   t.conviction_score,
+            "volume_ratio": t.volume_ratio,
+            "rsi":          t.rsi,
+        } for t in trades],
+    }
+
+
 @router.post("/zones/breakout/backtest-all")
 def run_breakout_backtest_all(from_date: str, to_date: str):
-    """Backtest zone strategy for all stocks with current breakout signals."""
+    """Backtest the breakout signal strategy across all NSE stocks."""
     global _bt_breakout_state
     with _bt_breakout_lock:
         if _bt_breakout_state.get("running"):
@@ -635,10 +666,11 @@ def run_breakout_backtest_all(from_date: str, to_date: str):
     except ValueError:
         raise HTTPException(status_code=422, detail="Dates must be YYYY-MM-DD")
 
+    symbols = list(NSE_SYMBOLS)
     threading.Thread(
-        target=_run_bt_breakout_bg, args=(fd, td), daemon=True, name="zone-bt-breakout"
+        target=_run_bt_breakout_bg, args=(symbols, fd, td), daemon=True, name="zone-bt-breakout"
     ).start()
-    return {"status": "started"}
+    return {"status": "started", "total": len(symbols)}
 
 
 @router.get("/zones/breakout/backtest-all/status")
@@ -649,35 +681,60 @@ def get_breakout_backtest_status():
 
 @router.get("/zones/breakout/backtest-results")
 def get_breakout_backtest_results(db: Session = Depends(get_db)):
-    """Return latest backtest result for each breakout symbol, sorted by pnl desc."""
-    today = str(date.today())
-    # Get today's breakout symbols from zone_analysis_results (position_tag or recent scan)
-    # Use the current breakout scan results
-    signals = BreakoutScanner().scan(db)
-    if not signals:
-        return []
-    syms = [s["symbol"] for s in signals]
-
+    """Latest breakout backtest result per symbol, sorted by total_pnl desc."""
     rows = db.execute(text("""
         SELECT DISTINCT ON (symbol)
-            id, symbol, from_date, to_date, total_trades, win_rate, total_pnl_pct, avg_hold_days, ran_at
-        FROM zone_backtest_results
-        WHERE symbol = ANY(:syms)
+            id, symbol, from_date, to_date, total_trades, win_rate, total_pnl, avg_pnl_pct, ran_at
+        FROM breakout_backtest_results
         ORDER BY symbol, ran_at DESC
-    """), {"syms": syms}).fetchall()
+    """)).fetchall()
 
-    results = [
-        {
-            "id":            r[0], "symbol": r[1],
-            "from_date":     str(r[2]), "to_date": str(r[3]),
-            "total_trades":  r[4], "win_rate": r[5],
-            "total_pnl_pct": r[6], "avg_hold_days": r[7],
-            "ran_at":        str(r[8]),
-        }
-        for r in rows
-    ]
-    results.sort(key=lambda x: x["total_pnl_pct"] or 0, reverse=True)
+    results = [{
+        "id": r[0], "symbol": r[1],
+        "from_date": str(r[2]), "to_date": str(r[3]),
+        "total_trades": r[4], "win_rate": r[5],
+        "total_pnl": r[6], "avg_pnl_pct": r[7],
+        "ran_at": str(r[8]),
+    } for r in rows]
+    results.sort(key=lambda x: x["total_pnl"] or 0, reverse=True)
     return results
+
+
+@router.get("/zones/breakout/backtest-results/{result_id}/trades")
+def get_breakout_backtest_trades(result_id: int, db: Session = Depends(get_db)):
+    rows = db.execute(text("""
+        SELECT entry_date, entry_price, resistance, exit_date, exit_price,
+               pnl_pct, exit_reason, hold_days, volume_ratio, rsi, conviction_score
+        FROM breakout_backtest_trades
+        WHERE result_id = :rid
+        ORDER BY entry_date
+    """), {"rid": result_id}).fetchall()
+    return [{
+        "entry_date": str(r[0]), "entry_price": r[1], "resistance": r[2],
+        "exit_date": str(r[3]) if r[3] else None, "exit_price": r[4],
+        "pnl_pct": r[5], "exit_reason": r[6], "hold_days": r[7],
+        "volume_ratio": r[8], "rsi": r[9], "conviction_score": r[10],
+    } for r in rows]
+
+
+# ── Breakout ML ───────────────────────────────────────────────────────────────
+
+@router.post("/zones/breakout/ml/train")
+def train_breakout_ml(db: Session = Depends(get_db)):
+    """Train the breakout ML model on stored breakout_backtest_trades."""
+    return BreakoutML.train(db)
+
+
+@router.get("/zones/breakout/ml/status")
+def get_breakout_ml_status():
+    from .breakout_ml import MODEL_PATH
+    return {
+        "model_exists": BreakoutML.model_exists(),
+        "model_path":   str(MODEL_PATH),
+        "using_ml":     BreakoutML.model_exists(),
+        "note":         "Rule-based fallback active" if not BreakoutML.model_exists()
+                        else "ML model active",
+    }
 
 
 # ── ML Zone Scorer ────────────────────────────────────────────────────────────

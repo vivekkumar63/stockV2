@@ -13,6 +13,8 @@ from datetime import date
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from .breakout_ml import BreakoutMLScorer
+
 logger = logging.getLogger(__name__)
 
 _CONVICTION_THRESHOLD = 4   # out of 6 signals
@@ -69,7 +71,7 @@ class BreakoutScanner:
                     "avg_vol_20": float(r[6] or 1),
                 }
 
-        # ── Batch load: latest indicators ─────────────────────────────────
+        # ── Batch load: latest indicators + EMA50 slope ──────────────────
         ind_map: dict[str, dict] = {}
         try:
             ind_rows = db.execute(text("""
@@ -79,13 +81,27 @@ class BreakoutScanner:
                     FROM stock_indicators_daily
                     WHERE symbol = ANY(:syms)
                 )
-                SELECT symbol, rsi_14, ema_50 FROM ranked WHERE rn = 1
+                SELECT
+                    symbol,
+                    MAX(CASE WHEN rn = 1 THEN rsi_14 END) AS rsi,
+                    MAX(CASE WHEN rn = 1 THEN ema_50  END) AS ema50_now,
+                    MAX(CASE WHEN rn = 5 THEN ema_50  END) AS ema50_prev
+                FROM ranked
+                WHERE rn <= 5
+                GROUP BY symbol
             """), {"syms": symbols}).fetchall()
 
             for r in ind_rows:
+                rsi       = float(r[1]) if r[1] is not None else 50.0
+                ema50_now  = float(r[2]) if r[2] is not None else 0.0
+                ema50_prev = float(r[3]) if r[3] is not None else 0.0
+                slope = 0.0
+                if ema50_prev > 0 and ema50_now > 0 and math.isfinite(ema50_now):
+                    slope = (ema50_now - ema50_prev) / ema50_prev * 100
                 ind_map[r[0]] = {
-                    "rsi": float(r[1]) if r[1] is not None else 50.0,
-                    "ema50": float(r[2]) if r[2] is not None else 0.0,
+                    "rsi": rsi,
+                    "ema50": ema50_now,
+                    "ema50_slope_pct": round(slope, 2),
                 }
         except Exception as e:
             logger.debug("[BreakoutScanner] indicator load failed: %s", e)
@@ -159,13 +175,19 @@ class BreakoutScanner:
             if score < _CONVICTION_THRESHOLD:
                 continue
 
-            signals.append({
+            ema50_slope = ind.get("ema50_slope_pct", 0.0)
+            range_atr_ratio = round(rng / atr, 2) if atr > 0 else 0.0
+
+            signal = {
                 "symbol":           sym,
                 "current_price":    round(close, 2),
                 "resistance":       round(resistance, 2),
                 "breakout_pct":     round(breakout_pct, 2),
                 "volume_ratio":     round(vol_ratio, 2),
                 "rsi":              round(rsi, 1),
+                "body_ratio":       round(body_ratio, 3),
+                "range_atr_ratio":  range_atr_ratio,
+                "ema50_slope_pct":  ema50_slope,
                 "conviction_score": score,
                 "signals_met":      met,
                 "signals_failed":   failed,
@@ -173,7 +195,9 @@ class BreakoutScanner:
                 "market_structure": rj.get("market_structure", "sideways"),
                 "candle_signal":    rj.get("candle_signal", "NONE"),
                 "trendline_resistance": round(tl_resistance, 2) if tl_resistance else None,
-            })
+            }
+            signal["true_breakout_probability"] = BreakoutMLScorer.predict(signal)
+            signals.append(signal)
 
         signals.sort(key=lambda x: (x["conviction_score"], x["volume_ratio"]), reverse=True)
         logger.info("[BreakoutScanner] %d signal(s) found for %s", len(signals), today)

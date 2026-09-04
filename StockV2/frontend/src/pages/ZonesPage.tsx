@@ -4,9 +4,12 @@ import {
   analyzeZones, getZoneRankings, recomputeAll, getRecomputeStatus,
   getChartData, runBacktest, getBacktestResults, getBacktestTrades,
   getBacktestSymbols, runBacktestAll, getBacktestAllStatus, getAllBacktestResults,
-  scanBreakouts, runBreakoutBacktestAll, getBreakoutBacktestAllStatus, getBreakoutBacktestResults,
+  scanBreakouts, runBreakoutBacktest, runBreakoutBacktestAll,
+  getBreakoutBacktestAllStatus, getBreakoutBacktestResults, getBreakoutBacktestTrades,
+  getBreakoutMLStatus, trainBreakoutML,
   type ZoneCard, type ZoneRankRow, type ZoneResult, type RecomputeStatus,
   type BacktestResult, type BacktestTrade, type BreakoutSignal,
+  type BreakoutBacktestResult, type BreakoutBacktestTrade,
 } from '../api/zones'
 import { PriceChart } from '../components/PriceChart'
 
@@ -566,16 +569,43 @@ const CONVICTION_COLOR: Record<number, string> = {
   4: 'bg-yellow-500 text-white',
 }
 
+function mlProbBadge(p: number) {
+  if (p >= 0.70) return <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-green-100 text-green-700">{Math.round(p * 100)}%</span>
+  if (p >= 0.55) return <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-yellow-100 text-yellow-700">{Math.round(p * 100)}%</span>
+  return <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-gray-100 text-gray-500">{Math.round(p * 100)}%</span>
+}
+
 function BreakoutsTab() {
   const queryClient = useQueryClient()
+  const [btSymbol, setBtSymbol]     = useState('')
   const [btFromDate, setBtFromDate] = useState('2022-01-01')
   const [btToDate, setBtToDate]     = useState(new Date().toISOString().slice(0, 10))
-  const [showBtSection, setShowBtSection] = useState(false)
+  const [showBtSection, setShowBtSection]   = useState(false)
+  const [showAllResults, setShowAllResults] = useState(false)
+  const [expandedResult, setExpandedResult] = useState<number | null>(null)
 
   const breakoutQuery = useQuery({
     queryKey: ['zone-breakouts'],
     queryFn:  scanBreakouts,
     staleTime: 5 * 60 * 1000,
+  })
+
+  const mlStatusQuery = useQuery({
+    queryKey: ['breakout-ml-status'],
+    queryFn:  getBreakoutMLStatus,
+  })
+
+  const trainMutation = useMutation({
+    mutationFn: trainBreakoutML,
+    onSuccess:  () => queryClient.invalidateQueries({ queryKey: ['breakout-ml-status'] }),
+  })
+
+  const singleBtMutation = useMutation({
+    mutationFn: () => runBreakoutBacktest({ symbol: btSymbol, from_date: btFromDate, to_date: btToDate }),
+    onSuccess:  () => {
+      queryClient.invalidateQueries({ queryKey: ['breakout-bt-all-results'] })
+      setShowAllResults(true)
+    },
   })
 
   const btAllMutation = useMutation({
@@ -589,14 +619,19 @@ function BreakoutsTab() {
     refetchInterval: (q) => q.state.data?.running ? 2000 : false,
   })
 
-  const btResultsQuery = useQuery({
-    queryKey: ['zone-breakout-bt-results'],
+  const btAllResultsQuery = useQuery({
+    queryKey: ['breakout-bt-all-results'],
     queryFn:  getBreakoutBacktestResults,
-    enabled:  showBtSection,
+    enabled:  showAllResults,
+  })
+
+  const btTradesQuery = useQuery({
+    queryKey: ['breakout-bt-trades', expandedResult],
+    queryFn:  () => getBreakoutBacktestTrades(expandedResult!),
+    enabled:  expandedResult != null,
   })
 
   const btStatus = btStatusQuery.data
-
   const [expanded, setExpanded] = useState<string | null>(null)
 
   return (
@@ -605,14 +640,36 @@ function BreakoutsTab() {
       <div className="flex items-center gap-3 bg-white rounded-lg border border-gray-200 px-4 py-3 mb-4 shadow-sm">
         <span className="text-sm font-semibold text-gray-700">Breakout Scanner</span>
         <span className="text-xs text-gray-400">Min 4/6 conviction signals · Max 6% above resistance · Today's zones</span>
-        <button
-          onClick={() => queryClient.invalidateQueries({ queryKey: ['zone-breakouts'] })}
-          disabled={breakoutQuery.isFetching}
-          className="ml-auto px-4 py-1.5 bg-blue-600 text-white text-sm rounded font-medium hover:bg-blue-700 disabled:opacity-50"
-        >
-          {breakoutQuery.isFetching ? 'Scanning…' : 'Scan Now'}
-        </button>
+        <div className="ml-auto flex items-center gap-2">
+          {mlStatusQuery.data && (
+            <span className={`text-[10px] px-2 py-0.5 rounded font-medium ${mlStatusQuery.data.model_exists ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
+              {mlStatusQuery.data.model_exists ? 'ML active' : 'Rule-based'}
+            </span>
+          )}
+          <button
+            onClick={() => trainMutation.mutate()}
+            disabled={trainMutation.isPending}
+            className="px-3 py-1.5 text-xs border border-purple-300 text-purple-700 rounded hover:bg-purple-50 disabled:opacity-50"
+          >
+            {trainMutation.isPending ? 'Training…' : 'Train ML'}
+          </button>
+          <button
+            onClick={() => queryClient.invalidateQueries({ queryKey: ['zone-breakouts'] })}
+            disabled={breakoutQuery.isFetching}
+            className="px-4 py-1.5 bg-blue-600 text-white text-sm rounded font-medium hover:bg-blue-700 disabled:opacity-50"
+          >
+            {breakoutQuery.isFetching ? 'Scanning…' : 'Scan Now'}
+          </button>
+        </div>
       </div>
+
+      {trainMutation.data && (
+        <div className={`mb-3 px-4 py-2 rounded text-xs font-medium ${trainMutation.data.trained ? 'bg-green-50 text-green-700 border border-green-200' : 'bg-yellow-50 text-yellow-700 border border-yellow-200'}`}>
+          {trainMutation.data.trained
+            ? `Trained on ${trainMutation.data.samples} trades · CV accuracy: ${((trainMutation.data.cv_accuracy ?? 0) * 100).toFixed(1)}% · Win rate: ${((trainMutation.data.positive_rate ?? 0) * 100).toFixed(0)}%`
+            : trainMutation.data.reason}
+        </div>
+      )}
 
       {breakoutQuery.isLoading && (
         <div className="text-center py-12 text-gray-400 text-sm">Scanning for breakouts…</div>
@@ -624,33 +681,93 @@ function BreakoutsTab() {
         </div>
       )}
 
-      {/* Backtest breakout candidates section */}
+      {/* Breakout signal backtest section */}
       <div className="mb-4">
         <button
           onClick={() => setShowBtSection(v => !v)}
           className="text-sm font-semibold text-indigo-600 hover:text-indigo-800 flex items-center gap-1"
         >
-          {showBtSection ? '▼' : '▶'} Backtest Breakout Candidates
+          {showBtSection ? '▼' : '▶'} Backtest Breakout Signal Strategy
         </button>
         {showBtSection && (
-          <div className="mt-3 bg-white rounded-lg border border-gray-200 p-4 shadow-sm">
-            <div className="flex items-center gap-3 flex-wrap mb-4">
-              <span className="text-xs text-gray-500">Run zone strategy backtest on stocks with current breakout signals:</span>
+          <div className="mt-3 bg-white rounded-lg border border-gray-200 p-4 shadow-sm space-y-4">
+            <p className="text-xs text-gray-500">Tests the same 6-signal breakout criteria on historical data. Entry: close above 20-day high with ≥4 signals. SL: resistance − 0.3×ATR. Target: entry + 2.5×ATR. Max hold: 15 days.</p>
+
+            {/* Single stock */}
+            <div className="flex items-center gap-2 flex-wrap">
+              <input
+                value={btSymbol} onChange={e => setBtSymbol(e.target.value.toUpperCase())}
+                placeholder="Symbol e.g. RELIANCE"
+                className="border border-gray-300 rounded px-2 py-1.5 text-sm focus:outline-none w-36"
+              />
               <input type="date" value={btFromDate} onChange={e => setBtFromDate(e.target.value)}
                 className="border border-gray-300 rounded px-2 py-1.5 text-sm focus:outline-none" />
               <span className="text-gray-400 text-sm">→</span>
               <input type="date" value={btToDate} onChange={e => setBtToDate(e.target.value)}
                 className="border border-gray-300 rounded px-2 py-1.5 text-sm focus:outline-none" />
               <button
-                onClick={() => btAllMutation.mutate()}
-                disabled={btStatus?.running}
+                onClick={() => singleBtMutation.mutate()}
+                disabled={!btSymbol.trim() || singleBtMutation.isPending}
                 className="px-4 py-1.5 bg-indigo-600 text-white text-sm rounded font-medium hover:bg-indigo-700 disabled:opacity-50"
               >
-                {btStatus?.running ? `Running… ${btStatus.done}/${btStatus.total}` : 'Backtest All Breakout Stocks'}
+                {singleBtMutation.isPending ? 'Running…' : 'Run Backtest'}
+              </button>
+            </div>
+
+            {singleBtMutation.data && (() => {
+              const r = singleBtMutation.data
+              return (
+                <div className="bg-indigo-50 rounded p-3 text-sm">
+                  <div className="flex gap-6 flex-wrap">
+                    <span><span className="text-gray-500">Trades</span> <strong>{r.total_trades}</strong></span>
+                    <span><span className="text-gray-500">Win rate</span> <strong className={r.win_rate != null && r.win_rate >= 50 ? 'text-green-600' : 'text-red-500'}>{r.win_rate != null ? `${r.win_rate}%` : '—'}</strong></span>
+                    <span><span className="text-gray-500">Total PnL</span> <strong className={r.total_pnl >= 0 ? 'text-green-600' : 'text-red-500'}>{r.total_pnl >= 0 ? '+' : ''}{r.total_pnl.toFixed(1)}%</strong></span>
+                    <span><span className="text-gray-500">Avg PnL</span> <strong className={r.avg_pnl_pct != null && r.avg_pnl_pct >= 0 ? 'text-green-600' : 'text-red-500'}>{r.avg_pnl_pct != null ? `${r.avg_pnl_pct >= 0 ? '+' : ''}${r.avg_pnl_pct.toFixed(1)}%` : '—'}</strong></span>
+                  </div>
+                  {r.trades.length > 0 && (
+                    <div className="mt-3 overflow-hidden rounded border border-indigo-100">
+                      <div className="grid px-3 py-1.5 text-[10px] font-bold text-gray-500 uppercase bg-white border-b"
+                        style={{ gridTemplateColumns: '90px 70px 70px 90px 70px 70px 70px 55px' }}>
+                        <span>Entry</span><span className="text-right">Price</span><span className="text-right">Resist.</span>
+                        <span>Exit</span><span className="text-right">Exit ₹</span><span className="text-right">PnL%</span>
+                        <span>Reason</span><span className="text-right">Days</span>
+                      </div>
+                      {r.trades.map((t, i) => (
+                        <div key={i} className="grid px-3 py-1.5 text-xs border-b border-indigo-50 hover:bg-white"
+                          style={{ gridTemplateColumns: '90px 70px 70px 90px 70px 70px 70px 55px' }}>
+                          <span>{t.entry_date}</span>
+                          <span className="text-right">₹{t.entry_price.toFixed(0)}</span>
+                          <span className="text-right text-gray-500">₹{t.resistance.toFixed(0)}</span>
+                          <span>{t.exit_date ?? '—'}</span>
+                          <span className="text-right">{t.exit_price != null ? `₹${t.exit_price.toFixed(0)}` : '—'}</span>
+                          <span className={`text-right font-semibold ${t.pnl_pct != null && t.pnl_pct >= 0 ? 'text-green-600' : 'text-red-500'}`}>
+                            {t.pnl_pct != null ? `${t.pnl_pct >= 0 ? '+' : ''}${t.pnl_pct.toFixed(1)}%` : '—'}
+                          </span>
+                          <span className={`text-[10px] ${t.exit_reason === 'target_hit' ? 'text-green-600' : t.exit_reason === 'stop_loss' ? 'text-red-500' : 'text-gray-400'}`}>
+                            {t.exit_reason.replace('_', ' ')}
+                          </span>
+                          <span className="text-right text-gray-400">{t.hold_days ?? '—'}d</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )
+            })()}
+
+            {/* All stocks */}
+            <div className="border-t border-gray-100 pt-3 flex items-center gap-3 flex-wrap">
+              <span className="text-xs text-gray-500 font-medium">All stocks:</span>
+              <button
+                onClick={() => btAllMutation.mutate()}
+                disabled={btStatus?.running}
+                className="px-4 py-1.5 bg-purple-600 text-white text-sm rounded font-medium hover:bg-purple-700 disabled:opacity-50"
+              >
+                {btStatus?.running ? `Running… ${btStatus.done}/${btStatus.total}` : 'Backtest All NSE Stocks'}
               </button>
               {btStatus?.running && (
                 <div className="flex-1 h-2 bg-gray-200 rounded-full overflow-hidden min-w-[100px]">
-                  <div className="h-full bg-indigo-500 transition-all"
+                  <div className="h-full bg-purple-500 transition-all"
                     style={{ width: `${btStatus.total ? (btStatus.done / btStatus.total) * 100 : 0}%` }} />
                 </div>
               )}
@@ -660,42 +777,77 @@ function BreakoutsTab() {
                 </span>
               )}
               <button
-                onClick={() => queryClient.invalidateQueries({ queryKey: ['zone-breakout-bt-results'] })}
+                onClick={() => { setShowAllResults(true); queryClient.invalidateQueries({ queryKey: ['breakout-bt-all-results'] }) }}
                 className="px-3 py-1.5 text-xs border border-gray-300 rounded text-gray-600 hover:bg-gray-50"
               >
-                Refresh Results
+                {showAllResults ? 'Refresh' : 'Show'} All Results
               </button>
             </div>
-            {btResultsQuery.data && btResultsQuery.data.length > 0 && (
+
+            {showAllResults && btAllResultsQuery.data && btAllResultsQuery.data.length > 0 && (
               <div className="overflow-hidden rounded border border-gray-100">
-                <div className="grid px-4 py-2 text-[10px] font-bold text-gray-500 uppercase bg-gray-50 border-b border-gray-200"
-                  style={{ gridTemplateColumns: '1fr 80px 70px 80px 70px 90px' }}>
+                <div className="grid px-4 py-2 text-[10px] font-bold text-gray-500 uppercase bg-gray-50 border-b"
+                  style={{ gridTemplateColumns: '1fr 70px 65px 70px 70px 90px' }}>
                   <span>Symbol</span>
                   <span className="text-right">Trades</span>
                   <span className="text-right">Win %</span>
-                  <span className="text-right">PnL %</span>
-                  <span className="text-right">Avg Days</span>
+                  <span className="text-right">Total PnL</span>
+                  <span className="text-right">Avg PnL</span>
                   <span className="text-right">Period</span>
                 </div>
-                {btResultsQuery.data.map(r => (
-                  <div key={r.id} className="grid px-4 py-2 text-xs border-b border-gray-100 hover:bg-gray-50"
-                    style={{ gridTemplateColumns: '1fr 80px 70px 80px 70px 90px' }}>
-                    <span className="font-medium text-gray-800">{r.symbol}</span>
-                    <span className="text-right text-gray-600">{r.total_trades}</span>
-                    <span className={`text-right font-medium ${r.win_rate != null && r.win_rate >= 50 ? 'text-green-600' : 'text-red-500'}`}>
-                      {r.win_rate != null ? `${r.win_rate}%` : '—'}
-                    </span>
-                    <span className={`text-right font-semibold ${r.total_pnl_pct >= 0 ? 'text-green-600' : 'text-red-500'}`}>
-                      {r.total_pnl_pct >= 0 ? '+' : ''}{r.total_pnl_pct.toFixed(1)}%
-                    </span>
-                    <span className="text-right text-gray-500">{r.avg_hold_days != null ? `${r.avg_hold_days.toFixed(1)}d` : '—'}</span>
-                    <span className="text-right text-gray-400 text-[10px]">{r.from_date.slice(0, 7)} → {r.to_date.slice(0, 7)}</span>
+                {btAllResultsQuery.data.map((r: BreakoutBacktestResult) => (
+                  <div key={r.id}>
+                    <div
+                      className={`grid px-4 py-2 text-xs border-b border-gray-100 hover:bg-gray-50 cursor-pointer ${expandedResult === r.id ? 'bg-indigo-50' : ''}`}
+                      style={{ gridTemplateColumns: '1fr 70px 65px 70px 70px 90px' }}
+                      onClick={() => setExpandedResult(expandedResult === r.id ? null : r.id)}
+                    >
+                      <span className="font-medium text-gray-800">{r.symbol}</span>
+                      <span className="text-right text-gray-600">{r.total_trades}</span>
+                      <span className={`text-right font-medium ${r.win_rate != null && r.win_rate >= 50 ? 'text-green-600' : 'text-red-500'}`}>
+                        {r.win_rate != null ? `${r.win_rate}%` : '—'}
+                      </span>
+                      <span className={`text-right font-semibold ${r.total_pnl >= 0 ? 'text-green-600' : 'text-red-500'}`}>
+                        {r.total_pnl >= 0 ? '+' : ''}{r.total_pnl.toFixed(1)}%
+                      </span>
+                      <span className={`text-right ${r.avg_pnl_pct != null && r.avg_pnl_pct >= 0 ? 'text-green-600' : 'text-red-500'}`}>
+                        {r.avg_pnl_pct != null ? `${r.avg_pnl_pct >= 0 ? '+' : ''}${r.avg_pnl_pct.toFixed(1)}%` : '—'}
+                      </span>
+                      <span className="text-right text-gray-400 text-[10px]">{r.from_date.slice(0, 7)} → {r.to_date.slice(0, 7)}</span>
+                    </div>
+                    {expandedResult === r.id && btTradesQuery.data && (
+                      <div className="bg-indigo-50 px-4 py-2 border-b">
+                        <div className="grid px-2 py-1 text-[10px] font-bold text-gray-500 uppercase bg-white rounded border-b"
+                          style={{ gridTemplateColumns: '90px 70px 70px 90px 70px 70px 70px 55px' }}>
+                          <span>Entry</span><span className="text-right">Price</span><span className="text-right">Resist.</span>
+                          <span>Exit</span><span className="text-right">Exit ₹</span><span className="text-right">PnL%</span>
+                          <span>Reason</span><span className="text-right">Days</span>
+                        </div>
+                        {(btTradesQuery.data as BreakoutBacktestTrade[]).map((t, i) => (
+                          <div key={i} className="grid px-2 py-1 text-xs border-b border-indigo-100"
+                            style={{ gridTemplateColumns: '90px 70px 70px 90px 70px 70px 70px 55px' }}>
+                            <span>{t.entry_date}</span>
+                            <span className="text-right">₹{t.entry_price.toFixed(0)}</span>
+                            <span className="text-right text-gray-500">₹{t.resistance.toFixed(0)}</span>
+                            <span>{t.exit_date ?? '—'}</span>
+                            <span className="text-right">{t.exit_price != null ? `₹${t.exit_price.toFixed(0)}` : '—'}</span>
+                            <span className={`text-right font-semibold ${t.pnl_pct != null && t.pnl_pct >= 0 ? 'text-green-600' : 'text-red-500'}`}>
+                              {t.pnl_pct != null ? `${t.pnl_pct >= 0 ? '+' : ''}${t.pnl_pct.toFixed(1)}%` : '—'}
+                            </span>
+                            <span className={`text-[10px] ${t.exit_reason === 'target_hit' ? 'text-green-600' : t.exit_reason === 'stop_loss' ? 'text-red-500' : 'text-gray-400'}`}>
+                              {t.exit_reason.replace('_', ' ')}
+                            </span>
+                            <span className="text-right text-gray-400">{t.hold_days ?? '—'}d</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>
             )}
-            {btResultsQuery.data?.length === 0 && (
-              <div className="text-center py-4 text-gray-400 text-sm">No backtest results for current breakout candidates yet.</div>
+            {showAllResults && btAllResultsQuery.data?.length === 0 && (
+              <div className="text-center py-4 text-gray-400 text-sm">No breakout backtest results yet. Run a backtest first.</div>
             )}
           </div>
         )}
@@ -705,7 +857,7 @@ function BreakoutsTab() {
         <div className="bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden">
           {/* Table header */}
           <div className="grid px-4 py-2 text-[10px] font-bold text-gray-500 uppercase bg-gray-50 border-b border-gray-200"
-            style={{ gridTemplateColumns: '1fr 80px 80px 70px 65px 55px 70px' }}>
+            style={{ gridTemplateColumns: '1fr 80px 80px 70px 65px 55px 70px 60px' }}>
             <span>Symbol</span>
             <span className="text-right">Price</span>
             <span className="text-right">Resistance</span>
@@ -713,13 +865,14 @@ function BreakoutsTab() {
             <span className="text-right">Vol×</span>
             <span className="text-right">RSI</span>
             <span className="text-center">Conviction</span>
+            <span className="text-center">ML Prob</span>
           </div>
 
           {breakoutQuery.data.map((sig: BreakoutSignal) => (
             <div key={sig.symbol}>
               <div
                 className={`grid px-4 py-2.5 text-xs border-b border-gray-100 hover:bg-gray-50 cursor-pointer ${expanded === sig.symbol ? 'bg-blue-50' : ''}`}
-                style={{ gridTemplateColumns: '1fr 80px 80px 70px 65px 55px 70px' }}
+                style={{ gridTemplateColumns: '1fr 80px 80px 70px 65px 55px 70px 60px' }}
                 onClick={() => setExpanded(expanded === sig.symbol ? null : sig.symbol)}
               >
                 <div>
@@ -749,12 +902,15 @@ function BreakoutsTab() {
                     {sig.conviction_score}/6
                   </span>
                 </div>
+                <div className="flex justify-center">
+                  {mlProbBadge(sig.true_breakout_probability ?? 0)}
+                </div>
               </div>
 
               {/* Expanded signals detail */}
               {expanded === sig.symbol && (
                 <div className="bg-blue-50 px-6 py-3 border-b border-blue-100 text-xs">
-                  <div className="flex gap-8">
+                  <div className="flex gap-8 flex-wrap">
                     <div>
                       <div className="font-semibold text-gray-600 mb-1">Signals Met ({sig.signals_met.length})</div>
                       {sig.signals_met.map(s => (
@@ -766,6 +922,12 @@ function BreakoutsTab() {
                       {sig.signals_failed.map(s => (
                         <div key={s} className="text-red-500">❌ {s}</div>
                       ))}
+                    </div>
+                    <div>
+                      <div className="font-semibold text-gray-600 mb-1">Metrics</div>
+                      <div className="text-gray-600">EMA50 slope: {sig.ema50_slope_pct?.toFixed(2) ?? '—'}%</div>
+                      <div className="text-gray-600">Body ratio: {sig.body_ratio != null ? (sig.body_ratio * 100).toFixed(0) : '—'}%</div>
+                      <div className="text-gray-600">Range/ATR: {sig.range_atr_ratio?.toFixed(2) ?? '—'}×</div>
                     </div>
                     {sig.trendline_resistance && (
                       <div>
@@ -779,6 +941,13 @@ function BreakoutsTab() {
                         <div className="text-gray-600">{sig.zone_score}/100</div>
                       </div>
                     )}
+                    <div>
+                      <div className="font-semibold text-gray-600 mb-1">ML Prediction</div>
+                      <div className="flex items-center gap-2">
+                        {mlProbBadge(sig.true_breakout_probability ?? 0)}
+                        <span className="text-gray-500">true breakout probability</span>
+                      </div>
+                    </div>
                   </div>
                 </div>
               )}

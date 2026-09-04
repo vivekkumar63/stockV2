@@ -571,6 +571,54 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning("zone phase B tables migration skipped: %s", e)
 
+    # Breakout signal backtesting tables
+    try:
+        with engine.connect() as _conn:
+            _conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS breakout_backtest_results (
+                    id           SERIAL PRIMARY KEY,
+                    symbol       VARCHAR(20) NOT NULL,
+                    from_date    DATE NOT NULL,
+                    to_date      DATE NOT NULL,
+                    total_trades INTEGER DEFAULT 0,
+                    win_rate     REAL,
+                    total_pnl    REAL DEFAULT 0,
+                    avg_pnl_pct  REAL,
+                    ran_at       TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """))
+            _conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS idx_bbo_results ON breakout_backtest_results (symbol, ran_at DESC)"
+            ))
+            _conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS breakout_backtest_trades (
+                    id                SERIAL PRIMARY KEY,
+                    result_id         INTEGER NOT NULL REFERENCES breakout_backtest_results(id) ON DELETE CASCADE,
+                    entry_date        DATE,
+                    entry_price       REAL,
+                    resistance        REAL,
+                    exit_date         DATE,
+                    exit_price        REAL,
+                    pnl_pct           REAL,
+                    exit_reason       VARCHAR(30),
+                    hold_days         INTEGER,
+                    volume_ratio      REAL,
+                    rsi               REAL,
+                    body_ratio        REAL,
+                    range_atr_ratio   REAL,
+                    conviction_score  INTEGER,
+                    breakout_pct      REAL,
+                    ema50_slope_pct   REAL
+                )
+            """))
+            _conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS idx_bbo_trades ON breakout_backtest_trades (result_id)"
+            ))
+            _conn.commit()
+        logger.info("breakout_backtest tables verified")
+    except Exception as e:
+        logger.warning("breakout_backtest tables migration skipped: %s", e)
+
     # Zone intraday price alerts deduplication table
     try:
         with engine.connect() as _conn:
