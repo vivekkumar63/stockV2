@@ -203,7 +203,7 @@ class BreakoutBacktester:
                 "rsi":           round(rsi, 1),
                 "body_ratio":    round(body_ratio, 3),
                 "range_atr_ratio": round(rng_atr, 2),
-                "conviction_score": met,
+                "conviction_score": int(met),
                 "breakout_pct":  round(breakout_pct, 2),
                 "ema50_slope_pct": round(ema50_slope, 2),
             }
