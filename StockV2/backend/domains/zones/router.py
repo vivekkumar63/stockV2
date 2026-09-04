@@ -726,14 +726,26 @@ def train_breakout_ml(db: Session = Depends(get_db)):
 
 
 @router.get("/zones/breakout/ml/status")
-def get_breakout_ml_status():
+def get_breakout_ml_status(db: Session = Depends(get_db)):
     from .breakout_ml import MODEL_PATH
+    trade_count = 0
+    result_count = 0
+    try:
+        trade_count = db.execute(
+            text("SELECT COUNT(*) FROM breakout_backtest_trades")
+        ).scalar() or 0
+        result_count = db.execute(
+            text("SELECT COUNT(*) FROM breakout_backtest_results WHERE total_trades > 0")
+        ).scalar() or 0
+    except Exception:
+        pass
     return {
-        "model_exists": BreakoutML.model_exists(),
-        "model_path":   str(MODEL_PATH),
-        "using_ml":     BreakoutML.model_exists(),
-        "note":         "Rule-based fallback active" if not BreakoutML.model_exists()
-                        else "ML model active",
+        "model_exists":   BreakoutML.model_exists(),
+        "model_path":     str(MODEL_PATH),
+        "using_ml":       BreakoutML.model_exists(),
+        "trade_count":    int(trade_count),
+        "result_count":   int(result_count),
+        "note": "Rule-based fallback active" if not BreakoutML.model_exists() else "ML model active",
     }
 
 
@@ -830,3 +842,129 @@ def get_recommendations(
 
     out.sort(key=lambda x: x["composite_score"], reverse=True)
     return out[:limit]
+
+
+# ── Actionable / Consolidated recommendations ─────────────────────────────────
+
+_PROX_THRESHOLD = 0.05   # 5 % of current price
+
+_BUY_TAG_WEIGHT  = {"in_demand": 3, "near_demand": 2, "breakout": 1}
+_SELL_TAG_WEIGHT = {"in_supply": 3, "near_supply": 2}
+
+
+@router.get("/reco/actionable")
+def get_actionable_recommendations(db: Session = Depends(get_db)):
+    """Zone picks where the ideal entry is within ±5 % of current price.
+
+    Stocks where price is at 100 and the entry is 75 are excluded — only
+    near-term, actionable setups where entry is reachable within 4-5 days.
+    """
+    rows = db.execute(text("""
+        SELECT DISTINCT ON (symbol)
+            symbol, price_at_compute, long_entry_price, short_entry_price,
+            best_demand_score, best_supply_score, long_setup_score, short_setup_score,
+            position_tag, best_long_rr, best_short_rr, result_json,
+            pct_from_52w_high, pct_from_52w_low, atr_at_compute, rvol_at_compute
+        FROM zone_analysis_results
+        WHERE computed_date >= CURRENT_DATE - INTERVAL '3 days'
+          AND price_at_compute > 0
+        ORDER BY symbol, computed_date DESC
+    """)).fetchall()
+
+    zone_buys: list[dict] = []
+    zone_sells: list[dict] = []
+
+    for r in rows:
+        symbol    = r[0]
+        price     = float(r[1])
+        long_ep   = float(r[2]) if r[2] is not None else None
+        short_ep  = float(r[3]) if r[3] is not None else None
+        pos_tag   = r[8] or "neutral"
+        rj: dict  = {}
+        try:
+            rj = r[11] if isinstance(r[11], dict) else json.loads(r[11] or "{}")
+        except Exception:
+            pass
+
+        # ── Long (Buy) ──────────────────────────────────────────────────────
+        if long_ep and long_ep > 0 and abs(price - long_ep) / price <= _PROX_THRESHOLD:
+            setup    = rj.get("long_setup") or {}
+            ml_input = {
+                "long_setup_score": r[6], "short_setup_score": r[7],
+                "best_demand_score": r[4], "best_supply_score": r[5],
+                "best_long_rr": r[9], "best_short_rr": r[10],
+                "rvol_at_compute": r[15], "position_tag": pos_tag,
+                "pct_from_52w_low": r[13], "pct_from_52w_high": r[12],
+            }
+            ml_conf = round(MLZoneScorer.predict(ml_input) * 100, 1)
+            zone_buys.append({
+                "symbol":           symbol,
+                "current_price":    round(price, 2),
+                "entry_price":      round(long_ep, 2),
+                "distance_pct":     round((price - long_ep) / price * 100, 2),
+                "stop_loss":        setup.get("stop_loss"),
+                "target1":          setup.get("t1"),
+                "target1_rr":       setup.get("t1_rr"),
+                "target2":          setup.get("t2"),
+                "target2_rr":       setup.get("t2_rr"),
+                "invalidation":     setup.get("invalidation"),
+                "zone_score":       r[4],
+                "setup_score":      r[6],
+                "rr":               r[9],
+                "ml_confidence":    ml_conf,
+                "position_tag":     pos_tag,
+                "market_structure": rj.get("market_structure", "sideways"),
+                "candle_signal":    rj.get("candle_signal", "NONE"),
+                "rvol":             r[15],
+                "pct_from_52w_high": r[12],
+            })
+
+        # ── Short (Sell / Exit) ─────────────────────────────────────────────
+        if short_ep and short_ep > 0 and abs(price - short_ep) / price <= _PROX_THRESHOLD:
+            setup    = rj.get("short_setup") or {}
+            ml_input = {
+                "long_setup_score": r[6], "short_setup_score": r[7],
+                "best_demand_score": r[4], "best_supply_score": r[5],
+                "best_long_rr": r[9], "best_short_rr": r[10],
+                "rvol_at_compute": r[15], "position_tag": pos_tag,
+                "pct_from_52w_low": r[13], "pct_from_52w_high": r[12],
+            }
+            ml_conf = round(MLZoneScorer.predict(ml_input) * 100, 1)
+            zone_sells.append({
+                "symbol":           symbol,
+                "current_price":    round(price, 2),
+                "entry_price":      round(short_ep, 2),
+                "distance_pct":     round((short_ep - price) / price * 100, 2),
+                "stop_loss":        setup.get("stop_loss"),
+                "target1":          setup.get("t1"),
+                "target1_rr":       setup.get("t1_rr"),
+                "target2":          setup.get("t2"),
+                "target2_rr":       setup.get("t2_rr"),
+                "invalidation":     setup.get("invalidation"),
+                "zone_score":       r[5],
+                "setup_score":      r[7],
+                "rr":               r[10],
+                "ml_confidence":    ml_conf,
+                "position_tag":     pos_tag,
+                "market_structure": rj.get("market_structure", "sideways"),
+                "candle_signal":    rj.get("candle_signal", "NONE"),
+                "rvol":             r[15],
+                "pct_from_52w_high": r[12],
+            })
+
+    def _buy_key(x: dict) -> tuple:
+        return (
+            _BUY_TAG_WEIGHT.get(x["position_tag"], 0),
+            (x["ml_confidence"] or 0) * 0.4 + (x["setup_score"] or 0) * 0.3 + (min(x["rr"] or 0, 5) / 5) * 30,
+        )
+
+    def _sell_key(x: dict) -> tuple:
+        return (
+            _SELL_TAG_WEIGHT.get(x["position_tag"], 0),
+            (x["ml_confidence"] or 0) * 0.4 + (x["setup_score"] or 0) * 0.3 + (min(x["rr"] or 0, 5) / 5) * 30,
+        )
+
+    zone_buys.sort(key=_buy_key, reverse=True)
+    zone_sells.sort(key=_sell_key, reverse=True)
+
+    return {"zone_buys": zone_buys[:60], "zone_sells": zone_sells[:60]}

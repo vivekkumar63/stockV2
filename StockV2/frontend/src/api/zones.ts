@@ -273,6 +273,8 @@ export interface BreakoutMLStatus {
   model_exists: boolean
   using_ml: boolean
   note: string
+  trade_count?: number
+  result_count?: number
 }
 
 export const getBreakoutMLStatus = () => apiFetch<BreakoutMLStatus>('/zones/breakout/ml/status')
@@ -329,3 +331,34 @@ export const getZoneRecommendations = (params?: { setup_type?: string; limit?: n
   const q = qs.toString()
   return apiFetch<ZoneRecommendation[]>(`/zones/recommendations${q ? '?' + q : ''}`)
 }
+
+// ── Actionable / Consolidated Picks ───────────────────────────────────────────
+
+export interface ActionablePick {
+  symbol:           string
+  current_price:    number
+  entry_price:      number
+  distance_pct:     number       // + = price above entry (approaching), − = price in zone
+  stop_loss:        number | null
+  target1:          number | null
+  target1_rr:       number | null
+  target2:          number | null
+  target2_rr:       number | null
+  invalidation:     string | null
+  zone_score:       number | null
+  setup_score:      number | null
+  rr:               number | null
+  ml_confidence:    number
+  position_tag:     string
+  market_structure: string
+  candle_signal:    string
+  rvol:             number | null
+  pct_from_52w_high: number | null
+}
+
+export interface ActionableResult {
+  zone_buys:  ActionablePick[]
+  zone_sells: ActionablePick[]
+}
+
+export const getActionableReco = () => apiFetch<ActionableResult>('/reco/actionable')

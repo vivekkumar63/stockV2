@@ -12,8 +12,8 @@ from sqlalchemy.orm import Session
 from domains.data.indicators import IndicatorEngine
 from .clusterer import ZoneClusterer
 from .detectors import (
-    CandlestickDetector, FibonacciDetector, MADetector, MomentumDetector,
-    PivotPointDetector, PrevHighLowDetector, PriceStructureDetector,
+    CandlestickDetector, FibonacciDetector, IchimokuCloudDetector, MADetector,
+    MomentumDetector, PivotPointDetector, PrevHighLowDetector, PriceStructureDetector,
     TrendlineDetector, VolatilityDetector, VolumeDetector, VWAPZoneDetector,
     Week52Detector,
 )
@@ -35,6 +35,7 @@ _DETECTORS = [
     CandlestickDetector(),
     PrevHighLowDetector(),
     TrendlineDetector(),
+    IchimokuCloudDetector(),
 ]
 
 

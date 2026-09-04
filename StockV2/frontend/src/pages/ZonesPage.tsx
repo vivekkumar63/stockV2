@@ -233,7 +233,7 @@ function mlColor(v: number | null): string {
   return 'text-gray-500'
 }
 
-function distColor(v: number | null, isLong: boolean) {
+function distColor(v: number | null) {
   if (v == null) return 'text-gray-400'
   // long: negative = price below entry (close/in zone), near-zero = at entry, positive = above entry (wait for pullback)
   // short: positive = price above entry (wait for rally), negative = below entry (close/in zone)
@@ -269,7 +269,7 @@ function RankRow({
         <span className={scoreColor(row.best_demand_score)}>{row.best_demand_score ?? '—'}</span>
         <span className={scoreColor(row.best_supply_score)}>{row.best_supply_score ?? '—'}</span>
         <span className={row.rvol >= 1.5 ? 'text-green-600 font-medium' : ''}>{row.rvol?.toFixed(1) ?? '—'}×</span>
-        <span className={distColor(row.dist_to_long, true)} title="% from long entry (–=below entry, +=above)">
+        <span className={distColor(row.dist_to_long)} title="% from long entry (–=below entry, +=above)">
           {row.dist_to_long != null ? `${row.dist_to_long > 0 ? '+' : ''}${row.dist_to_long}%` : '—'}
         </span>
         <span className={w52Color(row.pct_from_52w_high, true)} title="% below 52W high (–=below)">
@@ -644,7 +644,9 @@ function BreakoutsTab() {
         <div className="ml-auto flex items-center gap-2">
           {mlStatusQuery.data && (
             <span className={`text-[10px] px-2 py-0.5 rounded font-medium ${mlStatusQuery.data.model_exists ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
-              {mlStatusQuery.data.model_exists ? 'ML active' : 'Rule-based'}
+              {mlStatusQuery.data.model_exists
+                ? `ML active · ${mlStatusQuery.data.trade_count ?? 0} trades`
+                : `Rule-based · ${mlStatusQuery.data.trade_count ?? 0} trades stored`}
             </span>
           )}
           <button

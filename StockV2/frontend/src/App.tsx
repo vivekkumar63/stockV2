@@ -14,6 +14,7 @@ import { FundamentalsPage } from './pages/FundamentalsPage'
 import { ZonesPage } from './pages/ZonesPage'
 import { RecommendationsPage } from './pages/RecommendationsPage'
 import { ConfluencePage } from './pages/ConfluencePage'
+import { ActionableRecoPage } from './pages/ActionableRecoPage'
 
 const queryClient = new QueryClient()
 
@@ -38,6 +39,7 @@ export function App() {
               <Route path="/zones" element={<ZonesPage />} />
               <Route path="/zone-recommendations" element={<RecommendationsPage />} />
               <Route path="/confluence" element={<ConfluencePage />} />
+              <Route path="/picks" element={<ActionableRecoPage />} />
             </Routes>
           </main>
         </div>

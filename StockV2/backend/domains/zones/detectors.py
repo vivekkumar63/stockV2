@@ -742,3 +742,83 @@ class VWAPZoneDetector:
             strength_hint=0.6,
             source="vwap",
         )]
+
+
+class IchimokuCloudDetector:
+    """Ichimoku Cloud (Kumo) as supply/demand zones + Kijun-sen as standalone S/R.
+
+    Price above cloud → cloud is demand support below.
+    Price below cloud → cloud is resistance above (supply).
+    Price inside cloud → ambiguous, skip.
+    Kijun-sen emitted when within 8% of current price.
+    """
+
+    def detect(self, df: pd.DataFrame) -> list[ZoneLevel]:
+        if len(df) < 52:
+            return []
+
+        span_a_col = (
+            "ichimoku_span_a" if "ichimoku_span_a" in df.columns
+            else "ichimoku_cloud_a" if "ichimoku_cloud_a" in df.columns
+            else None
+        )
+        span_b_col = (
+            "ichimoku_span_b" if "ichimoku_span_b" in df.columns
+            else "ichimoku_cloud_b" if "ichimoku_cloud_b" in df.columns
+            else None
+        )
+        if span_a_col is None or span_b_col is None or "ichimoku_kijun" not in df.columns:
+            return []
+
+        n = len(df)
+        price  = float(df["close"].iloc[-1])
+        atr    = float(df["atr_14"].iloc[-1]) if "atr_14" in df.columns else price * 0.01
+        if not math.isfinite(atr) or atr <= 0:
+            atr = price * 0.01
+
+        span_a = float(df[span_a_col].iloc[-1])
+        span_b = float(df[span_b_col].iloc[-1])
+        kijun  = float(df["ichimoku_kijun"].iloc[-1])
+
+        if not (math.isfinite(span_a) and math.isfinite(span_b) and span_a > 0 and span_b > 0):
+            return []
+
+        cloud_top = max(span_a, span_b)
+        cloud_bot = min(span_a, span_b)
+        bullish_cloud = span_a > span_b
+
+        thickness_atr   = (cloud_top - cloud_bot) / atr
+        thickness_bonus = min(0.20, thickness_atr * 0.05)
+
+        levels: list[ZoneLevel] = []
+
+        if price > cloud_top:
+            direction_bonus = 0.10 if bullish_cloud else 0.0
+            strength = min(0.80, 0.45 + thickness_bonus + direction_bonus)
+            levels.append(ZoneLevel(price=cloud_top, zone_type="demand",
+                                    source_tag="ichimoku_cloud", strength_hint=strength,
+                                    bar_index=n - 1))
+            levels.append(ZoneLevel(price=cloud_bot, zone_type="demand",
+                                    source_tag="ichimoku_cloud", strength_hint=round(strength * 0.9, 3),
+                                    bar_index=n - 1))
+
+        elif price < cloud_bot:
+            direction_bonus = 0.10 if not bullish_cloud else 0.0
+            strength = min(0.80, 0.45 + thickness_bonus + direction_bonus)
+            levels.append(ZoneLevel(price=cloud_bot, zone_type="supply",
+                                    source_tag="ichimoku_cloud", strength_hint=strength,
+                                    bar_index=n - 1))
+            levels.append(ZoneLevel(price=cloud_top, zone_type="supply",
+                                    source_tag="ichimoku_cloud", strength_hint=round(strength * 0.9, 3),
+                                    bar_index=n - 1))
+        # else: price inside cloud → ambiguous, emit nothing
+
+        if math.isfinite(kijun) and kijun > 0:
+            dist_pct = abs(price - kijun) / price * 100
+            if dist_pct <= 8.0:
+                kijun_type = "demand" if price > kijun else "supply"
+                levels.append(ZoneLevel(price=kijun, zone_type=kijun_type,
+                                        source_tag="ichimoku_kijun", strength_hint=0.60,
+                                        bar_index=n - 1))
+
+        return levels
