@@ -13,6 +13,7 @@ import { MLModelsPage } from './pages/MLModelsPage'
 import { FundamentalsPage } from './pages/FundamentalsPage'
 import { ZonesPage } from './pages/ZonesPage'
 import { RecommendationsPage } from './pages/RecommendationsPage'
+import { ConfluencePage } from './pages/ConfluencePage'
 
 const queryClient = new QueryClient()
 
@@ -36,6 +37,7 @@ export function App() {
               <Route path="/fundamentals" element={<FundamentalsPage />} />
               <Route path="/zones" element={<ZonesPage />} />
               <Route path="/zone-recommendations" element={<RecommendationsPage />} />
+              <Route path="/confluence" element={<ConfluencePage />} />
             </Routes>
           </main>
         </div>

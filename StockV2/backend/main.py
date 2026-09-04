@@ -981,3 +981,6 @@ app.include_router(sector_router, prefix="/api/v1", dependencies=[Depends(verify
 
 from domains.zones.router import router as zones_router  # noqa: E402
 app.include_router(zones_router, prefix="/api/v1", dependencies=[Depends(verify_api_key)])
+
+from domains.zones.confluence_router import router as confluence_router  # noqa: E402
+app.include_router(confluence_router, prefix="/api/v1", dependencies=[Depends(verify_api_key)])
